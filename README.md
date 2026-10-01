@@ -1,12 +1,13 @@
 # FAE — a Framework for Agentic-authoring Evaluations
 
-FAE compares design approaches by how well coding agents build with them.
+FAE is a framework for comparing design approaches by how well coding
+agents build with them.
 
 Take one task and two or more ways to do it: two tools, two libraries, two
-architectures. FAE gives each way to the same coding agents (Claude, Gemini,
-DeepSeek, …), lets each agent try up to ten times, checks every attempt with
-the same automated verifier, and reports which way the agents get working,
-in how many attempts, and with how much code.
+architectures. An FAE experiment gives each way to the same coding agents
+(Claude, Gemini, DeepSeek, …), lets each agent try up to ten times, checks
+every attempt with the same automated verifier, and reports which way the
+agents get working, in how many attempts, and with how much code.
 
 ```
   the task + one approach's docs

@@ -2,9 +2,9 @@
 
 *From an empty directory to a sealed green cell, in about twenty minutes.*
 
-FAE runs coding agents against a task, judges every attempt with a
-verifier you write, and records how many attempts each agent needed. The
-unit of work is a **cell**: one `(model, variant, condition, task, rep)`
+An FAE experiment runs coding agents against a task, judges every attempt
+with a verifier you write, and records how many attempts each agent needed.
+The unit of work is a **cell**: one `(model, variant, condition, task, rep)`
 run with its own workspace, its own attempt budget (10) and its own ledger.
 A fleet of cells under one scheduler is an experiment.
 

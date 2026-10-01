@@ -1,8 +1,8 @@
 # AGENTS.md — FAE invariants
 
-FAE is a Framework for Agentic-authoring Evaluations: it runs coding agents
-against a task under a fixed attempt budget, judges every attempt with a
-deterministic verifier, and records how many attempts each agent needed, how
+FAE is a Framework for Agentic-authoring Evaluations. An experiment built
+on it runs coding agents against a task under a fixed attempt budget, judges
+every attempt with a deterministic verifier, and records how many attempts each agent needed, how
 much it authored and, optionally, graded defects. [`README.md`](README.md) is
 what FAE is and a first run, [`RUNBOOK.md`](RUNBOOK.md) the operator runbook, [`DESIGN-fae.md`](DESIGN-fae.md) the design,
 [`HOWTO.md`](HOWTO.md) the tutorial for a new experiment. This file records
