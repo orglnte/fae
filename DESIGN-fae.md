@@ -228,3 +228,62 @@ Grading is a separate, explicit step with a named judge model.
    excludes host sleep from every age it judges, a verify the host slept
    through is voided, and a load shape is tuned to each host's store before
    scored cells run.
+
+## 11. Validation
+
+What the repository can show about the method, and what it cannot yet.
+Each check below names where to run or read it.
+
+**Validated: the rig judges a known answer as green and a known wrong
+answer as charged.**
+
+1. **Reference solutions.** Every arm of the example experiments carries a
+   known-good answer; `cli.py rig smoke` runs each through the full
+   pipeline (sealed workspace, the verifier's container, the ledger) with
+   no agent, and `--full-gate` runs every arrangement. A reference that is
+   not green is a rig fault to fix before any scored cell runs.
+2. **Negative controls.** A deliberately wrong answer must end as a charged
+   failure, never as a refund or a halt (HOWTO.md §8, the `--stub` step).
+   For load-judged experiments, a load profile whose top is below the
+   host's knee must end in `FAIL[load-shape]`, refunded (AGENTS.md, tuning
+   the load shape to a host). The fae-terraform-vs-pulumi example records,
+   in its first commit, six broken solutions that each fail at the check
+   written for them.
+3. **Rig faults are separated from authoring failures.** A verifier that
+   times out, crashes or never starts, a provider's rate or quota wall, and
+   a substrate that dies under the measurement are refunded; a verify the
+   host slept through is voided. AGENTS.md states each rule, and the ledger
+   records each case as what it is.
+4. **The authoring surface.** Before every verify, a changed seeded file is
+   restored from the seed and a file outside the surface is moved out of the
+   tree; the seed record sits outside the agent's mount, so the agent cannot
+   rewrite what it is checked against (`fae/cell/surface.py`,
+   `tests/test_surface.py`).
+
+**Validated: the engine behaves as specified.**
+
+5. **State machine.** `.tla/Runs.tla` specifies the orchestration; `cli.py
+   rig selftest` replays the logged live transitions against it when
+   `tla_verify` is available, and says so when it is not.
+6. **Tests.** `tests/` is the engine's suite. `pyproject.toml` configures
+   `mutmut` over `fae/` and `cli.py`; no mutation score is published.
+7. **Provenance.** Every verdict carries the fingerprint of the task,
+   verifier, arms and engine that produced it (§6), every cell records its
+   driver (`IMPL`), and every attempt records the agent client and version
+   it ran with (the ledger's AGENT line). Client versions follow upstream
+   and are not part of the fingerprint.
+
+**Not validated yet.**
+
+8. **Run-to-run variance.** Cells are repeated (reps), but no test-retest
+   study of the same model and arm, run at different times, is reported
+   with the framework. How much of a difference between two rows is noise
+   is left to each experiment's statistics.
+9. **Grader reliability.** `fae/scoring/grader_agreement.py` computes
+   Cohen's kappa between two independent judge runs over the same cells. No
+   result is reported in the repository, and agreement between the LLM
+   judge and human graders has not been measured. The counted metrics
+   (green, attempts, minutes, lines) do not depend on a judge.
+10. **External validity.** That attempts and minutes to green on these
+    tasks predict how hard an approach is for agents on real work is an
+    assumption of each experiment, not something the framework establishes.
