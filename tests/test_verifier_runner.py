@@ -140,9 +140,24 @@ class TestTheChildIsAContainer(RunnerCase):
         exp = _definition(self.root, "")
         argv = verify_argv(self.ctx(exp), "img:1")
         mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
-        for path in (str(ROOT), str(self.out)):
-            self.assertIn(f"{path}:{path}", mounts)
+        self.assertIn(f"{ROOT}:{ROOT}:ro", mounts)
+        self.assertIn(f"{self.out}:{self.out}", mounts)
         self.assertEqual(len(mounts), len(set(mounts)))
+
+    def test_only_the_verifys_own_directory_is_writable(self):
+        exp = _definition(self.root, "")
+        ws = self.out
+        ctx = Ctx(root=str(ROOT), experiment_dir=str(exp), workspace=str(ws),
+                  artifacts=str(ws / "artifacts"), out=str(ws / ".verify-out"), cid="cell-x",
+                  task="T1", variant="only", arrangement="A")
+        for argv in (verify_argv(ctx, "img:1"), verify.teardown_argv(ctx, "img:1")):
+            mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"
+                      and "docker.sock" not in argv[i + 1]]
+            writable = [m for m in mounts if not m.endswith(":ro")]
+            self.assertEqual(writable, [f"{ws}/.verify-out:{ws}/.verify-out"])
+            self.assertIn(f"{ws}:{ws}:ro", mounts)
+            # the workspace is mounted before its writable child, which would otherwise be hidden
+            self.assertLess(mounts.index(f"{ws}:{ws}:ro"), mounts.index(writable[0]))
 
     def test_an_experiment_outside_the_root_is_mounted_too(self):
         # unmounted, the child cannot load the definition and every verify halts

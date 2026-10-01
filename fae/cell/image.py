@@ -307,10 +307,10 @@ def run_argv(image, name, argv, mounts=(), env=None, workdir=None, network=None,
         out += ["--network", network]
     seen = set()
     for m in mounts:
-        m = str(m)
-        if m and m not in seen:
-            seen.add(m)
-            out += ["-v", f"{m}:{m}"]
+        path, mode = (str(m[0]), m[1]) if isinstance(m, tuple) else (str(m), "rw")
+        if path and path not in seen:
+            seen.add(path)
+            out += ["-v", f"{path}:{path}" + (":ro" if mode == "ro" else "")]
     if socket:
         out += ["-v", "/var/run/docker.sock:/var/run/docker.sock"]
     for k, v in sorted((env or {}).items()):
@@ -319,6 +319,17 @@ def run_argv(image, name, argv, mounts=(), env=None, workdir=None, network=None,
         out += ["-w", str(workdir)]
     out += list(extra)
     return out + [image] + list(argv)
+
+
+def mount_specs(read_only=(), writable=()):
+    """(path, mode) bind mounts for a container that may write only
+    `writable`: the minimal read-only set, plus each writable path, which may
+    sit under a read-only one (docker mounts it over its parent). A path in
+    both is writable. Parents come first, so no mount hides a nested one."""
+    rw = mounts_for(*writable)
+    ro = [p for p in mounts_for(*read_only) if p not in rw]
+    specs = [(p, "ro") for p in ro] + [(p, "rw") for p in rw]
+    return sorted(specs, key=lambda s: (s[0].rstrip("/").count("/"), s[0]))
 
 
 def mounts_for(*paths):

@@ -38,7 +38,11 @@ def _cluster_map():
     (`substrate_identities`), cached per cid-set: a pure function of the cid,
     computed in-process — an owner map that could come back empty on a
     fault would strip every live cluster of its reaper protection."""
-    cids = tuple(sorted(p.name for p in common.WS.iterdir()
+    try:
+        entries = list(common.WS.iterdir())
+    except OSError:              # no workspaces yet: no cell owns a cluster
+        entries = []
+    cids = tuple(sorted(p.name for p in entries
                         if p.is_dir() and parse_cell_id(p.name)))
     if _CLMAP["key"] != cids:
         _CLMAP["key"] = cids

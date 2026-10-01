@@ -143,8 +143,10 @@ class Variant:
 
     def log(self, msg):
         line = f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}  {msg}\n"
+        # inside a verify the workspace is read-only; its own directory is not
+        where = Path(os.environ.get("FAE_VERIFY_OUT") or self.ws)
         try:
-            with (self.ws / "hooks.log").open("a") as f:
+            with (where / "hooks.log").open("a") as f:
                 f.write(line)
         except OSError:
             pass
