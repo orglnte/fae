@@ -402,6 +402,25 @@ The verifier's image and a variant's layer are built by content
 (`fae-<experiment>-<leaf>:<sha12>`), so an edit to an image context is a new
 image and the same content is never rebuilt.
 
+**What the verify container can write: its own directory, nothing else.**
+`verify.verify_mounts` mounts the experiment, the engine, the root's files,
+the verifier's `ROOT_READS` and each entry of the workspace read-only, and
+`ctx.out` alone writable. No mount sits inside another: on Docker Desktop a
+writable bind nested in a read-only one vanishes within a second of the
+container's start. A verify sees no other cell's workspace. Behind the
+mounts, the host compares the cell's record before and after every verify
+(cell.env, the seed record, `.sealed`, the archive, the checkpoint refs,
+the judged tree, and the ledger, which may only gain a supervisor's ALERT):
+a change voids the verify (stage `integrity`, uncharged), writes
+`ALERT INTEGRITY`, and stands the cell down; `results validate` taints it.
+
+**What every verify must leave is the experiment's to declare.**
+`Verifier.REQUIRED_OUTPUTS` names the files every verify of the experiment
+writes, whatever its outcome; they are always copied up and archived. One
+that a verify which ran did not write (absent from its own directory, or
+left there by an earlier verify) is a rig defect, the same on every retry:
+`ALERT RIG-OUTPUT`, uncharged, the cell stood down for the operator.
+
 **The judged program never runs in the verify container.** A verifier that
 measures a running program starts it in the cell's secure runner,
 `fae-secrun-<cid>` (`fae/cell/substrate/secrunner.py`), from the verify image
