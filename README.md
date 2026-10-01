@@ -27,13 +27,17 @@ row per model and approach. This one is from a scripted agent that fails once
 on purpose:
 
 ```
-MODEL      | TREATMENT | COND    | REPS | GREEN | ITG mn/avg/mx | SLoC avg
-testagent  | python    | apidocs | 1    | 100%  | 2 / 2.0 / 2   |   12
+MODEL            | TREATMENT        | COND     | REPS | E2E   | GREEN | ITG mn/avg/mx  | SLoC avg -mn/+mx
+testagent        | python           | apidocs  | 1    | -     | 100%  | 2 / 2.0 / 2    |   12   -0/+0
 ```
 
 `GREEN` is the share of cells the agents got working, `ITG` the attempts it
-took (iterations to green), `SLoC` the lines they wrote. The ledger also
-records how long the agent ran in each attempt.
+took (iterations to green), `SLoC` the lines they wrote. `E2E` is the share
+of the verifier's end-to-end checks passed, `-` when the verifier reports
+none (the calculator's does not). The ledger also records how long the agent
+ran in each attempt. Until `results grade` has judged the cells, `results
+score` warns that the graded metrics (consistency defects) are missing; the
+counted ones above do not need it.
 
 ## Try it in five minutes
 
