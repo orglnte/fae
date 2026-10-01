@@ -26,14 +26,17 @@ class TestRunArchive(unittest.TestCase):
         self.c._attempt = 3
         self.ws = self.c.ws
 
-    def verify(self, verdict, exclusive=None, lock=True):
-        def runner(ctx, variant, timeout_s):
-            (self.ws / "verify.log").write_text(f"run {ctx.arrangement}\n")
-            (self.ws / "trace.csv").write_text("t\n")
-            (self.ws / "cluster-diag").mkdir(exist_ok=True)
-            (self.ws / "cluster-diag" / "op.log").write_text("diag\n")
-            with (self.ws / "verifier.log").open("a") as f:
+    def verify(self, verdict, exclusive=None, lock=True, during=None):
+        def runner(ctx, variant, timeout_s, log_dir=None):
+            out = Path(ctx.out)
+            (out / "verify.log").write_text(f"run {ctx.arrangement}\n")
+            (out / "trace.csv").write_text("t\n")
+            (out / "cluster-diag").mkdir(exist_ok=True)
+            (out / "cluster-diag" / "op.log").write_text("diag\n")
+            with (Path(log_dir) / "verifier.log").open("a") as f:
                 f.write(f"verifier output {ctx.arrangement}\n")
+            if during:
+                during(out)
             return verdict
         vcls = mock.Mock(MEASURED_STAGES=None, FILES=("verify.log", "trace.csv"),
                          FEEDBACK_LOGS=("verify.log", "cluster-diag", "k6.log"))
@@ -106,6 +109,79 @@ class TestRunArchive(unittest.TestCase):
         d = self.ws / "arrangements" / "01-a3-A-refunded"
         self.assertTrue((d / "verify.log").is_file())
         self.assertFalse((d / "k6.log").exists())
+
+
+
+class TestTheVerifyWritesOnlyItsOwnDirectory(TestRunArchive):
+    """The verify's container writes <ws>/.verify-out alone; the host copies
+    its declared outputs up and appends the ledger events it allows."""
+
+    def ledger(self):
+        f = self.ws / "iterations.log"
+        return f.read_text().splitlines() if f.exists() else []
+
+    def test_the_verifier_runs_in_its_own_directory_and_its_outputs_come_up(self):
+        seen = []
+        self.verify(Verdict(ok=True, arrangement="A"), during=seen.append)
+        self.assertEqual(seen, [self.ws / ".verify-out"])
+        self.assertEqual((self.ws / "verify.log").read_text(), "run A\n")
+        self.assertEqual((self.ws / "cluster-diag" / "op.log").read_text(), "diag\n")
+        self.assertIn("verifier output A", (self.ws / "verifier.log").read_text())
+
+    def test_an_allowed_event_reaches_the_ledger_with_its_own_time_and_this_cells_id(self):
+        (self.ws / "iterations.log").write_text("")
+        from fae.cell import verify as _verify
+
+        def during(out):
+            _verify.record_event(out, "ALERT", "HOST-OVERLOADED ceiling=30qps")
+            with (out / _verify.EVENTS).open("a") as f:
+                f.write("2026-01-01T00:00:00Z\tVERIFY_READY\theld=10s\n")
+        self.verify(Verdict(ok=True, arrangement="A"), during=during)
+        lines = [l.split("\t") for l in self.ledger()]
+        self.assertEqual([l[1:] for l in lines], [["ALERT", "c", "HOST-OVERLOADED ceiling=30qps"],
+                                                  ["VERIFY_READY", "c", "held=10s"]])
+        self.assertEqual(lines[1][0], "2026-01-01T00:00:00Z")
+        self.assertFalse((self.ws / ".verify-out" / _verify.EVENTS).exists())
+
+    def test_an_event_the_host_does_not_allow_never_reaches_the_ledger(self):
+        (self.ws / "iterations.log").write_text("")
+        from fae.cell import verify as _verify
+
+        def during(out):
+            with (out / _verify.EVENTS).open("a") as f:
+                f.write("2026-01-01T00:00:00Z\tITER\tgreen\tattempt=3\n")
+                f.write("2026-01-01T00:00:00Z\tEND\tgreen=true\n")
+        self.verify(Verdict(ok=False, stage="e2e", arrangement="A"), during=during)
+        self.assertEqual(self.ledger(), [])
+
+    def test_a_reverify_records_no_events_in_the_cells_ledger(self):
+        (self.ws / "iterations.log").write_text("")
+        from fae.cell import verify as _verify
+        out = self.ws / "reverify" / "t1"
+        out.mkdir(parents=True)
+
+        def runner(ctx, variant, timeout_s, log_dir=None):
+            _verify.record_event(ctx.out, "ALERT", "LOAD-SHAPE x")
+            return Verdict(ok=True, arrangement="A")
+        vcls = mock.Mock(MEASURED_STAGES=None, FILES=(), FEEDBACK_LOGS=())
+        with mock.patch.object(cell, "run_verifier", runner), \
+                mock.patch.object(cell.Cell, "expected_fp", new_callable=mock.PropertyMock,
+                                  return_value=""), \
+                mock.patch.object(_experiment, "current",
+                                  return_value=mock.Mock(exclusive=None, verifier_class=lambda: vcls)):
+            self.c.verify(shape="A", out_dir=out)
+        self.assertEqual(self.ledger(), [])
+
+    def test_a_symlinked_output_is_not_copied_and_host_records_are_never_overwritten(self):
+        (self.ws / "iterations.log").write_text("the ledger\n")
+
+        def during(out):
+            (out / "verify.log").unlink(missing_ok=True)
+            (out / "verify.log").symlink_to(self.ws / "iterations.log")
+            (out / "iterations.log").write_text("forged\n")
+        self.verify(Verdict(ok=True, arrangement="A"), during=during)
+        self.assertEqual((self.ws / "iterations.log").read_text().splitlines()[0], "the ledger")
+        self.assertFalse((self.ws / "verify.log").is_symlink())
 
 
 if __name__ == "__main__":

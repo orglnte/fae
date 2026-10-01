@@ -305,6 +305,41 @@ class Verifier(ABC):
 
 CHILD_ARGV = ["python3", "-m", "fae.cell.verify_child"]
 WORKDIR = ".verifier"
+# The verify's own directory under the workspace: the only path its container
+# writes. The host copies the verifier's declared outputs up into the
+# workspace after the child exits (Cell.verify).
+RUN_OUT = ".verify-out"
+# A verify does not write the ledger: it records its events here and the host
+# appends the ones it allows, after the child exits.
+EVENTS = "ledger-events.tsv"
+LEDGER_EVENTS = frozenset({"ALERT", "VERIFY_READY"})
+
+
+def record_event(out, event, *fields):
+    """Called inside the verify: one ledger event for the host to append,
+    stamped now. Fields are free text; the host sanitises them."""
+    clean = (str(x).replace("\t", " ").replace("\n", " ").replace("\r", " ")
+             for x in (event, *fields))
+    with (Path(out) / EVENTS).open("a") as f:
+        f.write("\t".join((f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}", *clean)) + "\n")
+
+
+def take_events(out):
+    """The host's side: the events a verify recorded under `out`, as
+    (stamp, event, fields) for the allowed event names only, and the file
+    removed so the next verify starts empty."""
+    f = Path(out) / EVENTS
+    try:
+        lines = f.read_text(errors="replace").splitlines()
+    except OSError:
+        return []
+    f.unlink(missing_ok=True)
+    events = []
+    for line in lines:
+        parts = line.split("\t")
+        if len(parts) >= 2 and parts[1] in LEDGER_EVENTS:
+            events.append((parts[0], parts[1], tuple(parts[2:])))
+    return events
 
 
 def _log_line(out, text):
@@ -362,15 +397,16 @@ def teardown_argv(ctx, image, conf=None, environ=None):
                            labels=(("fae-cell", ctx.cid),), extra=HOST_ALIAS)
 
 
-def run_teardown(ctx, variant, timeout_s=900):
+def run_teardown(ctx, variant, timeout_s=900, log_dir=None):
     """Run the variant's `verify_teardown` for `ctx` in a fresh container of
     its image (see `teardown_argv`); returns the child's exit code, or None
     when no container could run (no image, no daemon). Best effort: the
-    reaper covers what this leaves."""
+    reaper covers what this leaves. `log_dir` holds verifier.log (the host's
+    record of the run), default `ctx.out`."""
     from . import experiment as _experiment
     from . import image as _image
-    out = Path(ctx.out)
-    work = out / WORKDIR
+    work = Path(ctx.out) / WORKDIR
+    out = Path(log_dir or ctx.out)
     (work / "home").mkdir(parents=True, exist_ok=True)
     (work / "teardown.ctx.json").write_text(ctx.to_json())
     conf = getattr(variant, "conf", None)
@@ -395,16 +431,17 @@ def run_teardown(ctx, variant, timeout_s=900):
             _end(p, name)
 
 
-def run_verifier(ctx, variant, timeout_s=7200):
+def run_verifier(ctx, variant, timeout_s=7200, log_dir=None):
     """Run the experiment's verifier on `ctx` inside a container of
     `variant`'s image and return its Verdict. A verifier that hangs past
     `timeout_s`, crashes, or exits without writing a verdict is a rig
     fault: `charge=False`, the attempt is retried. The container is removed
-    on every path, so nothing the verifier started outlives it."""
+    on every path, so nothing the verifier started outlives it. `log_dir`
+    holds verifier.log (the host's record of the run), default `ctx.out`."""
     from . import experiment as _experiment
     from . import image as _image
-    out = Path(ctx.out)
-    work = out / WORKDIR
+    work = Path(ctx.out) / WORKDIR
+    out = Path(log_dir or ctx.out)
     (work / "home").mkdir(parents=True, exist_ok=True)
     ctx_path, verdict_path = work / "ctx.json", work / "verdict.json"
     verdict_path.unlink(missing_ok=True)
