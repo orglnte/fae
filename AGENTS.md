@@ -149,6 +149,12 @@ a stranded reverify leaves the population.
   solved the task once but is not arrangement-robust; merging it with
   never-solved-it destroys the finding.
 - **Ledger rewrites are operator-run only.** No automated repair.
+- **The host is the ledger's only writer.** A verify never opens
+  `iterations.log`: it records its events with `verify.record_event` in its
+  own directory, and after the child exits the host appends them, under the
+  cell's id and with the time they happened, and only the kinds in
+  `verify.LEDGER_EVENTS` (ALERT, VERIFY_READY). A verify cannot write an
+  ITER or END line.
 
 ## 3. Locks — what each one actually protects
 
@@ -367,7 +373,11 @@ arrangement, variant, the fingerprint pinned at cell start) in `docker run
 --rm` of the variant's image (`fae/cell/verify.py: run_verifier`: the root,
 the engine's tree and the workspace mounted at their own paths, the cell
 network, the daemon's socket, the driver's environment minus the host's own
-and anything naming a secret) and reads one `Verdict` back:
+and anything naming a secret) and reads one `Verdict` back. `ctx.out` is the
+verify's own directory, `<ws>/.verify-out`: after the child exits the host
+copies the verifier's declared outputs (`FILES`, `FEEDBACK_LOGS`) up into
+the workspace, never over a host-owned name and never through a symlink;
+`verifier.log`, `metrics.json` and `arrangements/` are the host's:
 
 - `ok`, `stage`;
 - `charge` — False is a rig fault and the attempt is refunded; the engine
@@ -392,9 +402,26 @@ The verifier's image and a variant's layer are built by content
 (`fae-<experiment>-<leaf>:<sha12>`), so an edit to an image context is a new
 image and the same content is never rebuilt.
 
+**The judged program never runs in the verify container.** A verifier that
+measures a running program starts it in the cell's secure runner,
+`fae-secrun-<cid>` (`fae/cell/substrate/secrunner.py`), from the verify image
+(`FAE_VERIFY_IMAGE`): a fresh copy of the artifacts at `/workspace` and a
+scratch dir at `/scratch` are its only mounts; no Docker socket; the
+operator's uid with `HOME` and `USER` set, every capability dropped, no
+privilege escalation, CPU/memory/pid/open-file ceilings; the networks the
+verifier names, reached by its name. The verify container keeps the rig's
+reach (the mounts, the socket, the lock plane) and runs only rig code. A
+program run once and judged by its output (a CLI, a compiler) uses
+`substrate/sandbox.py`, the same shape without a network.
+
 ## 6. The seal: what the agent can actually reach
 
-The agent runs in its own container and mounts exactly:
+The agent runs in its own container, capped at `AGENT_CPUS` cores (default
+1, 0 lifts it): agents run beside the one verify the fleet measures at a
+time, and an uncapped one (its own tests, a build) takes the cores the
+measurement runs on. `CPUSET_MEASURED` / `CPUSET_AGENT` pin the measured
+verify's containers and the agents to separate cores; both are empty (off)
+by default. It mounts exactly:
 
 ```
 -v "$art":/workspace                    # the artifacts dir, nothing else
