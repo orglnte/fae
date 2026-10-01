@@ -25,7 +25,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..image import RUN_PREFIX
+from ..image import CONTAINER_USER, RUN_PREFIX
 
 MEMORY = "2g"
 PIDS = 512
@@ -76,7 +76,10 @@ class SecRunner:
             out += ["--ulimit", f"nofile={self.nofile}:{self.nofile}"]
         out += ["--network", self.networks[0] if self.networks else "none",
                 "-v", f"{self.workdir}:/workspace", "-v", f"{self.scratch}:/scratch",
-                "-w", "/workspace", "-e", "HOME=/scratch"]
+                "-w", "/workspace", "-e", "HOME=/scratch",
+                # the operator's uid has no passwd entry in the image; a tool
+                # that asks who it runs as (Go's user.Current) reads USER
+                "-e", f"USER={CONTAINER_USER}"]
         for k, v in sorted(self.env.items()):
             out += ["-e", f"{k}={v}"]
         return out + [self.image, *self.argv]

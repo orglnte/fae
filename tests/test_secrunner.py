@@ -58,6 +58,7 @@ class TestTheArgv(unittest.TestCase):
     def test_env_and_program_come_last(self):
         a = self.argv
         self.assertIn("HOME=/scratch", a)
+        self.assertIn("USER=fae", a)
         self.assertIn("DB_DSN=postgresql://s", a)
         self.assertEqual(a[-5:], ["img:1", "python3", "-m", "uvicorn", "app.main:app"])
 
