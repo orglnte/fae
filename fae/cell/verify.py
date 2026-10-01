@@ -280,6 +280,7 @@ class Verifier(ABC):
     EXCLUSIVE = None    # a lock name the engine holds around every run; None: none
     FILES = ()          # archived under arrangements/ when the Verdict names no files
     FEEDBACK_LOGS = ("verify.log", "deploy.log")   # copied to /feedback/ for the next attempt; a name may be a directory
+    ROOT_READS = ()     # paths under the experiment root the verify reads, besides the root's files
     SUBSTRATE_PREFIXES = {}   # {kind: name prefix} of what a verify provisions, for the reaper
     # A charged fail at one of these stages is voided when the variant's
     # substrate is found dead afterwards; None: any charged fail.
@@ -347,14 +348,37 @@ def _log_line(out, text):
         log.write(f"{_now()}  {text}\n")
 
 
-def verify_mounts(ctx):
-    """What a verify container sees: the root, the experiment, the engine and
-    the workspace read-only, its own directory `ctx.out` writable. Whatever
-    runs in it can change nothing of the cell's record or the experiment."""
+def verify_mounts(ctx, root_reads=None):
+    """What a verify container sees: the experiment, the engine, the root's
+    files and the paths the verifier declares (`ROOT_READS`), and each entry
+    of the workspace, all read-only; its own directory `ctx.out` writable.
+    Whatever runs in it can change nothing of the cell's record or the
+    experiment, and sees no other cell.
+
+    No mount sits inside another: a writable bind nested in a read-only one
+    vanishes from the container within a second on Docker Desktop, and the
+    verify then writes into the read-only parent. So the root and the
+    workspace are not mounted whole; the workspace entry that holds `ctx.out`
+    is left out."""
     from . import image as _image
-    return _image.mount_specs(
-        read_only=(ctx.root, ctx.experiment_dir, HARNESS.parent, ctx.workspace),
-        writable=(ctx.out,))
+    if root_reads is None:
+        from . import experiment as _experiment
+        root_reads = _experiment.current().verifier_class().ROOT_READS
+    out = Path(ctx.out)
+    root, ws = Path(ctx.root), Path(ctx.workspace)
+
+    def entries(d, files_only=False):
+        try:
+            found = sorted(d.iterdir())
+        except OSError:
+            return []
+        return [p for p in found
+                if not p.is_symlink() and p != out and p not in out.parents
+                and not (files_only and not p.is_file())]
+    ro = [ctx.experiment_dir, HARNESS.parent, *entries(root, files_only=True),
+          *[root / r for r in root_reads if (root / r).exists()], *entries(ws)]
+    return ([(p, "ro") for p in _image.mounts_for(*ro) if p != str(out)]
+            + [(str(out), "rw")])
 
 
 def verify_argv(ctx, image, conf=None, environ=None, cpus=None):

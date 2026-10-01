@@ -144,20 +144,39 @@ class TestTheChildIsAContainer(RunnerCase):
         self.assertIn(f"{self.out}:{self.out}", mounts)
         self.assertEqual(len(mounts), len(set(mounts)))
 
-    def test_only_the_verifys_own_directory_is_writable(self):
+    def test_only_the_verifys_own_directory_is_writable_and_nothing_contains_it(self):
         exp = _definition(self.root, "")
         ws = self.out
+        (ws / "artifacts").mkdir(exist_ok=True)
+        (ws / "iterations.log").write_text("")
+        (ws / ".verify-out").mkdir(exist_ok=True)
+        out = ws / ".verify-out"
         ctx = Ctx(root=str(ROOT), experiment_dir=str(exp), workspace=str(ws),
-                  artifacts=str(ws / "artifacts"), out=str(ws / ".verify-out"), cid="cell-x",
+                  artifacts=str(ws / "artifacts"), out=str(out), cid="cell-x",
                   task="T1", variant="only", arrangement="A")
         for argv in (verify_argv(ctx, "img:1"), verify.teardown_argv(ctx, "img:1")):
             mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"
                       and "docker.sock" not in argv[i + 1]]
+            paths = [m.split(":")[0] for m in mounts]
             writable = [m for m in mounts if not m.endswith(":ro")]
-            self.assertEqual(writable, [f"{ws}/.verify-out:{ws}/.verify-out"])
-            self.assertIn(f"{ws}:{ws}:ro", mounts)
-            # the workspace is mounted before its writable child, which would otherwise be hidden
-            self.assertLess(mounts.index(f"{ws}:{ws}:ro"), mounts.index(writable[0]))
+            self.assertEqual(writable, [f"{out}:{out}"])
+            # a writable bind inside a read-only one vanishes on Docker Desktop
+            self.assertFalse([p for p in paths if p != str(out) and str(out).startswith(p + "/")])
+            self.assertNotIn(str(ws), paths)
+            self.assertIn(f"{ws}/artifacts:{ws}/artifacts:ro", mounts)
+            self.assertIn(f"{ws}/iterations.log:{ws}/iterations.log:ro", mounts)
+
+    def test_a_reverify_leaves_out_the_workspace_entry_that_holds_its_directory(self):
+        exp = _definition(self.root, "")
+        ws = self.out
+        out = ws / "reverify" / "t1" / ".verify-out"
+        out.mkdir(parents=True, exist_ok=True)
+        ctx = Ctx(root=str(ROOT), experiment_dir=str(exp), workspace=str(ws),
+                  artifacts=str(ws / "artifacts"), out=str(out), cid="cell-x",
+                  task="T1", variant="only", arrangement="A")
+        paths = [m[0] for m in verify.verify_mounts(ctx, root_reads=())]
+        self.assertNotIn(str(ws / "reverify"), paths)
+        self.assertIn(str(out), paths)
 
     def test_an_experiment_outside_the_root_is_mounted_too(self):
         # unmounted, the child cannot load the definition and every verify halts
