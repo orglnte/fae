@@ -39,6 +39,7 @@ CSV_COLUMNS = [
     "deploy_ok", "e2e_pass", "e2e_total", "e2e_green",
     "load_errors", "load_total", "k6_available", "verify_stage_failed",
     "iterations_to_green", "green", "revoked", "budget_exhausted",
+    "agent_s_total", "agent_s_per_attempt",
     "files", "language_count", "lines", "sloc", "total_lines", "grader", "grading_missing",
     # WHICH model graded this row. consistency_defect_count is the primary
     # metric and an LLM judge produces it, so the judge's identity belongs in
@@ -202,6 +203,8 @@ def flat_row(c: dict) -> dict:
         "iterations_to_green": c.get("iterations_to_green"),
         "green": c.get("green"),
         "budget_exhausted": c.get("budget_exhausted"),
+        "agent_s_total": c.get("agent_s_total"),
+        "agent_s_per_attempt": c.get("agent_s_per_attempt"),
         "files": surface.get("files"),
         "language_count": surface.get("language_count"),
         "lines": surface.get("lines"),
@@ -284,6 +287,11 @@ def cell_metrics(cells: list[dict]) -> dict:
         "mean_iterations_to_green": mean([c.get("iterations_to_green") for c in cells]),
         "max_iterations_to_green": max_val([c.get("iterations_to_green") for c in cells]),
         "budget_censored_rate": rate([bool(c.get("budget_exhausted")) for c in cells]),
+        # authoring time: to green over GREEN cells (as ITG), per attempt over all
+        "min_agent_s_to_green": min_val([c.get("agent_s_total") for c in cells if c.get("green")]),
+        "mean_agent_s_to_green": mean([c.get("agent_s_total") for c in cells if c.get("green")]),
+        "max_agent_s_to_green": max_val([c.get("agent_s_total") for c in cells if c.get("green")]),
+        "mean_agent_s_per_attempt": mean([c.get("agent_s_per_attempt") for c in cells]),
         # metric 4 (agent-authored surface)
         # GREEN CELLS ONLY, for the reason spelled out above mean_consistency_
         # defects: a non-green cell's files are whatever its last failed attempt
@@ -531,12 +539,22 @@ def discrepancy(b: dict | None) -> float | None:
     return None
 
 
+def format_agent_time(m: dict) -> tuple[str, str]:
+    """The MIN and MIN/ATT cells: agent seconds shown as minutes."""
+    mean = m.get("mean_agent_s_to_green")
+    total = "-" if mean is None else (f"{m['min_agent_s_to_green'] / 60:.0f} / {mean / 60:.1f} / "
+                                      f"{m['max_agent_s_to_green'] / 60:.0f}")
+    per = m.get("mean_agent_s_per_attempt")
+    return total, "-" if per is None else f"{per / 60:.1f}"
+
+
 def table_columns(cond_col: bool, vs: str | None) -> list[tuple[str, int]]:
     """(header, width) per column, in print order. The LoC column must fit
     format_loc's widest value or the columns after it walk left."""
     return ([("MODEL", 16), ("TREATMENT", 16)]
             + ([("COND", 8)] if cond_col else [])
             + [("REPS", 4), ("E2E", 5), ("GREEN", 5), ("ITG mn/avg/mx", 14),
+               ("MIN mn/avg/mx", 17), ("MIN/ATT", 7),
                ("SLoC avg -mn/+mx", LOC_MEAN_W + len("   -9999/+9999"))]
             + ([("N: GRN%  Δpt", 15), ("ITG  Δ", 10), ("SIG(p)  GRADE", 19)]
                if vs else []))
@@ -701,6 +719,7 @@ def main() -> int:
                "e2e_green_rate", "green_rate", "revoked_rate",
                "mean_e2e_pass_rate", "load_error_rate_on_green",
                "mean_iterations_to_green", "budget_censored_rate",
+               "mean_agent_s_to_green", "mean_agent_s_per_attempt",
                "mean_files", "mean_languages", "mean_lines"]
 
     # Grading provenance travels WITH the aggregate, not just per cell. The
@@ -776,19 +795,23 @@ def main() -> int:
         # single outlier shows as one long arm rather than being averaged into
         # a symmetric interval it does not describe.
         lines = format_loc(m.get('mean_sloc'), m.get('min_sloc'), m.get('max_sloc'))
+        agent_min, per_att = format_agent_time(m)
         
         # Split the key back into its parts
         mod, rest = mtc.split(" / ", 1)
         trt, cond = rest.split("/", 1)
         
         vals = [short_model(mod), arm_label(trt)] + ([cond] if cond_col else []) \
-            + [str(n), e2e, grn, itg, lines] \
+            + [str(n), e2e, grn, itg, agent_min, per_att, lines] \
             + (list(format_compare(compare.get(mtc))) if compare is not None else [])
         print(" | ".join(f"{v:<{w}}" for v, (_, w) in zip(vals, cols)))
 
-    print("="*138)
+    print("=" * width)
     print(" * ITG, SLoC: GREEN cells only -- denominator is GREEN, not REPS.")
     print("   A non-green cell never worked; its size is not comparable.")
+    print(" * MIN = the agent's minutes up to green (charged attempts; GREEN cells only);")
+    print("   MIN/ATT = its mean minutes per charged attempt, every cell. '-' when the")
+    print("   ledger has no AGENT lines for those attempts.")
     print(" * SLoC = non-blank, non-comment lines authored by the agent, excluding the")
     print("   seeded skeleton. Raw line counts stay in results.csv/json.")
     if compare is not None:

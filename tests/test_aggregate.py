@@ -104,6 +104,29 @@ class TestOtherMetricsStillSpanAllCells(unittest.TestCase):
         self.assertEqual(s["max_iterations_to_green"], 4)
 
 
+class TestAgentTime(unittest.TestCase):
+    """Minutes to green span GREEN cells only, as ITG; minutes per attempt span
+    every cell that has them."""
+
+    def _cell(self, green, total, per):
+        c = cell(green)
+        c.update(agent_s_total=total, agent_s_per_attempt=per)
+        return c
+
+    def test_time_to_green_ignores_cells_that_never_greened(self):
+        s = aggregate.cell_metrics([self._cell(True, 600, 300), self._cell(True, 1200, 400),
+                                    self._cell(False, 6000, 600)])
+        self.assertEqual((s["min_agent_s_to_green"], s["mean_agent_s_to_green"],
+                          s["max_agent_s_to_green"]), (600, 900, 1200))
+        self.assertAlmostEqual(s["mean_agent_s_per_attempt"], 433.333, places=2)
+
+    def test_the_cells_print_minutes_and_a_dash_without_data(self):
+        s = aggregate.cell_metrics([self._cell(True, 600, 300), self._cell(True, 1200, 300)])
+        self.assertEqual(aggregate.format_agent_time(s), ("10 / 15.0 / 20", "5.0"))
+        s = aggregate.cell_metrics([self._cell(True, None, None)])
+        self.assertEqual(aggregate.format_agent_time(s), ("-", "-"))
+
+
 class TestShortModelStripsGatewayPaths(unittest.TestCase):
     def test_provider_path_keeps_only_the_model(self):
         self.assertEqual(aggregate.short_model("opencode-go/deepseek-v4-flash"),
@@ -175,8 +198,13 @@ class TestTableColumns(unittest.TestCase):
 
     def test_row_order_matches_the_header(self):
         src = (Path(ROOT) / "fae" / "scoring" / "aggregate.py").read_text()
-        row = next(l for l in src.splitlines() if "[str(n), e2e, grn, itg, lines]" in l)
-        self.assertLess(row.index("itg"), row.index("lines"))
+        row = next(l for l in src.splitlines() if "[str(n), e2e, grn, itg, agent_min, per_att, lines]" in l)
+        hdrs = [h for h, _ in aggregate.table_columns(True, None)]
+        self.assertLess(row.index("itg"), row.index("agent_min"))
+        self.assertLess(row.index("agent_min"), row.index("per_att"))
+        self.assertLess(row.index("per_att"), row.index("lines"))
+        self.assertEqual(hdrs[hdrs.index("ITG mn/avg/mx") + 1:hdrs.index("SLoC avg -mn/+mx")],
+                         ["MIN mn/avg/mx", "MIN/ATT"])
 
     def test_the_condition_column_goes_when_the_table_is_one_variant(self):
         with_c = [h for h, _ in aggregate.table_columns(True, None)]
