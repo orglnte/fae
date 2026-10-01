@@ -1,0 +1,25 @@
+[project]
+name = "fae"
+version = "0.1.0"
+description = "a Framework for Agentic-authoring Evaluations — the engine that runs coding agents against a task and judges every attempt"
+requires-python = ">=3.11"
+dependencies = ["typer", "ujson"]
+
+[project.scripts]
+fae = "fae.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["fae*"]
+
+[tool.mutmut]
+source_paths = ["fae", "cli.py"]
+# Tests read these at run time; they are copied beside the mutated tree, never mutated.
+also_copy = [".tla", "tests/fixture_experiment", "AGENTS.md", "README.md",
+             "requirements-dev.txt"]
+pytest_add_cli_args = ["-p", "no:cacheprovider", "-q"]
+pytest_add_cli_args_test_selection = ["tests/"]
+do_not_mutate = ["fae/testagent.py", "fae/agent-container/*"]

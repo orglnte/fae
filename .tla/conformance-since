@@ -1,0 +1,17 @@
+# Live-trace conformance window.
+#
+# `runs.py selftest` judges transitions.log events at or after this instant.
+# Earlier events are still replayed — the state they build is what makes later
+# events judgeable — but they are not evidence, because they were recorded
+# under rules that have since changed.
+#
+# Move this ONLY when a fix changes what conformance means, and say why below.
+# It is not a way to silence a violation: a violation after the cutoff is a
+# real one, and a cell whose state is wrong needs an EPOCH re-anchor
+# (`runs.py trace-reset`), which this file does not do.
+#
+# 2026-08-13T17:04:00Z — verify_s stopped counting the wait for the verify
+# lock (8dc0055). Every verify recorded before that measured lock-wait +
+# verify, so the min-verify-duration predicate was judging a different
+# quantity than the one the guard now reads.
+2026-08-13T17:04:00Z

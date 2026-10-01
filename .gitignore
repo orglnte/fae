@@ -1,0 +1,53 @@
+# Operator-local config (holds AGENT_CMD, paths — never committed)
+harness/config.sh
+
+# Rig-debug reference solutions (AGENT_STUB_OVERLAY). Known-good answers used to
+# iterate the rig without an agent — NEVER published (would be a cheat answer)
+# and firewall-denied so a real agent cell can't read them.
+harness/fixtures/
+
+# Per-cell agent workspaces: generated code + logs land here at run time.
+# Keep the directory, ignore its contents.
+workspaces/*
+!workspaces/.gitkeep
+.rig.lock/
+
+# Scoring outputs land in results/ at run time.
+# Keep the directory + schema + templates, ignore generated results.
+results/cells/
+results/artifact-*/
+results/results.csv
+results/results.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.venv*/
+venv/
+
+# Scratch
+tmp/
+.DS_Store
+.agent-home/
+*.nosync
+*.nosync/
+.tla/tla2tools.jar
+restart-prompt.md
+# the two-stage delete's holding area (safe_wipe, PEM rule 19)
+.to_be_deleted/
+
+# operator queue backups (Phase 0 safety net — local only)
+.orch-backups/
+.aider*
+fae.toml
+.coverage
+htmlcov/
+
+# mutation testing (mutmut) scratch
+mutants/
+.mutmut-cache
+
+# commit-message draft (git commit -F COMMIT_MSG), never committed
+COMMIT_MSG
+
