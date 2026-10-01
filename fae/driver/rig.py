@@ -570,7 +570,9 @@ def init(args):
         # the file is rendered for THAT experiment: its locks, its CONFIG keys
         os.environ["EXPERIMENT_DIR"] = experiment
     target.write_text(_config.render_default_toml(common.definition(), experiment))
-    print(f"wrote {target} — set [paths] for this machine, then `cli.py rig substrate`")
+    print(f"wrote {target} — edit [paths] if the siblings are elsewhere; next: "
+          "`cli.py rig smoke` (the pipeline, no agent), or first `cli.py rig substrate` "
+          "(what each arm needs from this host)")
 
 
 def prepare(args):
