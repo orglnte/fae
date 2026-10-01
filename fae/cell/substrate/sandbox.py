@@ -2,7 +2,8 @@
 runs a judged program without it ever touching the host.
 
 `run` starts `docker run --rm` of `image` with `workdir` mounted at
-/workspace, no network, a memory and pid ceiling, the given argv and
+/workspace, no network, a memory, pid and CPU ceiling, the operator's uid,
+every capability dropped and no privilege escalation, the given argv and
 stdin; it returns what the program answered. A timeout removes the
 container, since the client's death alone does not. `fresh_copy` is the
 verifier's own copy of the artifacts, so a build writes there and never
@@ -10,15 +11,17 @@ into the judged tree.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
 MEMORY = "256m"
 PIDS = 128
+CPUS = 1
 
 
-def argv(image, name, workdir, program, mounts=(), memory=MEMORY, pids=PIDS):
+def argv(image, name, workdir, program, mounts=(), memory=MEMORY, pids=PIDS, cpus=CPUS):
     """The `docker run` argv: `program` inside `image`, `workdir` at
     /workspace, `mounts` as (host path, container path) read-only extras."""
     extra = []
@@ -26,6 +29,9 @@ def argv(image, name, workdir, program, mounts=(), memory=MEMORY, pids=PIDS):
         extra += ["-v", f"{host}:{inner}:ro"]
     return (["docker", "run", "--rm", "-i", "--name", name,
              "--network", "none", "--memory", memory, "--pids-limit", str(pids),
+             f"--cpus={cpus}", "--user", f"{os.getuid()}:{os.getgid()}",
+             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+             "-e", "HOME=/workspace",
              "-v", f"{workdir}:/workspace", "-w", "/workspace"]
             + extra + [image] + list(program))
 
