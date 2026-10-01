@@ -1147,6 +1147,7 @@ class Cell:
                         agent_cmd=agent_cmd, extra_env=extra_env)
             return True
         log = self.ws / f"agent.attempt-{attempt}.log"
+        client = self._client_field()
         retry_s = int(self.conf.get("LIMIT_RETRY_S", self.LIMIT_RETRY_S))
         cap = int(self.conf.get("AGENT_FAULT_RETRIES", self.AGENT_FAULT_RETRIES))
         silent = 0
@@ -1161,7 +1162,7 @@ class Cell:
                 self._append("ALERT", f"attempt={attempt}",
                              f"AGENT-TIMEOUT killed after {self._agent_timeout_s()}s; "
                              f"judged as it stands")
-                self._append("AGENT", *agent_time_fields(attempt, runs, None))
+                self._append("AGENT", *agent_time_fields(attempt, runs, None), client)
                 (self.ws / "timeout.last").write_text("1\n")
                 return True
             if rc == self.DOCKER_RUN_FAILED and self._docker_refused(log):
@@ -1198,9 +1199,22 @@ class Cell:
                 continue
             client_s = _config.client_reported_seconds(
                 self.conf.get("AGENT_CLI", "claude"), log)
-            self._append("AGENT", *agent_time_fields(attempt, runs, client_s))
+            self._append("AGENT", *agent_time_fields(attempt, runs, client_s), client)
             (self.ws / "timeout.last").unlink(missing_ok=True)
             return True
+
+    def _client_field(self):
+        """`client=<cli>:<version>`: the CLI this attempt runs and its version in
+        the image it runs in, `-` when that cannot be read."""
+        cli = self.conf.get("AGENT_CLI", "claude")
+        try:
+            from . import image as _image
+            orch = self.root / "workspaces.nosync" / ".orch"
+            v = _image.client_versions(self.conf.get("AGENT_IMAGE") or self.agent_image(),
+                                       orch / "agent_clients.json").get(cli)
+        except Exception:       # an unreadable version never costs an attempt
+            v = None
+        return f"client={cli}:{v or '-'}"
 
     def _charged_note(self):
         """The last ITER note as a dict: the verdict the ledger charged, which

@@ -431,7 +431,10 @@ client and a stale client fails every cell of that model. A failed update at
 preflight stops conduct; before an admission it is logged and the cell
 starts on the image there is. An update pulls the base image through
 Docker's credential helper, so a helper that hangs blocks every update.
-Client versions are not part of the fingerprint.
+Client versions are not part of the fingerprint; each attempt's AGENT ledger
+line records the CLI that ran and its version in the image it ran in
+(`client=claude:2.1.286`, `-` when unreadable), probed once per image id
+and cached in `.orch/agent_clients.json`.
 
 `$AGENT_CLAUDE` is restaged **before every attempt**: the CLI keeps
 per-project memory and transcripts under `~/.claude/projects/<cwd>`, and

@@ -12,6 +12,7 @@ The verify container (`fae-verify-<cid>`) and the cell network
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -149,6 +150,32 @@ def image_id(image):
     r = subprocess.run(["docker", "image", "inspect", "-f", "{{.Id}}", image],
                        capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def client_versions(image, cache_file):
+    """{cli: version} the agent image carries. Keyed by image id, so a rebuilt
+    tag is probed afresh: one container run per new id, a cache read after."""
+    iid = image_id(image)
+    if not iid:
+        return {}
+    cache_file = Path(cache_file)
+    try:
+        cache = json.loads(cache_file.read_text())
+    except (OSError, ValueError):
+        cache = {}
+    if iid in cache:
+        return cache[iid]
+    from fae.driver import image as _clients
+    found = _clients.installed(iid)
+    if found:
+        cache[iid] = found
+        tmp = cache_file.with_name(f"{cache_file.name}.{os.getpid()}.tmp")
+        try:
+            tmp.write_text(json.dumps(cache, sort_keys=True))
+            os.replace(tmp, cache_file)
+        except OSError:
+            pass
+    return found
 
 
 def label(image, key):
