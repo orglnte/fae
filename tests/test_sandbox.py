@@ -27,6 +27,14 @@ class TestTheArgv(unittest.TestCase):
         self.assertEqual(argv[-3:], ["img:1", "python3", "p.py"])
         self.assertEqual(argv[argv.index("-w") + 1], "/workspace")
 
+    def test_the_operators_uid_no_capabilities_no_escalation_one_core(self):
+        argv = sandbox.argv("img:1", "fae-x-cid", "/w", ("true",))
+        self.assertEqual(argv[argv.index("--user") + 1], f"{os.getuid()}:{os.getgid()}")
+        self.assertEqual(argv[argv.index("--cap-drop") + 1], "ALL")
+        self.assertEqual(argv[argv.index("--security-opt") + 1], "no-new-privileges")
+        self.assertIn("--cpus=1", argv)
+        self.assertFalse(any("docker.sock" in a for a in argv))
+
 
 class TestTheFreshCopy(unittest.TestCase):
     def test_it_is_rebuilt_every_time_and_is_not_the_judged_tree(self):
