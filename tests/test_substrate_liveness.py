@@ -69,7 +69,7 @@ class TestTheTwoGates(unittest.TestCase):
     def verify_with(self, verdict, alive_after, measured=None):
         calls = []
 
-        def runner(ctx, variant, timeout_s):
+        def runner(ctx, variant, timeout_s, log_dir=None):
             calls.append(ctx)
             self.alive[0] = alive_after
             return verdict

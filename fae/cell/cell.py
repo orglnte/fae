@@ -46,7 +46,8 @@ from .checkpoints import Checkpoints
 from .surface import Surface
 from .fsm import (ENABLED, PHASE_TO_LOOP, IllegalTransition, Loop, Phase,
                   Sealed, State, T, step)
-from .verify import Ctx, Verdict, _mutex_module as _load_mutex, run_verifier
+from .verify import (RUN_OUT, Ctx, Verdict, _mutex_module as _load_mutex, run_verifier,
+                     take_events)
 
 _mutex = _load_mutex()
 
@@ -581,8 +582,10 @@ class Cell:
                          f"Pass out_dir=... to add evidence instead.")
         from . import experiment as _experiment
         out = Path(out_dir or self.ws)
+        run_out = out / RUN_OUT
+        run_out.mkdir(parents=True, exist_ok=True)
         ctx = Ctx(root=str(self.root), experiment_dir=str(self.conf.get("EXPERIMENT_DIR")),
-                  workspace=str(self.ws), artifacts=str(self.artifacts), out=str(out),
+                  workspace=str(self.ws), artifacts=str(self.artifacts), out=str(run_out),
                   cid=self.cid, task=self.task, variant=self.treatment,
                   arrangement=shape, expected_fp=self.expected_fp)
         definition = _experiment.current()
@@ -607,10 +610,12 @@ class Cell:
                 return VerifyResult.from_verdict(v, shape, out_dir)
         try:
             v = run_verifier(ctx, self.arm_variant,
-                             timeout_s=int(self.conf.get("VERIFIER_TIMEOUT_S") or 7200))
+                             timeout_s=int(self.conf.get("VERIFIER_TIMEOUT_S") or 7200),
+                             log_dir=out)
         finally:
             if fh is not None:
                 fh.close()
+        self._take_verify_output(run_out, out, record_events=out_dir is None)
         measured = definition.verifier_class().MEASURED_STAGES
         if (not v.ok and v.charge and (measured is None or v.stage in measured)
                 and not self.arm_variant.substrate_alive()):
@@ -630,6 +635,40 @@ class Cell:
         return VerifyResult.from_verdict(v, shape, out_dir)
 
     INFLIGHT = ".verify-inflight.json"
+    # Written by the host alone; a verifier that declares one of these names
+    # as an output does not get it copied over the host's record.
+    HOST_OWNED = frozenset({"iterations.log", "metrics.json", "verifier.log", "cell.env",
+                            INFLIGHT, "arrangements", "artifacts", "feedback",
+                            ".skeleton_manifest", "score.json", "validation.json",
+                            ".sealed", RUN_OUT})
+
+    def _take_verify_output(self, run_out, out, record_events=True):
+        """After the verify's container exits: append the ledger events it
+        recorded (only the allowed kinds, under this cell's id), then copy the
+        verifier's declared outputs from its own directory up into `out`,
+        where every reader expects them. A symlink is never followed."""
+        from . import experiment as _experiment
+        for stamp, event, fields in take_events(run_out):
+            if record_events:
+                ledger.append(self.ws, event, self.cid, *fields, stamp=stamp)
+        cls = _experiment.current().verifier_class()
+        for name in dict.fromkeys((*cls.FILES, *cls.FEEDBACK_LOGS)):
+            if name in self.HOST_OWNED or "/" in name:
+                continue
+            src, dst = run_out / name, out / name
+            if src.is_symlink() or not src.exists():
+                continue
+            try:
+                if dst.is_dir() and not dst.is_symlink():
+                    shutil.rmtree(dst)
+                elif dst.exists() or dst.is_symlink():
+                    dst.unlink()
+                if src.is_dir():
+                    shutil.copytree(src, dst, symlinks=True)
+                else:
+                    shutil.copy2(src, dst)
+            except OSError:
+                continue
 
     def _mark_inflight(self, out, shape):
         """Written before a verify runs, removed when its verdict is archived:

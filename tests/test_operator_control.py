@@ -490,7 +490,8 @@ class TestStopCells(OperatorTestCase):
         self.assertEqual(len(torn), 1)
         ctx, variant = torn[0]
         self.assertEqual((ctx.cid, ctx.variant, ctx.artifacts, ctx.out),
-                         (cid, "beta", str(self.ws / cid / "artifacts"), str(self.ws / cid)))
+                         (cid, "beta", str(self.ws / cid / "artifacts"),
+                          str(self.ws / cid / ".verify-out")))
         self.assertEqual(type(variant).ARM, "beta")
 
     def test_plain_stop_of_a_live_loop_emits_crash_not_kill(self):

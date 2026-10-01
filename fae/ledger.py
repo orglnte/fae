@@ -252,13 +252,20 @@ def _stamp() -> str:
     return f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}"
 
 
-def append(ws, event: str, *fields) -> str:
-    """Append ONE event. Returns the line written.
+STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+
+def append(ws, event: str, *fields, stamp: str | None = None) -> str:
+    """Append ONE event. Returns the line written. `stamp` keeps the time an
+    event happened when it is recorded later (a verify's own events, appended
+    after the verify returns); anything but a well-formed stamp is replaced
+    by now.
 
     The whole record is built first and written once — splitting it across
     writes is what would let two producers interleave.
     """
-    line = "\t".join([_stamp(), _clean(event), *(_clean(f) for f in fields)]) + "\n"
+    when = stamp if stamp and STAMP.match(stamp) else _stamp()
+    line = "\t".join([when, _clean(event), *(_clean(f) for f in fields)]) + "\n"
     log = Path(ws) / "iterations.log"
     with log.open("a") as f:
         f.write(line)

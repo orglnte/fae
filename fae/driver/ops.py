@@ -589,10 +589,12 @@ def _bringup_teardown(cid):
     cell = _ShimCell(cid, ws, common.ROOT)
     cell.treatment = p[1]
     variant = cls(cell)
+    run_out = ws / _verify.RUN_OUT
+    run_out.mkdir(exist_ok=True)
     ctx = _verify.Ctx(root=str(common.ROOT), experiment_dir=str(cell.conf.get("EXPERIMENT_DIR")),
-                      workspace=str(ws), artifacts=str(ws / "artifacts"), out=str(ws),
+                      workspace=str(ws), artifacts=str(ws / "artifacts"), out=str(run_out),
                       cid=cid, task=p[3], variant=p[1])
-    _verify.run_teardown(ctx, variant, timeout_s=TEARDOWN_TIMEOUT_S)
+    _verify.run_teardown(ctx, variant, timeout_s=TEARDOWN_TIMEOUT_S, log_dir=ws)
 
 
 def _variant_teardown(treatment, cid, timeout=None):
