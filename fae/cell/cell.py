@@ -608,6 +608,7 @@ class Cell:
                             why=f"gave up waiting for the {name} lock", arrangement=shape)
                 self._persist_verdict(out, v)
                 return VerifyResult.from_verdict(v, shape, out_dir)
+        before = self._record_snapshot()
         try:
             v = run_verifier(ctx, self.arm_variant,
                              timeout_s=int(self.conf.get("VERIFIER_TIMEOUT_S") or 7200),
@@ -615,7 +616,17 @@ class Cell:
         finally:
             if fh is not None:
                 fh.close()
-        self._take_verify_output(run_out, out, record_events=out_dir is None)
+        changed = self._record_changes(before)
+        if changed:
+            # the verify reached the cell's record: nothing it reports can be trusted
+            self._append("ALERT", f"attempt={self._attempt}",
+                         "INTEGRITY the verify changed the cell's record: "
+                         + " ".join(changed)[:300])
+            v = Verdict(ok=False, stage="integrity", charge=False,
+                        why=f"the verify changed the cell's record ({', '.join(changed[:5])})",
+                        stand_down=("integrity",), arrangement=v.arrangement,
+                        seconds=v.seconds)
+        self._take_verify_output(run_out, out, record_events=out_dir is None and not changed)
         measured = definition.verifier_class().MEASURED_STAGES
         if (not v.ok and v.charge and (measured is None or v.stage in measured)
                 and not self.arm_variant.substrate_alive()):
@@ -635,6 +646,50 @@ class Cell:
         return VerifyResult.from_verdict(v, shape, out_dir)
 
     INFLIGHT = ".verify-inflight.json"
+    # The cell's record, which no verify may change: hashed whole, or (for
+    # the archive, the checkpoint refs and the judged tree) by size and mtime.
+    # The ledger is checked apart: the supervisor may append an ALERT to a
+    # live cell's ledger while it verifies, and nothing else may.
+    RECORD_FILES = ("cell.env", ".skeleton_manifest", ".sealed")
+    RECORD_TREES = ("arrangements", ".attempts.git/refs", "artifacts")
+    SUPERVISOR_EVENTS = frozenset({"ALERT"})
+
+    def _record_snapshot(self):
+        import hashlib
+        led = self.ws / "iterations.log"
+        snap = {"iterations.log": led.read_bytes() if led.is_file() else None}
+        for name in self.RECORD_FILES:
+            f = self.ws / name
+            if f.is_file():
+                snap[name] = hashlib.sha256(f.read_bytes()).hexdigest()
+        for name in (".attempts.git/HEAD", ".attempts.git/packed-refs"):
+            f = self.ws / name
+            if f.is_file():
+                snap[name] = f.read_bytes()
+        for tree in self.RECORD_TREES:
+            root = self.ws / tree
+            if not root.is_dir():
+                continue
+            for p in root.rglob("*"):
+                if p.is_file() and not p.is_symlink():
+                    st = p.stat()
+                    snap[str(p.relative_to(self.ws))] = (st.st_size, st.st_mtime_ns)
+        return snap
+
+    def _record_changes(self, before):
+        """Relpaths of the cell's record a verify changed, added or removed.
+        The ledger counts as changed when its earlier content moved or a
+        line other than a supervisor's was appended."""
+        after = self._record_snapshot()
+        old, new = before.pop("iterations.log"), after.pop("iterations.log")
+        changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
+        if old != new:
+            grown = new is not None and old is not None and new.startswith(old)
+            added = new[len(old):].decode(errors="replace").splitlines() if grown else []
+            if not grown or any(len(l.split("\t")) < 2 or l.split("\t")[1] not in
+                                self.SUPERVISOR_EVENTS for l in added):
+                changed.insert(0, "iterations.log")
+        return changed
     # Written by the host alone; a verifier that declares one of these names
     # as an output does not get it copied over the host's record.
     HOST_OWNED = frozenset({"iterations.log", "metrics.json", "verifier.log", "cell.env",

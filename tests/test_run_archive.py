@@ -184,6 +184,58 @@ class TestTheVerifyWritesOnlyItsOwnDirectory(TestRunArchive):
         self.assertFalse((self.ws / "verify.log").is_symlink())
 
 
+
+class TestAVerifyThatReachesTheRecordIsVoided(TestRunArchive):
+    """Defence in depth behind the read-only mounts: the host compares the
+    cell's record before and after every verify."""
+
+    def setUp(self):
+        super().setUp()
+        (self.ws / "iterations.log").write_text("2026-01-01T00:00:00Z\tSTART\tc\tattempt=3\n")
+        (self.ws / "cell.env").write_text("TASK=T1\n")
+
+    def ledger(self):
+        return (self.ws / "iterations.log").read_text().splitlines()
+
+    def test_a_rewritten_ledger_voids_the_verify_and_stands_the_cell_down(self):
+        from fae.cell import verify as _verify
+
+        def during(out):
+            (self.ws / "iterations.log").write_text("forged\n")
+            _verify.record_event(out, "VERIFY_READY", "held=1s")
+        r = self.verify(Verdict(ok=True, arrangement="A"), during=during)
+        self.assertFalse(r.green)
+        rec = self.record(self.runs()[-1])
+        self.assertEqual((rec["stage"], rec["charge"], rec["stand_down"]),
+                         ("integrity", False, ["integrity"]))
+        alerts = [l for l in self.ledger() if "\tALERT\t" in l]
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("INTEGRITY", alerts[0])
+        self.assertIn("iterations.log", alerts[0])
+        self.assertFalse(any("VERIFY_READY" in l for l in self.ledger()))
+
+    def test_a_changed_cell_env_or_a_file_added_to_the_judged_tree_is_caught(self):
+        for change in (lambda: (self.ws / "cell.env").write_text("TASK=T9\n"),
+                       lambda: (self.ws / "artifacts" / "planted.py").write_text("x\n")):
+            self.verify(Verdict(ok=True, arrangement="A"), during=lambda out: change())
+            self.assertEqual(self.record(self.runs()[-1])["stage"], "integrity")
+
+    def test_an_alert_the_supervisor_appends_meanwhile_is_not_a_change(self):
+        def during(out):
+            with (self.ws / "iterations.log").open("a") as f:
+                f.write("2026-01-01T00:01:00Z\tALERT\tc\tPHASE-STALLED verify 3h\n")
+        self.verify(Verdict(ok=True, arrangement="A"), during=during)
+        self.assertEqual(self.record(self.runs()[-1])["stage"], "")
+        self.assertTrue(self.record(self.runs()[-1])["ok"])
+
+    def test_an_appended_iter_line_is_a_change(self):
+        def during(out):
+            with (self.ws / "iterations.log").open("a") as f:
+                f.write("2026-01-01T00:01:00Z\tITER\tgreen\tattempt=3\n")
+        self.verify(Verdict(ok=True, arrangement="A"), during=during)
+        self.assertEqual(self.record(self.runs()[-1])["stage"], "integrity")
+
+
 if __name__ == "__main__":
     unittest.main()
 

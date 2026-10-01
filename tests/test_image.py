@@ -161,6 +161,19 @@ class TestTheDeclarations(ImageCase):
 
 
 class TestTheRunArgv(unittest.TestCase):
+    def test_a_writable_path_under_a_read_only_one_is_mounted_over_it(self):
+        specs = image.mount_specs(read_only=("/r", "/r/ws", "/e"), writable=("/r/ws/.verify-out",))
+        self.assertEqual(specs, [("/e", "ro"), ("/r", "ro"), ("/r/ws/.verify-out", "rw")])
+
+    def test_a_path_both_read_only_and_writable_is_writable(self):
+        self.assertEqual(image.mount_specs(read_only=("/w",), writable=("/w",)), [("/w", "rw")])
+
+    def test_run_argv_marks_read_only_mounts(self):
+        argv = image.run_argv("img", "n", ["x"], mounts=[("/r", "ro"), ("/r/out", "rw")],
+                              socket=False, user=False)
+        self.assertEqual([argv[i + 1] for i, a in enumerate(argv) if a == "-v"],
+                         ["/r:/r:ro", "/r/out:/r/out"])
+
     def test_mounts_are_minimal_and_at_their_own_paths(self):
         self.assertEqual(image.mounts_for("/a/b", "/a", "/c", "/a/b/d", ""), ["/a", "/c"])
 

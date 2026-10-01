@@ -347,6 +347,16 @@ def _log_line(out, text):
         log.write(f"{_now()}  {text}\n")
 
 
+def verify_mounts(ctx):
+    """What a verify container sees: the root, the experiment, the engine and
+    the workspace read-only, its own directory `ctx.out` writable. Whatever
+    runs in it can change nothing of the cell's record or the experiment."""
+    from . import image as _image
+    return _image.mount_specs(
+        read_only=(ctx.root, ctx.experiment_dir, HARNESS.parent, ctx.workspace),
+        writable=(ctx.out,))
+
+
 def verify_argv(ctx, image, conf=None, environ=None, cpus=None):
     """The `docker run` that is one arrangement's child: the variant's
     image, the roots mounted at their own paths, the cell's network, the
@@ -360,11 +370,10 @@ def verify_argv(ctx, image, conf=None, environ=None, cpus=None):
                  PYTHONPATH=os.pathsep.join([ctx.root, str(HARNESS.parent)]),
                  HOME=str(home), USER=CONTAINER_USER,
                  FAE_VERIFY_CONTAINER=_image.verify_container(ctx.cid),
-                 FAE_VERIFY_IMAGE=image,
+                 FAE_VERIFY_IMAGE=image, FAE_VERIFY_OUT=ctx.out,
                  FAE_CELL_NET=_image.cell_network(ctx.cid))
     env = _image.child_env(environ if environ is not None else os.environ, **extra)
-    mounts = _image.mounts_for(ctx.root, ctx.experiment_dir, HARNESS.parent,
-                               ctx.workspace, ctx.out)
+    mounts = verify_mounts(ctx)
     return _image.run_argv(image, _image.verify_container(ctx.cid),
                            CHILD_ARGV + ["--ctx", str(Path(ctx.out) / WORKDIR / "ctx.json"),
                                          "--out", str(Path(ctx.out) / WORKDIR / "verdict.json")],
@@ -386,10 +395,9 @@ def teardown_argv(ctx, image, conf=None, environ=None):
     extra = dict(getattr(conf, "exported", None) or {})
     extra.update(REPO_ROOT=ctx.root, EXPERIMENT_DIR=ctx.experiment_dir,
                  PYTHONPATH=os.pathsep.join([ctx.root, str(HARNESS.parent)]),
-                 HOME=str(home), USER=CONTAINER_USER)
+                 HOME=str(home), USER=CONTAINER_USER, FAE_VERIFY_OUT=ctx.out)
     env = _image.child_env(environ if environ is not None else os.environ, **extra)
-    mounts = _image.mounts_for(ctx.root, ctx.experiment_dir, HARNESS.parent,
-                               ctx.workspace, ctx.out)
+    mounts = verify_mounts(ctx)
     return _image.run_argv(image, f"{_image.verify_container(ctx.cid)}-teardown",
                            CHILD_ARGV + ["--teardown", "--ctx",
                                          str(Path(ctx.out) / WORKDIR / "teardown.ctx.json")],

@@ -40,6 +40,10 @@ def _validate_cell(ws):
                if (ws / "iterations.log").exists() else "")
     metrics = _metrics.read(ws)
 
+    # A verify that changed the cell's record (Cell._record_changes): the cell
+    # paused for the operator, and nothing it recorded can stand unexamined.
+    for m in re.finditer(r"\tALERT\t[^\t\n]*\t(?:attempt=\d+\t)?INTEGRITY ([^\n]*)", it_text):
+        taints.append(f"a verify changed the cell's record: {m.group(1)[:100]}")
     # rig aborts
     if "ERROR[rig]" in it_text:
         warns.append("a reverify aborted on a rig fault (green intact, "
@@ -90,8 +94,9 @@ def _validate_cell(ws):
            # rule_set 5 adds the provider-wall rule above; rule_set 6 the
            # rig<->framework junction rules 12-16 (the experiment's).
            # rule_set 7 adds the archive checks (runs not charged, and the
-           # archive disagreeing with the ledger).
-           "rule_set": 7,
+           # archive disagreeing with the ledger); rule_set 8 the integrity
+           # rule (a verify that changed the cell's record).
+           "rule_set": 8,
            "at": f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}"}
     (ws / VALIDATION).write_text(json.dumps(doc, indent=1))
     record_taints_on_seal(ws, taints)
