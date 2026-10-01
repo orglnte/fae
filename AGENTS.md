@@ -330,7 +330,14 @@ the experiment's, registered by arm on first use (§0). Each declares `ARM`,
 `TECH` (its skeleton overlay and api-doc name), `VARIANTS`, `LOCK` (the arm
 lock its cells hold for their lifetime, or none), `LOCK_SLOTS` and
 `AUTHORABLE` — the exact files and directory prefixes the agent may write;
-`fae/cell/surface.py` heals everything else before a verdict. It answers:
+`fae/cell/surface.py` heals everything else before a verdict: a changed
+seeded file is restored from the seed, and a file that is neither seeded nor
+authorable is moved to `<ws>/.out-of-surface/attempt-N/` (kept, never
+deleted); the rig's own `.git`/`.gitignore` and tool caches are left alone.
+Both are named in the ledger (`HEAL`) and in the next prompt. The seed record,
+`<ws>/.skeleton_manifest`, sits beside `artifacts/`, not in it: the agent's
+container mounts only `artifacts/`, so it cannot rewrite the record it is
+checked against. It answers:
 
 | Call | Called by | Purpose |
 |---|---|---|

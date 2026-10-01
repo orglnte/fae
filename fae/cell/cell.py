@@ -1268,6 +1268,14 @@ class Cell:
                 "Those files are not yours to edit — solve the task within "
                 "your authorable\nsurface only.\n\n")
 
+        evict = self.ws / "evict.last"
+        if evict.is_file() and evict.stat().st_size:
+            parts.append(
+                f"NOTE: files you created outside your authorable surface were "
+                f"moved out before\nverification and had no effect: "
+                f"{evict.read_text().strip()}\n"
+                "Write only within your authorable surface.\n\n")
+
         parts.append("## verify.log (tail)\n" + self._tail(src / "verify.log"))
         parts.append("\n## deploy.log (tail)\n" + self._tail(src / "deploy.log"))
         staged = self._stage_feedback(src)
@@ -1386,6 +1394,13 @@ class Cell:
         common = _prepare.task_dir(self.root, self.conf) / "skeleton"
         overlay = self.variant.seed_root() / "overlay" if self.variant else common / "-"
         return "\n".join(self.surface.heal(common, overlay))
+
+    def _evict_strays(self, attempt):
+        """Move files that are neither seeded nor authorable out of artifacts/
+        (Surface.evict) into ws/.out-of-surface/attempt-N/, so they cannot
+        reach the verify. Returns the moved relpaths joined by spaces."""
+        dest = self.ws / ".out-of-surface" / f"attempt-{attempt}"
+        return " ".join(self.surface.evict(dest))
 
     PAUSE_EXIT = 44
     LOCK_EXIT = 43          # another loop owns the workspace
@@ -1511,6 +1526,15 @@ class Cell:
                     self._append("HEAL", f"attempt={attempt}",
                                  f"reverted: {healed}")
                     (self.ws / "heal.last").write_text(healed + "\n")
+                else:
+                    (self.ws / "heal.last").unlink(missing_ok=True)
+                moved = self._evict_strays(attempt)
+                if moved:
+                    self._append("HEAL", f"attempt={attempt}",
+                                 f"moved out of surface: {moved}"[:400])
+                    (self.ws / "evict.last").write_text(moved + "\n")
+                else:
+                    (self.ws / "evict.last").unlink(missing_ok=True)
 
                 if self.noedit():
                     self._append("NOEDIT", f"attempt={attempt}",

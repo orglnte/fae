@@ -229,9 +229,10 @@ def prepare(cid, task, treatment, condition, rep, workspaces, root=ROOT,
                 f"resolved to {api.name!r} — the condition doc is missing or "
                 f"renamed, and the cell would silently get the base doc")
 
-    if (ws / "artifacts" / ".skeleton_manifest").exists():
+    surface = Surface(ws / "artifacts", treatment)
+    if surface.has_manifest():
         # A resumed cell keeps its tree; only the seal is brought up to date.
-        Surface(ws / "artifacts", treatment).seal()
+        surface.seal()
     else:
         seed_skeleton(task, treatment, ws / "artifacts", condition, cfg)
         if condition == "reference":

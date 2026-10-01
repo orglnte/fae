@@ -557,6 +557,12 @@ class TestTheFeedbackPromptTellsTheAgentWhatFailed(CellTestCase):
         self.assertIn("were reverted before verification", t)
         self.assertIn("TODO.md", t)
 
+    def test_files_moved_out_of_the_surface_are_called_out(self):
+        c = self.prepared(evict_last="conftest.py tests/test_a.py\n")
+        t = c._prompt(2).read_text()
+        self.assertIn("moved out before\nverification and had no effect", t)
+        self.assertIn("conftest.py tests/test_a.py", t)
+
     def test_the_task_itself_is_still_first(self):
         c = self.prepared()
         t = c._prompt(2).read_text()

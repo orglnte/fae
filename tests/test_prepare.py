@@ -71,14 +71,19 @@ class TestTheSeededSurface(PrepareTestCase):
                    if p.is_file() and ".git/" not in p.relative_to(a).as_posix()
                    and p.name != ".skeleton_manifest" and p.name != ".gitignore"}
         listed = {l.split("\t")[0]
-                  for l in (a / ".skeleton_manifest").read_text().splitlines()}
+                  for l in (ws / ".skeleton_manifest").read_text().splitlines()}
         self.assertTrue(on_disk <= listed, f"unlisted: {on_disk - listed}")
+
+    def test_the_manifest_is_outside_the_agents_mount(self):
+        ws = self.seed()
+        self.assertTrue((ws / ".skeleton_manifest").is_file())
+        self.assertFalse((ws / "artifacts" / ".skeleton_manifest").exists())
 
     def test_the_manifest_records_lines_and_sha(self):
         import hashlib
         ws = self.seed()
         a = ws / "artifacts"
-        for line in (a / ".skeleton_manifest").read_text().splitlines():
+        for line in (ws / ".skeleton_manifest").read_text().splitlines():
             rel, lines, sha = line.split("\t")
             data = (a / rel).read_bytes()
             self.assertEqual(int(lines), data.count(b"\n"), rel)
@@ -87,12 +92,12 @@ class TestTheSeededSurface(PrepareTestCase):
     def test_the_manifest_is_deterministic(self):
         # Ordering must not depend on the machine's locale, which is what a
         # shell `sort` gives.
-        first = (self.seed() / "artifacts" / ".skeleton_manifest").read_text()
+        first = (self.seed() / ".skeleton_manifest").read_text()
         second_root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: None)
         ws2 = prepare.prepare(self.CID, "T1", "beta", "apidocs", "1",
                               workspaces=second_root, root=ROOT, cfg=self.cfg)
-        self.assertEqual((ws2 / "artifacts" / ".skeleton_manifest").read_text(),
+        self.assertEqual((ws2 / ".skeleton_manifest").read_text(),
                          first)
 
     def test_the_workspace_is_the_agents_own_git_repo(self):

@@ -35,12 +35,20 @@ class SurfaceCase(unittest.TestCase):
 
 
 class TestRecordAndSeal(SurfaceCase):
-    def test_record_lists_every_file_but_the_manifest(self):
+    def test_record_lists_every_file_and_writes_outside_the_agents_mount(self):
         rows = self.s.record()
         self.assertEqual([r for r, _, _ in rows],
                          ["Dockerfile", "app/main.py", "app/provisioning_impl.py", "declaration.toml"])
         self.assertEqual(self.s.rows(), rows)
-        self.assertTrue((self.art / MANIFEST).is_file())
+        self.assertTrue((self.art.parent / MANIFEST).is_file())
+        self.assertFalse((self.art / MANIFEST).exists())
+
+    def test_a_manifest_left_inside_artifacts_is_adopted(self):
+        rows = self.s.record()
+        (self.art.parent / MANIFEST).rename(self.art / MANIFEST)
+        self.assertEqual(Surface(self.art, "beta").rows(), rows)
+        self.assertTrue((self.art.parent / MANIFEST).is_file())
+        self.assertFalse((self.art / MANIFEST).exists())
 
     def test_seal_marks_fixed_files_read_only_and_opens_the_authorable_one(self):
         rows = self.s.record()
@@ -78,6 +86,50 @@ class TestHeal(SurfaceCase):
         self.assertEqual((self.art / "app" / "provisioning_impl.py").read_text(), "done\n")
 
 
+class TestTheManifestIsNotTheAgents(SurfaceCase):
+    def test_a_fixed_file_and_a_forged_row_inside_artifacts_are_still_healed(self):
+        self.s.record()
+        (self.art / "Dockerfile").chmod(0o644)
+        (self.art / "Dockerfile").write_text("FROM evil\n")
+        forged = "".join(l.replace(l.split("\t")[2], "0" * 64) + "\n"
+                         for l in (self.art.parent / MANIFEST).read_text().splitlines())
+        (self.art / MANIFEST).write_text(forged)
+        self.assertEqual(self.s.heal(self.skel / "common", self.skel / "beta"), ["Dockerfile"])
+        self.assertEqual((self.art / "Dockerfile").read_text(), "FROM x\n")
+
+
+class TestEvict(SurfaceCase):
+    def test_a_file_outside_the_surface_is_moved_out_and_kept(self):
+        self.s.record()
+        _w(self.art / "conftest.py", "import sys\n")
+        _w(self.art / "tests" / "test_a.py", "def test(): pass\n")
+        dest = self.art.parent / ".out-of-surface" / "attempt-1"
+        self.assertEqual(self.s.evict(dest), ["conftest.py", "tests/test_a.py"])
+        self.assertFalse((self.art / "conftest.py").exists())
+        self.assertFalse((self.art / "tests").exists())
+        self.assertEqual((dest / "tests" / "test_a.py").read_text(), "def test(): pass\n")
+        self.assertEqual(self.s.check(), [])
+
+    def test_authorable_new_files_stay(self):
+        self.s.record()
+        _w(self.art / "app" / "new_module.py", "x = 1\n")
+        self.assertEqual(self.s.evict(self.art.parent / "out"), [])
+        self.assertTrue((self.art / "app" / "new_module.py").is_file())
+
+    def test_the_rigs_git_and_tool_caches_are_left_alone(self):
+        self.s.record()
+        _w(self.art / ".git" / "HEAD", "ref\n")
+        _w(self.art / ".gitignore", "*.pyc\n")
+        _w(self.art / "app" / "__pycache__" / "main.cpython-312.pyc", "x")
+        _w(self.art / ".pytest_cache" / "v" / "lastfailed", "{}")
+        self.assertEqual(self.s.evict(self.art.parent / "out"), [])
+
+    def test_a_forged_manifest_inside_artifacts_is_itself_a_stray(self):
+        self.s.record()
+        _w(self.art / MANIFEST, "Dockerfile\t1\tforged\n")
+        self.assertEqual(self.s.strays(), [MANIFEST])
+
+
 class TestCheck(SurfaceCase):
     def test_modified_and_deleted_fixed_files_are_named(self):
         _w(self.art / "README.md", "seed\n")
@@ -92,6 +144,11 @@ class TestCheck(SurfaceCase):
         (self.art / "declaration.toml").write_text("id = 1\n")
         (self.art / "app" / "provisioning_impl.py").write_text("done\n")
         self.assertEqual(self.s.check(), [])
+
+    def test_a_stray_left_after_heal_is_named(self):
+        self.s.record()
+        _w(self.art / "sitecustomize.py", "import os\n")
+        self.assertEqual(self.s.check(), ["sitecustomize.py (outside surface)"])
 
     def test_no_manifest_is_nothing_to_check(self):
         self.assertEqual(self.s.check(), [])
