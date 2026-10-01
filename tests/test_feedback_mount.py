@@ -72,3 +72,30 @@ class TestFeedbackLogs(unittest.TestCase):
     def test_the_default_is_verify_and_deploy(self):
         from fae.cell.verify import Verifier
         self.assertEqual(Verifier.FEEDBACK_LOGS, ("verify.log", "deploy.log"))
+
+
+
+class TestTheAgentsCpuCeiling(unittest.TestCase):
+    """An agent runs beside the one verify the fleet measures: one core by
+    default, pinned only when CPUSET_AGENT says so."""
+
+    def argv(self, **values):
+        d = Path(tempfile.mkdtemp())
+        (d / "PROMPT.md").write_text("task\n")
+        conf = C.Config({"AGENT_CLI": "claude", "AGENT_MODEL": "m", "AGENT_IMAGE": "img",
+                         "AGENT_HOME": str(d), **values}, {})
+        return C.build_agent_argv(conf, "cid1", "/ws/art", d / "home", d / "PROMPT.md")
+
+    def test_one_core_by_default_and_no_pinning(self):
+        a = self.argv()
+        self.assertIn("--cpus=1", a)
+        self.assertFalse(any(x.startswith("--cpuset-cpus") for x in a))
+        self.assertLess(a.index("--cpus=1"), a.index("img"))
+
+    def test_zero_lifts_the_ceiling(self):
+        self.assertFalse(any(x.startswith("--cpus") for x in self.argv(AGENT_CPUS="0")))
+
+    def test_pinning_when_asked(self):
+        a = self.argv(AGENT_CPUS="2", CPUSET_AGENT="4")
+        self.assertIn("--cpus=2", a)
+        self.assertIn("--cpuset-cpus=4", a)

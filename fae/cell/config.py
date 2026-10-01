@@ -30,7 +30,18 @@ ATTEMPT_BUDGET = 10
 # The engine's own rig defaults; fae.toml [rig] overrides one with an
 # UPPERCASE key. The experiment's knobs (a store, a load shape) are its
 # CONFIG, read below.
-_ENGINE_DEFAULTS = {"HB_TICK": "30"}
+_ENGINE_DEFAULTS = {
+    "HB_TICK": "30",
+    # An agent container's CPU ceiling: agents run beside the one verify the
+    # fleet measures at a time, and an uncapped one (its own tests, a build)
+    # takes the cores the measurement runs on. 0: no ceiling.
+    "AGENT_CPUS": "1",
+    # Optional pinning (docker --cpuset-cpus), off when empty: the measured
+    # verify's containers on CPUSET_MEASURED, agents on CPUSET_AGENT, e.g.
+    # "0-3" and "4" on a host with cores to spare.
+    "CPUSET_MEASURED": "",
+    "CPUSET_AGENT": "",
+}
 
 # The agent container's name, `<prefix><cell id>`: the engine's own label
 # (the sealed run, whatever the experiment), and what the fleet console,
@@ -51,7 +62,7 @@ DEFAULT_EXPERIMENT_DIR = "experiment"
 _EXPORT_KEYS = (
     "AGENT_CLI", "EXPERIMENT_DIR", "FP_EXTRA_FILES",
     "REPO_ROOT", "SHAPE_VARIATION", "WORKSPACES_DIR", "WORK_SLOTS", "AGENT_IMAGE",
-    "AGENT_HOME",
+    "AGENT_HOME", "CPUSET_MEASURED",
 )
 
 _cache: dict[str, "Config"] = {}
@@ -342,6 +353,18 @@ def opencode_key_file(agent_home):
     return d / "opencode.key"
 
 
+def agent_cpu_args(conf):
+    """The agent container's CPU ceiling and, when pinning is on, its cores."""
+    out = []
+    cpus = str(conf.get("AGENT_CPUS", _ENGINE_DEFAULTS["AGENT_CPUS"])).strip()
+    if cpus and cpus != "0":
+        out += [f"--cpus={cpus}"]
+    cpuset = str(conf.get("CPUSET_AGENT") or "").strip()
+    if cpuset:
+        out += [f"--cpuset-cpus={cpuset}"]
+    return out
+
+
 def build_agent_argv(conf, cid, art, home, prompt_file, docker_net="", kube_mount="",
                      feedback="", image=None):
     """The `docker run ...` argv for one agent invocation, built from the
@@ -353,6 +376,7 @@ def build_agent_argv(conf, cid, art, home, prompt_file, docker_net="", kube_moun
     image = conf.get("AGENT_IMAGE") or image or "fae-agent:latest"
     prompt = Path(prompt_file).read_text()
     common = ["docker", "run", "--rm", "--name", agent_container(cid),
+              *agent_cpu_args(conf),
               "-v", f"{art}:/workspace", "-w", "/workspace"]
     add_dirs = ["--add-dir", "/workspace"]
     if feedback:

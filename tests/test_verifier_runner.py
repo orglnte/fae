@@ -325,6 +325,15 @@ class TestTheTeardownRunsInAFreshContainer(RunnerCase):
         self.assertIn("--cpus=2", argv)
         self.assertLess(argv.index("--cpus=2"), argv.index("img:1"))
 
+    def test_the_verify_is_pinned_only_when_the_config_asks(self):
+        from types import SimpleNamespace
+        exp = _definition(self.root, "")
+        off = SimpleNamespace(exported={}, get=lambda k, d=None: d)
+        on = SimpleNamespace(exported={}, get=lambda k, d=None: "0-3" if k == "CPUSET_MEASURED" else d)
+        self.assertFalse(any(a.startswith("--cpuset-cpus") for a in
+                             verify_argv(self.ctx(exp), "img:1", off)))
+        self.assertIn("--cpuset-cpus=0-3", verify_argv(self.ctx(exp), "img:1", on))
+
     def test_run_verifier_applies_the_declared_cap(self):
         # one process, one experiment: the class the runner reads is the
         # loaded definition's verifier, so its cap is patched there

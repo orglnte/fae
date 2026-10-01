@@ -29,6 +29,7 @@ from ..image import RUN_PREFIX
 
 MEMORY = "2g"
 PIDS = 512
+NOFILE = 65536          # a service holds a store pool, a cache pool and hundreds of sockets
 
 
 def name_for(cid):
@@ -52,6 +53,8 @@ class SecRunner:
     memory: str = MEMORY
     pids: int = PIDS
     cpus: float | None = None
+    nofile: int | None = NOFILE
+    cpuset: str | None = None
 
     @property
     def name(self):
@@ -67,6 +70,10 @@ class SecRunner:
                "--memory", self.memory, "--pids-limit", str(self.pids)]
         if self.cpus is not None:
             out += [f"--cpus={self.cpus}"]
+        if self.cpuset:
+            out += [f"--cpuset-cpus={self.cpuset}"]
+        if self.nofile is not None:
+            out += ["--ulimit", f"nofile={self.nofile}:{self.nofile}"]
         out += ["--network", self.networks[0] if self.networks else "none",
                 "-v", f"{self.workdir}:/workspace", "-v", f"{self.scratch}:/scratch",
                 "-w", "/workspace", "-e", "HOME=/scratch"]

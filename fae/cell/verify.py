@@ -371,7 +371,7 @@ def verify_argv(ctx, image, conf=None, environ=None, cpus=None):
                            mounts=mounts, env=env, workdir=ctx.root,
                            network=_image.cell_network(ctx.cid),
                            labels=(("fae-cell", ctx.cid),), extra=HOST_ALIAS,
-                           cpus=cpus)
+                           cpus=cpus, cpuset=(conf.get("CPUSET_MEASURED") if conf else None))
 
 
 from .image import CONTAINER_USER, HOST_ALIAS  # noqa: E402

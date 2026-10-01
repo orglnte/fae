@@ -286,7 +286,7 @@ def socket_group():
 
 
 def run_argv(image, name, argv, mounts=(), env=None, workdir=None, network=None,
-             user=True, socket=True, labels=(), extra=(), cpus=None):
+             user=True, socket=True, labels=(), extra=(), cpus=None, cpuset=None):
     """`docker run --rm` of `argv` in `image`: every mount at its own host
     path, so paths in the ctx mean the same inside; the daemon's socket for
     what the tool provisions; the caller's uid so files are the operator's,
@@ -295,6 +295,8 @@ def run_argv(image, name, argv, mounts=(), env=None, workdir=None, network=None,
     out = ["docker", "run", "--rm", "--name", name]
     if cpus is not None:
         out += [f"--cpus={cpus}"]
+    if cpuset:
+        out += [f"--cpuset-cpus={cpuset}"]
     if user:
         out += ["--user", f"{os.getuid()}:{os.getgid()}"]
         if socket:
