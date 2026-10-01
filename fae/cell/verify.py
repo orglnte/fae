@@ -360,6 +360,7 @@ def verify_argv(ctx, image, conf=None, environ=None, cpus=None):
                  PYTHONPATH=os.pathsep.join([ctx.root, str(HARNESS.parent)]),
                  HOME=str(home), USER=CONTAINER_USER,
                  FAE_VERIFY_CONTAINER=_image.verify_container(ctx.cid),
+                 FAE_VERIFY_IMAGE=image,
                  FAE_CELL_NET=_image.cell_network(ctx.cid))
     env = _image.child_env(environ if environ is not None else os.environ, **extra)
     mounts = _image.mounts_for(ctx.root, ctx.experiment_dir, HARNESS.parent,
