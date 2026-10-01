@@ -1,10 +1,11 @@
 # FAE — a Framework for Agentic-authoring Evaluations
 
-FAE measures how well coding agents author against a given surface: a design
-pattern, a framework, a library, a language, an API style, an
-infrastructure technology. It hands several agents the same task, the same
-verifier and the same attempt budget, changes only the surface they author
-against and what they are told about it, and records what happens.
+FAE is a framework for measuring how well coding agents author against a
+given surface: a design pattern, a framework, a library, a language, an API
+style, an infrastructure technology. An experiment built on it hands several
+agents the same task, the same verifier and the same attempt budget, changes
+only the surface they author against and what they are told about it, and
+records what happens.
 
 This document is the design as it stands. [`AGENTS.md`](AGENTS.md) states
 the invariants the code must keep, [`RUNBOOK.md`](RUNBOOK.md) is the operator
