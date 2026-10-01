@@ -609,6 +609,7 @@ class Cell:
                 self._persist_verdict(out, v)
                 return VerifyResult.from_verdict(v, shape, out_dir)
         before = self._record_snapshot()
+        started = time.time()
         try:
             v = run_verifier(ctx, self.arm_variant,
                              timeout_s=int(self.conf.get("VERIFIER_TIMEOUT_S") or 7200),
@@ -627,6 +628,15 @@ class Cell:
                         stand_down=("integrity",), arrangement=v.arrangement,
                         seconds=v.seconds)
         self._take_verify_output(run_out, out, record_events=out_dir is None and not changed)
+        missing = self._missing_outputs(run_out, v, started)
+        if missing and not changed:
+            # a rig defect, the same on every retry: the operator's, not a refund
+            self._append("ALERT", f"attempt={self._attempt}",
+                         "RIG-OUTPUT the verify left no " + " ".join(missing)[:300])
+            v = Verdict(ok=False, stage="rig-output", charge=False,
+                        why=f"the verify left no {', '.join(missing)}",
+                        stand_down=("rig-output",), metrics=v.metrics,
+                        arrangement=v.arrangement, seconds=v.seconds, files=v.files)
         measured = definition.verifier_class().MEASURED_STAGES
         if (not v.ok and v.charge and (measured is None or v.stage in measured)
                 and not self.arm_variant.substrate_alive()):
@@ -697,6 +707,24 @@ class Cell:
                             ".skeleton_manifest", "score.json", "validation.json",
                             ".sealed", RUN_OUT})
 
+    def _missing_outputs(self, run_out, v, started):
+        """The experiment's REQUIRED_OUTPUTS a verify that ran did not write:
+        absent from its own directory, or left there by an earlier verify."""
+        from . import experiment as _experiment
+        cls = _experiment.current().verifier_class()
+        if v.stage in cls.NOT_RUN_STAGES:
+            return []
+        missing = []
+        for n in cls.REQUIRED_OUTPUTS:
+            f = run_out / n
+            try:
+                fresh = f.stat().st_mtime >= started - 1
+            except OSError:
+                fresh = False
+            if not fresh:
+                missing.append(n)
+        return missing
+
     def _take_verify_output(self, run_out, out, record_events=True):
         """After the verify's container exits: append the ledger events it
         recorded (only the allowed kinds, under this cell's id), then copy the
@@ -707,7 +735,7 @@ class Cell:
             if record_events:
                 ledger.append(self.ws, event, self.cid, *fields, stamp=stamp)
         cls = _experiment.current().verifier_class()
-        for name in dict.fromkeys((*cls.FILES, *cls.FEEDBACK_LOGS)):
+        for name in dict.fromkeys((*cls.FILES, *cls.FEEDBACK_LOGS, *cls.REQUIRED_OUTPUTS)):
             if name in self.HOST_OWNED or "/" in name:
                 continue
             src, dst = run_out / name, out / name
@@ -765,7 +793,8 @@ class Cell:
     def _archive(self, out, m, end, verdict, files=()):
         from . import experiment as _experiment
         cls = _experiment.current().verifier_class()
-        names = list(dict.fromkeys((*(files or cls.FILES), *cls.FEEDBACK_LOGS, "metrics.json")))
+        names = list(dict.fromkeys((*(files or cls.FILES), *cls.FEEDBACK_LOGS,
+                                    *cls.REQUIRED_OUTPUTS, "metrics.json")))
         base = out / "arrangements"
         base.mkdir(exist_ok=True)
         n = len([d for d in base.iterdir() if d.is_dir()]) + 1

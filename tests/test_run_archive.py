@@ -38,7 +38,7 @@ class TestRunArchive(unittest.TestCase):
             if during:
                 during(out)
             return verdict
-        vcls = mock.Mock(MEASURED_STAGES=None, FILES=("verify.log", "trace.csv"),
+        vcls = mock.Mock(REQUIRED_OUTPUTS=(), NOT_RUN_STAGES=frozenset(), MEASURED_STAGES=None, FILES=("verify.log", "trace.csv"),
                          FEEDBACK_LOGS=("verify.log", "cluster-diag", "k6.log"))
         definition = mock.Mock(exclusive=exclusive, verifier_class=lambda: vcls)
         with mock.patch.object(cell, "run_verifier", runner), \
@@ -163,7 +163,7 @@ class TestTheVerifyWritesOnlyItsOwnDirectory(TestRunArchive):
         def runner(ctx, variant, timeout_s, log_dir=None):
             _verify.record_event(ctx.out, "ALERT", "LOAD-SHAPE x")
             return Verdict(ok=True, arrangement="A")
-        vcls = mock.Mock(MEASURED_STAGES=None, FILES=(), FEEDBACK_LOGS=())
+        vcls = mock.Mock(REQUIRED_OUTPUTS=(), NOT_RUN_STAGES=frozenset(), MEASURED_STAGES=None, FILES=(), FEEDBACK_LOGS=())
         with mock.patch.object(cell, "run_verifier", runner), \
                 mock.patch.object(cell.Cell, "expected_fp", new_callable=mock.PropertyMock,
                                   return_value=""), \
@@ -239,3 +239,64 @@ class TestAVerifyThatReachesTheRecordIsVoided(TestRunArchive):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+class TestRequiredOutputs(unittest.TestCase):
+    """An experiment's REQUIRED_OUTPUTS: always copied up; one a verify that
+    ran did not write stands the cell down for the operator (a rig defect is
+    the same on every retry)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        d = Path(self._tmp.name)
+        (d / "ws" / "c" / "artifacts").mkdir(parents=True)
+        self.c = cell.Cell("c", workspaces=d / "ws", root=ROOT)
+        self.c._treatment = mock.Mock(substrate_alive=lambda: True)
+        self.c._attempt = 2
+        self.ws = self.c.ws
+        (self.ws / "iterations.log").write_text("")
+
+    def verify(self, writes, verdict=None, required=("verify.log", "resources.json")):
+        def runner(ctx, variant, timeout_s, log_dir=None):
+            for name in writes:
+                (Path(ctx.out) / name).write_text("x\n")
+            return verdict or Verdict(ok=True, arrangement="A")
+        vcls = mock.Mock(REQUIRED_OUTPUTS=required, NOT_RUN_STAGES=frozenset({"verifier"}),
+                         MEASURED_STAGES=None, FILES=(), FEEDBACK_LOGS=())
+        with mock.patch.object(cell, "run_verifier", runner), \
+                mock.patch.object(cell.Cell, "expected_fp", new_callable=mock.PropertyMock,
+                                  return_value=""), \
+                mock.patch.object(_experiment, "current",
+                                  return_value=mock.Mock(exclusive=None, verifier_class=lambda: vcls)):
+            return self.c.verify(shape="A")
+
+    def last(self):
+        base = self.ws / "arrangements"
+        return json.loads((sorted(base.iterdir())[-1] / "verdict.json").read_text())
+
+    def test_every_required_output_present_is_judged_copied_up_and_archived(self):
+        self.assertTrue(self.verify(["verify.log", "resources.json"]).green)
+        self.assertTrue((self.ws / "resources.json").is_file())
+        self.assertIn("resources.json", self.last()["files"])
+
+    def test_a_missing_one_stands_the_cell_down_uncharged(self):
+        self.verify(["verify.log"])
+        rec = self.last()
+        self.assertEqual((rec["stage"], rec["charge"], rec["stand_down"]),
+                         ("rig-output", False, ["rig-output"]))
+        self.assertIn("RIG-OUTPUT the verify left no resources.json",
+                      (self.ws / "iterations.log").read_text())
+
+    def test_one_left_by_an_earlier_verify_does_not_count(self):
+        import os
+        stale = self.ws / ".verify-out" / "resources.json"
+        stale.parent.mkdir(parents=True)
+        stale.write_text("old\n")
+        os.utime(stale, (1, 1))
+        self.verify(["verify.log"])
+        self.assertEqual(self.last()["stage"], "rig-output")
+
+    def test_a_verifier_that_never_ran_to_its_end_is_not_asked_for_them(self):
+        self.verify([], verdict=Verdict(ok=False, stage="verifier", charge=False, arrangement="A"))
+        self.assertEqual(self.last()["stage"], "verifier")

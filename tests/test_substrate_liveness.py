@@ -73,7 +73,7 @@ class TestTheTwoGates(unittest.TestCase):
             calls.append(ctx)
             self.alive[0] = alive_after
             return verdict
-        vcls = mock.Mock(MEASURED_STAGES=measured, FILES=(), FEEDBACK_LOGS=())
+        vcls = mock.Mock(REQUIRED_OUTPUTS=(), NOT_RUN_STAGES=frozenset(), MEASURED_STAGES=measured, FILES=(), FEEDBACK_LOGS=())
         with mock.patch.object(cell, "run_verifier", runner), \
                 mock.patch.object(cell.Cell, "expected_fp", new_callable=mock.PropertyMock,
                                   return_value=""), \
