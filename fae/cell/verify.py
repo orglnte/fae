@@ -281,6 +281,12 @@ class Verifier(ABC):
     FILES = ()          # archived under arrangements/ when the Verdict names no files
     FEEDBACK_LOGS = ("verify.log", "deploy.log")   # copied to /feedback/ for the next attempt; a name may be a directory
     ROOT_READS = ()     # paths under the experiment root the verify reads, besides the root's files
+    # Files every verify of this experiment must leave: always copied up, and
+    # one missing after a verify that ran is a rig defect (Cell.verify).
+    REQUIRED_OUTPUTS = ()
+    # The stages at which the verifier never ran to its end (no image, a
+    # crash, a timeout): its outputs are not expected there.
+    NOT_RUN_STAGES = frozenset({"verifier", "verifier-timeout", "verifier-image"})
     SUBSTRATE_PREFIXES = {}   # {kind: name prefix} of what a verify provisions, for the reaper
     # A charged fail at one of these stages is voided when the variant's
     # substrate is found dead afterwards; None: any charged fail.
