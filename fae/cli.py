@@ -1,0 +1,572 @@
+#!/usr/bin/env python3
+"""Grouped Typer front-end for the driver — 
+
+DESIGN: this is a CLI LAYER, not the orchestrator. Every command builds the
+namespace the target fae/driver/*.py function already expects and calls it
+directly — fae/driver/ is the library, this is its one client. That includes
+fae/driver/rig.py (the rig-maintenance verbs: selftest, trace-reset, substrate,
+smoke, prepare, exp1, zombies) and the tail/log pair folded into fae/driver/ops.py.
+No orchestration logic is duplicated here.
+
+GROUPS
+  cell     exactly ONE named cell: spawn, pause, resume, stop, tail, log,
+           seal, reverify
+  conduct  the queues' conductor — scheduler, supervisor, backlog, and every
+           bulk verb: run, pause, resume, stop, diagnose, queue-add, reconcile
+  results  what the experiment produced, and whether to trust it: score,
+           grade, validate, aggregate
+  rig      the harness itself, not the experiment: selftest, trace-reset,
+           substrate, smoke, prepare, exp1, zombies
+  tools    instruments/*.py scripts, run standalone for debugging — the
+           harness path-loads and calls them in-process (verify.py); this
+           is a separate, human-facing subprocess invocation, not a second
+           way the harness reaches them
+plus top-level `fleet-status` — read-only observation is NOT conducting.
+
+MERGES
+  fleet-status     absorbs  status | watch | monitor   (--watch N, --walls)
+  results score    absorbs  score | aggregate          (--no-aggregate)
+  results grade    absorbs  grade
+  conduct queue-add absorbs spawn-matrix | top-up      (--matrix, --to-rep N; apidocs by default, --condition V, --all-conditions)
+  conduct pause    absorbs  drain | queue-pause        (--admission-only)
+  conduct resume   absorbs  resume-all | queue-resume  (requeues, never spawns)
+  conduct stop     absorbs  stop-all                   (scoped: all | MODEL...)
+  conduct run      absorbs  reconcile --watch | watch's zombie reap
+  conduct diagnose absorbs  fleet reconcile --dry-run | fleet zombies
+
+TOP-LEVEL ALIAS: `status` stays reachable as a hidden alias of
+`fleet-status` — muscle memory and the operator's monitors.
+
+The driver (fae/cell) imports `driver.common.cell_id` and reads the
+experiment definition directly; nothing shells out to a hidden
+subcommand any more (the `_cell_id` and `_seed_doc` verbs went with the bash
+callers that needed them).
+"""
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Optional
+
+import typer
+
+ROOT = Path(__file__).resolve().parents[1]
+# When run directly (`python3 cli.py ...`) Python already puts this file's
+# directory on sys.path[0]; when path-loaded (tests exec this module by
+# file), it does not — so fae/driver/ needs this insert to be importable either way.
+sys.path.insert(0, str(ROOT))
+
+# fae/driver/ is the library; this file is the client of it. No orchestration
+# logic is duplicated here — every command builds the namespace the target
+# fae/driver/*.py function already expects and calls straight through.
+from fae.driver import ops, render, score, supervise, conduct, rig  # noqa: E402
+
+
+def _ns(**kw):
+    """The namespace fae/driver/*.py's functions read. Defaults mirror argparse's."""
+    return SimpleNamespace(**kw)
+
+
+app = typer.Typer(add_completion=False, no_args_is_help=True,
+                  help="The fae orchestrator. Groups: cell, queue, fleet, "
+                       "results, rig.")
+cell_app = typer.Typer(no_args_is_help=True, help="Act on exactly ONE named cell.")
+conduct_app = typer.Typer(no_args_is_help=True,
+                          help="The queues' conductor: scheduler, supervisor, "
+                               "backlog, and every bulk verb.")
+results_app = typer.Typer(no_args_is_help=True, help="What the run produced, and whether to trust it.")
+rig_app = typer.Typer(no_args_is_help=True, help="The harness itself, not the experiment.")
+tools_app = typer.Typer(no_args_is_help=True,
+                        help="instruments/*.py, run standalone for debugging — "
+                             "the harness calls them in-process, not through here.")
+
+app.add_typer(cell_app, name="cell")
+app.add_typer(conduct_app, name="conduct")
+app.add_typer(results_app, name="results")
+app.add_typer(rig_app, name="rig")
+app.add_typer(tools_app, name="tools")
+
+SEL = "cid, model name, or a whole `_`-separated token run. Anchored: `r1` "
+SEL += "does not match `r10`."
+
+
+# --- cell -------------------------------------------------------------------
+
+@cell_app.command("spawn")
+def cell_spawn(
+    model: str, treatment: str, condition: str,
+    rep: str = typer.Option("1", "-r", "--rep", help="int, or comma-separated ints"),
+    task: str = typer.Option("T1", "--task", help="task id: T<n>, one the experiment's task/ carries"),
+    fresh: bool = typer.Option(False, "--fresh",
+                              help="WIPES the workspace (safe_wipe) and restarts at attempt 1"),
+):
+    """Start one cell now, in parallel with whatever else is running."""
+    ops.spawn(_ns(model=model, treatment=treatment, condition=condition, rep=rep,
+                  task=task, fresh=fresh))
+
+
+@cell_app.command("pause")
+def cell_pause(selectors: list[str] = typer.Argument(..., help=SEL + " Must match ONE cell."),
+               reason: str = typer.Option("manual", "--reason",
+                                          help="recorded in .paused; roster/manual survive `conduct resume all`")):
+    """Ask ONE cell to stop at its next safe point. Cooperative, not a signal.
+    Bulk pause is `conduct pause`."""
+    ops.pause(_ns(selectors=list(selectors), reason=reason))
+
+
+@cell_app.command("resume")
+def cell_resume(selectors: list[str] = typer.Argument(..., help=SEL + " Must match ONE cell."),
+                force: bool = typer.Option(False, "--force",
+                                           help="respawn even past the per-model live-cell cap")):
+    """Lift ONE cell's locks, clear its reconcile flag, respawn its loop.
+    Direct spawn is safe at n=1; the respawn still defers at the per-model
+    cap (--force pushes past it). Bulk resume is `conduct resume`."""
+    ops.resume(_ns(selectors=list(selectors), force=force))
+
+
+@cell_app.command("stop")
+def cell_stop(selectors: list[str] = typer.Argument(..., help=SEL + " Must match ONE cell."),
+              cancel: bool = typer.Option(False, "--cancel",
+                                          help="TERMINAL: write .cancelled — DONE·cancelled, never comes back"),
+              dry_run: bool = typer.Option(False, "--dry-run",
+                                           help="list what would be stopped and dropped, do nothing")):
+    """Halt ONE cell NOW: loop killed, substrate torn down, queued specs
+    removed (backed up). Resumable — PAUSED·stopped — unless --cancel.
+    Files are never touched. Bulk stop is `conduct stop`."""
+    ops.stop_cells(_ns(selectors=list(selectors), cancel=cancel, dry_run=dry_run))
+
+
+@cell_app.command("tail")
+def cell_tail(cid: str, follow: bool = typer.Option(False, "-f", "--follow",
+                                                   help="stream as it grows")):
+    """The agent transcript of the latest attempt."""
+    ops.tail(_ns(cell=cid, follow=follow))
+
+
+@cell_app.command("log")
+def cell_log(cid: str):
+    """The run_cell console log."""
+    ops.log(_ns(cell=cid))
+
+
+@cell_app.command("seal")
+def cell_seal(selector: str = typer.Argument("all", help=SEL),
+              apply: bool = typer.Option(False, "--apply",
+                                         help="write .sealed (dry by default)"),
+              verbose: bool = typer.Option(False, "-v", "--verbose",
+                                           help="also list cells left alone, and why")):
+    """Make terminal cells read-only. No unseal: redo a cell by deleting and
+    requeueing it."""
+    ops.seal(_ns(selector=selector, apply=apply, verbose=verbose))
+
+
+@cell_app.command("reverify")
+def cell_reverify(selectors: Optional[list[str]] = typer.Argument(None, help=SEL),
+                  all_: bool = typer.Option(False, "--all",
+                                            help="accept a selector matching more than one cell")):
+    """Re-run the shape gate on a finished cell WITHOUT touching its recorded
+    result (writes under <ws>/reverify/<ts>/)."""
+    ops.reverify(_ns(selectors=list(selectors) if selectors else ["all"], all=all_))
+
+
+# --- conduct: backlog -------------------------------------------------------
+
+@conduct_app.command("queue-add")
+def conduct_queue_add(
+    model: str,
+    matrix: bool = typer.Option(False, "--matrix",
+                                help="enqueue every (treatment, condition) in the experiment's matrix"),
+    to_rep: Optional[int] = typer.Option(None, "--to-rep",
+                                         help="fill missing reps up to N for the selected combos"),
+    combo: list[str] = typer.Option([], "--combo",
+                                    help="treatment·condition (repeatable; overrides the default selection)"),
+    condition: list[str] = typer.Option([], "--condition",
+                                      help="with --to-rep: also fill this condition on every treatment "
+                                           "that has it (repeatable; apidocs is always included)"),
+    all_conditions: bool = typer.Option(False, "--all-conditions",
+                                      help="with --to-rep: the whole matrix, every condition"),
+    reps: int = typer.Option(3, "--reps", help="with --matrix: how many reps"),
+    task: str = typer.Option("T1", "--task", help="task id: T<n>, one the experiment's task/ carries"),
+    fresh: bool = typer.Option(False, "--fresh",
+                              help="WIPES each workspace before running it"),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="with --to-rep: print the plan, enqueue nothing"),
+):
+    """Hand work to the conductor (was queue add / spawn-matrix / top-up).
+
+    Enqueues rep-outer, so every combination advances together and a partial
+    run still yields comparable n across the matrix. Enqueue-only either way:
+    admission happens in `conduct run`.
+    """
+    if not matrix and to_rep is None:
+        raise typer.BadParameter("choose --matrix or --to-rep N")
+    if to_rep is not None:
+        ops.top_up(_ns(model=model, to_rep=to_rep, combos=list(combo),
+                       conditions=list(condition), all_conditions=all_conditions,
+                       task=task, dry_run=dry_run))
+        return
+    ops.spawn_matrix(_ns(model=model, reps=reps, task=task, fresh=fresh))
+
+
+# --- conduct ----------------------------------------------------------------
+
+SCOPE = "`all` or model lane name(s)."
+
+
+@conduct_app.command("run")
+def conduct_run(limit: int = typer.Option(7, "-n", "--limit",
+                                          help="global cap on live cells"),
+                per_model: int = typer.Option(1, "--per-model",
+                                              help="max live cells per model"),
+                per_model_override: str = typer.Option("", "--per-model-override",
+                                                        help="MODEL=N[,MODEL=N...] — raise "
+                                                             "the per-model cap for named "
+                                                             "lanes only; every other lane "
+                                                             "keeps --per-model"),
+                interval: int = typer.Option(30, "--interval", help="poll seconds"),
+                supervise_interval: int = typer.Option(300, "--supervise-interval",
+                                                       help="seconds between supervision "
+                                                            "sweeps (repair-requeue, DONE "
+                                                            "validation, zombie reap); 0 off")):
+    """THE scheduler AND supervisor — the only thing that turns queued specs
+    into cells, and the only controller: every --supervise-interval it
+    repairs crashed/hung cells (by REQUEUING them at the lane front — its
+    own admission brings them back), validates DONE cells, and reaps
+    zombies on a 2nd consecutive sighting.
+
+    Foreground: run it and watch it. Ctrl-C detaches — live cells keep
+    running; nothing new starts and nothing is supervised until conduct
+    runs again.
+
+    Raising --per-model changes the host-load regime every lane is measured
+    under, so it applies fleet-wide; --per-model-override scopes a raise to
+    named lanes only, leaving the rest at the comparable baseline.
+    """
+    overrides = {}
+    for part in per_model_override.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        model, _, n = part.partition("=")
+        if not model or not n.strip().isdigit():
+            raise typer.BadParameter(
+                f"--per-model-override wants MODEL=N, got {part!r}")
+        overrides[model.strip()] = int(n)
+    conduct.conduct(_ns(limit=limit, per_model=per_model,
+                        per_model_override=overrides, interval=interval,
+                        supervise_interval=supervise_interval))
+
+
+@conduct_app.command("diagnose")
+def conduct_diagnose():
+    """READ-ONLY one-shot: what supervision would do (dry), current zombies
+    (listed, not reaped), and the admission preview per lane — the conduct
+    loop's judgment without waiting for the loop."""
+    supervise.conduct_diagnose(_ns())
+
+
+@conduct_app.command("pause")
+def conduct_pause(scope: list[str] = typer.Argument(..., help=SCOPE),
+                  admission_only: bool = typer.Option(False, "--admission-only",
+                                                      help="park the lane(s) only; running cells finish"),
+                  interval: int = typer.Option(60, "-n", "--interval",
+                                               help="poll seconds while waiting (`all`)"),
+                  dry_run: bool = typer.Option(False, "--dry-run",
+                                               help="show what would be paused/parked, do nothing")):
+    """GRACEFUL bulk pause, everything preserved. `all`: stop conduct, pause
+    every cell, wait for zero loops — the FP-edit window. Model names: park
+    those lanes + pause their running cells, return immediately.
+    Contrast: `conduct stop` kills NOW."""
+    conduct.conduct_pause(_ns(scope=list(scope), admission_only=admission_only,
+                              interval=interval, dry_run=dry_run))
+
+
+@conduct_app.command("resume")
+def conduct_resume(scope: list[str] = typer.Argument(..., help=SCOPE)):
+    """Bulk resume WITHOUT spawning: unpark lanes, lift pause locks, requeue
+    interrupted cells at the FRONT of their lane. A running conduct admits
+    them under its caps — nothing starts while conduct is down. Blanket
+    `all` leaves roster/manual pauses and cancelled cells alone."""
+    conduct.conduct_resume(_ns(scope=list(scope)))
+
+
+@conduct_app.command("stop")
+def conduct_stop(scope: list[str] = typer.Argument(..., help=SCOPE),
+                 yes: bool = typer.Option(False, "--yes", "-y",
+                                          help="skip the confirmation")):
+    """HARD halt NOW, scoped: loops TERMed mid-attempt, agent containers
+    removed; `all` also TERMs conduct. Queues are NOT touched. Warns and asks
+    to confirm first. Resumable (`conduct resume`); the terminal verdict is
+    `cell stop --cancel`. For a graceful stop use `conduct pause`."""
+    conduct.conduct_stop(_ns(scope=list(scope), yes=yes))
+
+
+@conduct_app.command("reconcile")
+def conduct_reconcile(dry_run: bool = typer.Option(False, "--dry-run",
+                                                    help="preview repairs, write nothing"),
+                      only: str = typer.Option("", "--only",
+                                               help="restrict the sweep to this cid substring")):
+    """One-shot supervision sweep — repair-requeue, DONE validation, zombie
+    reap. The engine verb `conduct run` calls the same sweep every
+    --supervise-interval; this is the one-shot equivalent."""
+    supervise.reconcile(_ns(dry_run=dry_run, only=only))
+
+
+# --- fleet-status (top-level: read-only observation is NOT conducting) -------
+
+@app.command("fleet-status")
+def fleet_status(
+    flat: bool = typer.Option(False, "--flat", help="one row per cell"),
+    running_only: bool = typer.Option(False, "--running", help="only live cells"),
+    watch: Optional[int] = typer.Option(None, "-w", "--watch",
+                                        help="refresh every N s (was `watch`)"),
+    walls: bool = typer.Option(False, "--walls",
+                               help="surface limit/AUTH walls (was `monitor`)"),
+):
+    """The fleet table. Absorbs the old status / watch / monitor."""
+    if walls:
+        render.monitor(_ns(interval=watch or 60))
+    elif watch:
+        render.watch(_ns(interval=watch, flat=flat, running_only=running_only))
+    else:
+        render.status(_ns(flat=flat, running_only=running_only))
+
+
+# --- results ----------------------------------------------------------------
+
+@results_app.command("score")
+def results_score(
+    selector: Optional[str] = typer.Argument(None, help=SEL),
+    no_aggregate: bool = typer.Option(False, "--no-aggregate",
+                                      help="score cells without printing the table"),
+    all_cells: bool = typer.Option(False, "--all-cells", help="per-cell rows"),
+    allow_stale: bool = typer.Option(False, "--allow-stale",
+                                     help="proceed even if a score.json is older than its inputs"),
+    condition: Optional[str] = typer.Option(None, "--condition",
+                                          help="restrict the scoreboard to one information "
+                                               "condition (e.g. apidocs); prints a FILTERED "
+                                               "banner with shown/total counts"),
+    impl: Optional[str] = typer.Option(None, "--impl",
+                                       help="restrict to one cell driver (py|bash)"),
+    sort_discrepancy: bool = typer.Option(False, "--sort-discrepancy",
+                                          help="rank rows by how far --impl's baseline "
+                                               "comparison diverged, biggest gap first "
+                                               "(needs --impl; no-op without it)"),
+    sort_significant: bool = typer.Option(False, "--sort-significant",
+                                          help="rank rows by whether --impl's baseline "
+                                               "comparison is significant (Fisher's p<.05), "
+                                               "most significant first; combine with "
+                                               "--sort-discrepancy for significant AND big "
+                                               "first (needs --impl; no-op without it)"),
+):
+    """Score cells and print the metrics table (was score + aggregate)."""
+    score.score(_ns(selector=selector, all_cells=all_cells,
+                    allow_stale=allow_stale, no_aggregate=no_aggregate,
+                    condition=condition, impl=impl, sort_discrepancy=sort_discrepancy,
+                    sort_significant=sort_significant))
+
+
+@results_app.command("run-report")
+def results_run_report(
+    since: Optional[str] = typer.Option(None, "--since",
+                                        help="ISO 8601 or epoch seconds; default = the "
+                                             "current run's start (conduct.pid mtime)"),
+):
+    """What THIS run produced: completed cells by treatment (green rate + mean
+    iterations-to-green) and the cells still working."""
+    from fae.scoring import run_report
+    run_report.cli(since)
+
+
+@results_app.command("grade")
+def results_grade(
+    judge_model: Optional[str] = typer.Option(None, "--judge-model",
+                                              help="REQUIRED unless --no-judge; recorded per cell as grader_model ($JUDGE_MODEL)"),
+    force: bool = typer.Option(False, "--force", help="redo every cell ($FORCE=1)"),
+    no_judge: bool = typer.Option(False, "--no-judge",
+                                  help="mechanical extraction only ($JUDGE=0)"),
+    cells: Optional[list[str]] = typer.Option(None, "--cells",
+                                              help="restrict the scan to these cell ids ($CELLS)"),
+    limit: Optional[int] = typer.Option(None, "--limit", help="stop after N cells scanned ($LIMIT)"),
+    cost_log: Optional[str] = typer.Option(None, "--cost-log", help="per-call usage TSV ($COST_LOG)"),
+    grade_inflight: bool = typer.Option(False, "--grade-inflight",
+                                        help="also grade non-terminal cells ($GRADE_INFLIGHT=1)"),
+):
+    """Defect scan: one defects.json per terminal cell, graded twice by the
+    judge model; restartable per pass."""
+    score.grade(_ns(judge_model=judge_model, force=force, no_judge=no_judge,
+                    cells=list(cells) if cells else None, limit=limit,
+                    cost_log=cost_log, grade_inflight=grade_inflight))
+
+
+@results_app.command("validate")
+def results_validate(selector: Optional[str] = typer.Argument(None, help=SEL)):
+    """Post-DONE trust check: VALID or TAINTED, with reasons."""
+    score.validate(_ns(selector=selector))
+
+
+@results_app.command("aggregate")
+def results_aggregate(
+    condition: Optional[str] = typer.Option(None, "--condition",
+                                          help="restrict the scoreboard to one information "
+                                               "condition (e.g. apidocs)"),
+    impl: Optional[str] = typer.Option(None, "--impl",
+                                       help="restrict to one cell driver (py|bash)"),
+    include_tainted: bool = typer.Option(False, "--include-tainted",
+                                         help="keep TAINTED cells in the scoreboard"),
+    tainted_cells_details: bool = typer.Option(False, "--tainted-cells-details",
+                                               help="print only the TAINTED cells, then exit"),
+    allow_stale: bool = typer.Option(False, "--allow-stale",
+                                     help="proceed even if a score.json is older than its inputs"),
+    sort_discrepancy: bool = typer.Option(False, "--sort-discrepancy",
+                                          help="rank rows by how far --impl's baseline "
+                                               "comparison diverged, biggest gap first "
+                                               "(needs --impl; no-op without it)"),
+    sort_significant: bool = typer.Option(False, "--sort-significant",
+                                          help="rank rows by whether --impl's baseline "
+                                               "comparison is significant (Fisher's p<.05), "
+                                               "most significant first; combine with "
+                                               "--sort-discrepancy for significant AND big "
+                                               "first (needs --impl; no-op without it)"),
+):
+    """Print the scoreboard from existing score.json files, without rescoring
+    (was `runs.py aggregate`; `results score` also runs this as its last
+    step)."""
+    score.aggregate(_ns(condition=condition, impl=impl, include_tainted=include_tainted,
+                        tainted_cells_details=tainted_cells_details, allow_stale=allow_stale,
+                        sort_discrepancy=sort_discrepancy, sort_significant=sort_significant))
+
+
+# --- rig --------------------------------------------------------------------
+
+@rig_app.command("init")
+def rig_init(experiment: str = typer.Option("", "--experiment",
+                                            help="the experiment directory the file "
+                                                 "points the engine at (relative to the "
+                                                 "root or absolute); default `experiment`")):
+    """Write fae.toml at the root with every key at its default; refuses to
+    overwrite one that exists."""
+    rig.init(_ns(experiment=experiment))
+
+
+@rig_app.command("selftest")
+def rig_selftest():
+    """Invariants of the rig itself, incl. TLA+ live-trace conformance."""
+    rig.selftest(_ns())
+
+
+@rig_app.command("trace-reset")
+def rig_trace_reset(dry_run: bool = typer.Option(False, "--dry-run",
+                                                 help="preview the EPOCH lines, write nothing")):
+    """Archive transitions.log, restart it from a recorded EPOCH state."""
+    rig.trace_reset(_ns(dry_run=dry_run))
+
+
+@rig_app.command("substrate")
+def rig_substrate():
+    """Every arm's substrate preflight (variants.py substrate_ok) + a sweep
+    of stale per-verify kind clusters. Creates nothing: each verify provisions
+    its own substrate."""
+    rig.substrate(_ns())
+
+
+@rig_app.command("agent-image")
+def rig_agent_image(rebuild: bool = typer.Option(False, "--rebuild",
+                                                 help="build what is missing or behind: the base, then each arm's layer")):
+    """The agent images: the base's clients (claude, opencode, agy) installed
+    vs latest upstream, and each arm's layer over it. --rebuild builds the
+    base when missing or behind and a layer when its content moved."""
+    from fae.driver import image
+    behind = image.report()
+    if rebuild:
+        raise SystemExit(0 if image.ensure_agent() else 1)
+    raise SystemExit(1 if behind else 0)
+
+
+@rig_app.command("smoke")
+def rig_smoke(arms: str = typer.Option("", "--arms", help="comma-separated (default: every arm)"),
+              only: str = typer.Option("", "--only", help="substring filter on the arm name"),
+              rep: int = typer.Option(1, "--rep"),
+              full_gate: bool = typer.Option(False, "--full-gate",
+                                             help="every arrangement of the gate per arm "
+                                                  "(default: the canonical one)")):
+    """Pipeline check: one reference cell per arm through the driver
+    (`-m fae.cell ... --stub`), in ws-test.nosync. Exit 0 iff all green."""
+    rig.smoke(_ns(arms=arms, only=only, rep=rep, full_gate=full_gate))
+
+
+@rig_app.command("prepare")
+def rig_prepare(model: str = typer.Option("", "--model", help="lane name (default: $MODEL)"),
+                reps: int = typer.Option(1, "--reps", help="reps per combination"),
+                task: str = typer.Option("T1", "--task", help="task id: T<n>, one the experiment's task/ carries")):
+    """Seed the matrix's workspaces WITHOUT launching anything
+    (fae/cell/prepare.py, the driver's own prepare)."""
+    rig.prepare(_ns(model=model, reps=reps, task=task))
+
+
+@rig_app.command("exp1")
+def rig_exp1(reps: int = typer.Option(3, "--reps", help="runs per arm"),
+             arms: Optional[str] = typer.Option(None, "--arms",
+                                                help="comma-separated; default the sealed trio"),
+             report_only: bool = typer.Option(False, "--report-only",
+                                              help="aggregate existing ref workspaces; run nothing")):
+    """The experiment's reference benchmark (its `exp1` verb: the reference
+    implementation of each arm through the verifier)."""
+    rig.exp1_cmd(_ns(reps=reps, arms=arms, report_only=report_only))
+
+
+@rig_app.command("zombies")
+def rig_zombies(reap: bool = typer.Option(False, "--reap",
+                                          help="run one manual reap sweep"),
+                quiet: bool = typer.Option(False, "--quiet",
+                                           help="suppress the reaped-line log during --reap")):
+    """List orphaned rig resources (containers, kind clusters, stale
+    heartbeats) whose owning loop is gone. --reap sweeps them."""
+    rig.zombies_cmd(_ns(reap=reap, quiet=quiet))
+
+
+# --- tools: instruments, run standalone (debug/one-off) ----------------------
+
+_PASSTHROUGH = {"allow_extra_args": True, "ignore_unknown_options": True,
+                "help_option_names": []}
+
+
+def _instrument_dirs():
+    """Where an instrument name resolves, in order: the engine's own, the
+    contrib blocks, the experiment's."""
+    from fae.driver import common
+    from fae.cell.contrib import elastic_resource
+    from fae import paths
+    return [paths.ENGINE / "cell" / "instruments", elastic_resource.DIR,
+            common.experiment_dir() / "instruments"]
+
+
+@tools_app.command("run", context_settings=_PASSTHROUGH)
+def tools_run(ctx: typer.Context):
+    """run NAME [ARGS...] — one instrument by name (e.g. resource_sampler, law,
+    trace, k6, load_shape), forwarding ARGS untouched; the script owns its
+    own argument parsing."""
+    if not ctx.args:
+        raise typer.BadParameter("tools run NAME [ARGS...]")
+    name, argv = ctx.args[0], ctx.args[1:]
+    for base in _instrument_dirs():
+        if (base / f"{name}.py").is_file():
+            rc = subprocess.run([sys.executable, str(base / f"{name}.py"), *argv]).returncode
+            raise typer.Exit(code=rc)
+    raise typer.BadParameter(f"no instrument named {name!r} under "
+                             + ", ".join(str(d) for d in _instrument_dirs()))
+
+
+# --- top-level alias: backward compatibility only ----------------------------
+# HIDDEN from --help on purpose: `fleet-status` is the surface to learn.
+app.command("status", hidden=True)(fleet_status)
+
+
+def main():
+    app()
+
+
+if __name__ == "__main__":
+    main()

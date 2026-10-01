@@ -1,0 +1,12 @@
+# Development / test tooling for the harness (NOT the cell venv — that is
+# seeds/skeleton/common/requirements.txt, installed into each cell's template).
+#
+#   python3 -m pip install -r requirements-dev.txt
+#   python3 -m coverage run --source=runs,cli,driver,harness,scoring -m unittest discover -s tests
+#   python3 -m coverage report
+coverage>=7.16
+
+# Runtime deps the harness itself imports (declared here for a one-shot install
+# on a fresh checkout; move to a requirements.txt if the repo grows one):
+ujson       # every fae/driver/*.py — the ledger/queue JSON path
+typer       # cli.py — the grouped operator front-end

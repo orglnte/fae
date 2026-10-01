@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Repo-tracked pre-commit gate. Enable with:
+#   git config core.hooksPath .githooks
+# Lives in the repo (not .git/hooks) so it ships with the release and every
+# clone gets the same checks.
+#
+# Three gates, in increasing order of how much they cost you:
+#   1. shellcheck on staged shell scripts            — blocking (pre-existing)
+#   2. treatment hooks must be executable            — blocking
+#   3. AGENTS.md kept in step with rig changes       — reminder only
+set -uo pipefail
+rc=0
+staged="$(git diff --cached --name-only --diff-filter=ACM || true)"
+
+# --- 1. shellcheck ----------------------------------------------------------
+sh_files="$(grep -E '\.sh$' <<<"$staged" || true)"
+if [[ -n "$sh_files" ]]; then
+  if command -v shellcheck >/dev/null 2>&1; then
+    while IFS= read -r f; do
+      [[ -f "$f" ]] && { shellcheck -S warning "$f" || rc=1; }
+    done <<<"$sh_files"
+  else
+    echo "pre-commit: shellcheck not installed — lint skipped (brew install shellcheck)" >&2
+  fi
+fi
+
+# --- 2. no treatment hook may come back --------------------------------------
+# The shell hooks (harness/variants/<arm>/*.sh) were gated on the executable
+# bit and reported success when it was missing; they retired 2026-08-29 in
+# favour of the variant classes (experiment/variants/, answering the
+# fae/cell/variants/base.py interface), whose methods have no mode bit. A hook
+# file reappearing is a second implementation, and this refuses it.
+while IFS= read -r f; do
+  [[ -n "$f" ]] || continue
+  case "$f" in
+    harness/variants/*) ;;
+    *) continue ;;
+  esac
+  echo "pre-commit: BLOCKED — $f: the treatment hooks are experiment/variants/ now." >&2
+  rc=1
+done <<<"$staged"
+
+# --- 3. AGENTS.md staleness reminder (never blocks) -------------------------
+# AGENTS.md records the rig invariants a reader of the paper needs and a future
+# session cannot re-derive. It is meant to move with the code it describes.
+if grep -qE '^(harness/|experiment/|\.tla/|fae/scoring/)' <<<"$staged" \
+   && ! grep -qx 'AGENTS.md' <<<"$staged"; then
+  echo "pre-commit: reminder — rig files changed but AGENTS.md was not updated." >&2
+  echo "  If this commit changes a lock, a substrate, an isolation boundary, a" >&2
+  echo "  verdict derivation, or the delete/restart rules, update the matching" >&2
+  echo "  section (see 'Keeping this file honest'). Not blocking." >&2
+fi
+
+exit $rc
