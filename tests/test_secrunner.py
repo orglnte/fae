@@ -96,6 +96,23 @@ class TestStartAndStop(unittest.TestCase):
                          "started\nGET /health 200\n")
         self.assertTrue((Path(self.tmp) / "scratch").is_dir())
 
+    def test_run_to_end_returns_the_exit_code_and_the_output_and_removes_it(self):
+        calls = []
+
+        def run(argv, **kw):
+            calls.append(argv)
+            if argv[:2] == ["docker", "wait"]:
+                return mock.Mock(returncode=0, stdout="3\n", stderr="")
+            if argv[:2] == ["docker", "logs"]:
+                return mock.Mock(returncode=0, stdout="plan: 2 to add\n", stderr="")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+        r = make(self.tmp, cwd="/workspace/infra")
+        r.log = None
+        with mock.patch.object(secrunner.subprocess, "run", run):
+            self.assertEqual(r.run_to_end(60), (3, "plan: 2 to add\n"))
+        self.assertEqual(calls[-1], ["docker", "rm", "-f", "fae-secrun-c1"])
+        self.assertEqual(r.run_argv()[r.run_argv().index("-w") + 1], "/workspace/infra")
+
     def test_a_failed_start_says_why(self):
         def run(argv, **kw):
             if argv[:3] == ["docker", "run", "-d"]:

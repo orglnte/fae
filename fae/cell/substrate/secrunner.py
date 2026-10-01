@@ -55,6 +55,7 @@ class SecRunner:
     cpus: float | None = None
     nofile: int | None = NOFILE
     cpuset: str | None = None
+    cwd: str = "/workspace"
 
     @property
     def name(self):
@@ -76,7 +77,7 @@ class SecRunner:
             out += ["--ulimit", f"nofile={self.nofile}:{self.nofile}"]
         out += ["--network", self.networks[0] if self.networks else "none",
                 "-v", f"{self.workdir}:/workspace", "-v", f"{self.scratch}:/scratch",
-                "-w", "/workspace", "-e", "HOME=/scratch",
+                "-w", self.cwd, "-e", "HOME=/scratch",
                 # the operator's uid has no passwd entry in the image; a tool
                 # that asks who it runs as (Go's user.Current) reads USER
                 "-e", f"USER={CONTAINER_USER}"]
@@ -107,17 +108,42 @@ class SecRunner:
             return False
         return p.returncode == 0 and p.stdout.strip() == "true"
 
-    def dump_logs(self):
-        """What the program printed so far, into `log` (replaced)."""
-        if self.log is None:
-            return
+    def output(self):
+        """What the program printed so far, stdout and stderr in order."""
         try:
             p = subprocess.run(["docker", "logs", self.name], stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, text=True, timeout=30)
         except (OSError, subprocess.TimeoutExpired):
+            return None
+        return p.stdout if p.returncode == 0 else None
+
+    def dump_logs(self):
+        """What the program printed so far, into `log` (replaced)."""
+        if self.log is None:
             return
-        if p.returncode == 0:
-            Path(self.log).write_text(p.stdout)
+        out = self.output()
+        if out is not None:
+            Path(self.log).write_text(out)
+
+    def run_to_end(self, timeout_s):
+        """A program that ends rather than serves (a CLI): run it to its end
+        and return (exit code, what it printed). The code is None when it
+        never started or ran past `timeout_s`; the container is removed
+        either way."""
+        why = self.start()
+        if why:
+            return None, why
+        rc = None
+        try:
+            p = subprocess.run(["docker", "wait", self.name], capture_output=True,
+                               text=True, timeout=timeout_s)
+            if p.returncode == 0 and p.stdout.strip().lstrip("-").isdigit():
+                rc = int(p.stdout.strip())
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        out = self.output() or ""
+        self.stop()
+        return rc, out
 
     def stop(self):
         """Keep its logs, then remove it. Safe to call when it never started."""
