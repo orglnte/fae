@@ -46,6 +46,7 @@ class TestTheArgv(unittest.TestCase):
         self.assertIn("--memory", a)
         self.assertIn("--pids-limit", a)
         self.assertIn("--cpus=1", a)
+        self.assertEqual(a[a.index("--ulimit") + 1], "nofile=65536:65536")
         self.assertNotIn("--privileged", a)
 
     def test_its_name_its_cell_label_and_the_first_network(self):
@@ -59,6 +60,10 @@ class TestTheArgv(unittest.TestCase):
         self.assertIn("HOME=/scratch", a)
         self.assertIn("DB_DSN=postgresql://s", a)
         self.assertEqual(a[-5:], ["img:1", "python3", "-m", "uvicorn", "app.main:app"])
+
+    def test_pinned_only_when_asked(self):
+        self.assertFalse(any(x.startswith("--cpuset-cpus") for x in self.argv))
+        self.assertIn("--cpuset-cpus=0-3", make(self.tmp, cpuset="0-3").run_argv())
 
     def test_no_network_means_none(self):
         r = make(self.tmp)

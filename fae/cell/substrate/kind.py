@@ -53,8 +53,9 @@ class Cluster:
         finally:
             os.umask(old)
 
-    def cap(self, cpus, mem):
-        base._run(["docker", "update", "--cpus", str(cpus), "--memory", mem,
+    def cap(self, cpus, mem, cpuset=None):
+        pin = ["--cpuset-cpus", cpuset] if cpuset else []
+        base._run(["docker", "update", "--cpus", str(cpus), *pin, "--memory", mem,
                    "--memory-swap", mem, self.node])
 
     def load_images(self, images):
