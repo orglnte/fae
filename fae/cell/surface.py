@@ -1,11 +1,14 @@
 """The authorable surface of a cell's artifacts.
 
-The seeded files the agent may not change are recorded in .skeleton_manifest
-(relative path, line count, sha256). The seal marks them read-only, which is
+The seeded files are recorded in the workspace's .skeleton_manifest
+(relative path, line count, sha256), beside artifacts/ rather than in it:
+the agent's container mounts only artifacts/, so it cannot rewrite the
+record it is checked against. The seal marks fixed files read-only, which is
 a deterrent only: the agent is root in its container. The guarantee is
 heal-then-check before every verdict — heal restores a changed fixed file
-from the skeleton and re-baselines its row, check asserts that nothing
-outside the surface still differs. Scoring reads the same manifest to
+from the skeleton and re-baselines its row, evict moves every file that is
+neither seeded nor authorable out of artifacts/, and check asserts that
+nothing outside the surface is left. Scoring reads the same manifest to
 separate the authored lines from the seed.
 """
 from __future__ import annotations
@@ -17,6 +20,10 @@ import stat
 from pathlib import Path
 
 MANIFEST = ".skeleton_manifest"
+# Written by the rig into artifacts/ (.git, the root .gitignore) or left by
+# the agent's own tools; none of them can change what a build does.
+RIG_OWNED = frozenset({".git", ".gitignore"})
+CACHE_DIRS = frozenset({"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"})
 
 
 def authorable(treatment):
@@ -36,16 +43,24 @@ class Surface:
         self.artifacts = Path(artifacts)
         self.tech = str(treatment).split("_")[0]
         self.exact, self.prefixes = authorable(treatment)
-        self.manifest = self.artifacts / MANIFEST
+        self.manifest = self.artifacts.parent / MANIFEST
+        self._legacy = self.artifacts / MANIFEST
 
     def is_authorable(self, rel):
         return rel in self.exact or rel.startswith(self.prefixes)
+
+    def has_manifest(self):
+        """A cell seeded before the manifest moved out of artifacts/ keeps its
+        record there; it is adopted on first use."""
+        if not self.manifest.exists() and self._legacy.is_file():
+            os.replace(self._legacy, self.manifest)
+        return self.manifest.exists()
 
     def record(self):
         """Write the manifest from the tree as seeded: (rel, lines, sha) rows."""
         rows = []
         for p in sorted(self.artifacts.rglob("*")):
-            if not p.is_file() or p.name == MANIFEST:
+            if not p.is_file() or p == self._legacy or self._ignored(p):
                 continue
             data = p.read_bytes()
             rows.append((p.relative_to(self.artifacts).as_posix(),
@@ -54,6 +69,7 @@ class Surface:
         return rows
 
     def rows(self):
+        self.has_manifest()
         out = []
         for line in self.manifest.read_text().splitlines():
             rel, n, sha = line.split("\t")
@@ -107,10 +123,47 @@ class Surface:
             self._write(rows)
         return restored
 
+    def _ignored(self, p):
+        """Rig-owned at the root, or a tool cache anywhere."""
+        rel = p.relative_to(self.artifacts)
+        return (rel.parts[0] in RIG_OWNED or p.suffix == ".pyc"
+                or any(part in CACHE_DIRS for part in rel.parts[:-1]))
+
+    def strays(self):
+        """Files neither seeded nor authorable, as relpaths."""
+        seeded = {rel for rel, _n, _sha in self.rows()}
+        out = []
+        for p in sorted(self.artifacts.rglob("*")):
+            if p.is_dir() and not p.is_symlink():
+                continue
+            if self._ignored(p):
+                continue
+            rel = p.relative_to(self.artifacts).as_posix()
+            if rel not in seeded and not self.is_authorable(rel):
+                out.append(rel)
+        return out
+
+    def evict(self, dest):
+        """Move every stray into dest (kept as evidence, never deleted) and
+        drop the directories that leaves empty. Returns the moved relpaths."""
+        if not self.has_manifest():
+            return []
+        moved = self.strays()
+        for rel in moved:
+            src, to = self.artifacts / rel, Path(dest) / rel
+            to.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(src, to)
+            d = src.parent
+            while d != self.artifacts and not any(d.iterdir()):
+                d.rmdir()
+                d = d.parent
+        return moved
+
     def check(self):
-        """Fixed files that still differ from their row: 'rel (modified)' /
-        'rel (deleted)'. Empty when the tree has no manifest."""
-        if not self.manifest.exists():
+        """What is outside the surface after heal and evict: 'rel (modified)',
+        'rel (deleted)' for fixed files, 'rel (outside surface)' for a stray.
+        Empty when the tree has no manifest."""
+        if not self.has_manifest():
             return []
         out = []
         for rel, _n, sha in self.rows():
@@ -121,4 +174,4 @@ class Surface:
                 out.append(f"{rel} (deleted)")
             elif hashlib.sha256(p.read_bytes()).hexdigest() != sha:
                 out.append(f"{rel} (modified)")
-        return out
+        return out + [f"{rel} (outside surface)" for rel in self.strays()]

@@ -99,7 +99,9 @@ def _sha256(p: Path) -> str:
 def read_skeleton_manifest(artifacts_dir: Path) -> dict[str, str]:
     """path -> sha256 for every FIXED skeleton file seeded at prepare time.
     Lets us separate the agent-authored surface from the fixed skeleton."""
-    manifest = artifacts_dir / ".skeleton_manifest"
+    manifest = artifacts_dir.parent / ".skeleton_manifest"
+    if not manifest.is_file():
+        manifest = artifacts_dir / ".skeleton_manifest"      # a cell seeded with it inside artifacts/
     out: dict[str, str] = {}
     if manifest.is_file():
         for line in manifest.read_text().splitlines():
