@@ -22,6 +22,7 @@ from pathlib import Path
 TAG_PREFIX = "fae-"
 VERIFY_PREFIX = "fae-verify-"
 TOOL_PREFIX = "fae-tool-"
+RUN_PREFIX = "fae-secrun-"     # the judged program's own container (substrate/secrunner.py)
 NET_PREFIX = "fae-net-"
 _SKIP = {".git", "__pycache__", ".pytest_cache", ".venv", ".mypy_cache"}
 # the host, by the name Docker Desktop gives it, on Linux too: what a

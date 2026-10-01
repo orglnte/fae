@@ -110,6 +110,7 @@ def _prefixes():
     from fae.cell import variants as _tr
     out = [("container", common.AGENT_CONTAINER_PREFIX),
            ("container", _image.VERIFY_PREFIX), ("container", _image.TOOL_PREFIX),
+           ("container", _image.RUN_PREFIX),
            ("network", _image.NET_PREFIX)]
     classes = list(_tr.registry().values()) + [common.definition().verifier_class()]
     for cls in classes:
