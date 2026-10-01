@@ -63,6 +63,7 @@ class TestTheAttemptIsJudged(unittest.TestCase):
         self.assertEqual(c.ledger[0], ("ALERT", "attempt=2",
                                        "AGENT-TIMEOUT killed after 60s; judged as it stands"))
         self.assertEqual(c.ledger[1][0], "AGENT")
+        self.assertTrue(c.ledger[1][-1].startswith("client=claude:"))
 
 
 class TestTheNextPromptSaysSo(unittest.TestCase):
