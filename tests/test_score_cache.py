@@ -112,3 +112,37 @@ class TestVersioning(CacheCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAgentTime(unittest.TestCase):
+    """The agent's seconds per charged attempt come from the ledger's AGENT
+    lines; a refunded attempt is not counted, and a re-run keeps its last run."""
+
+    def ledger(self, *rows):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        log = Path(d.name) / "iterations.log"
+        log.write_text("".join("2026-10-01T00:00:00Z\t" + "\t".join(r) + "\n" for r in rows))
+        return sc.parse_agent_time(log)
+
+    def test_charged_attempts_up_to_green_are_summed(self):
+        t = self.ledger(("AGENT", "c", "attempt=1", "s=300"), ("ITER", "fail", "attempt=1 stage=e2e"),
+                        ("AGENT", "c", "attempt=2", "s=100"), ("ITER", "green", "attempt=2 e2e=7/7"))
+        self.assertEqual((t["agent_s_total"], t["agent_s_per_attempt"]), (400, 200.0))
+
+    def test_a_refunded_attempt_is_not_counted_and_a_rerun_keeps_its_last_run(self):
+        t = self.ledger(("AGENT", "c", "attempt=1", "s=900"),
+                        ("AGENT", "c", "attempt=1", "s=120"), ("ITER", "green", "attempt=1"),
+                        ("AGENT", "c", "attempt=2", "s=500"))
+        self.assertEqual((t["agent_s_total"], t["agent_s_by_attempt"]), (120, {"1": 120}))
+
+    def test_a_never_green_cell_sums_every_charged_attempt(self):
+        t = self.ledger(("AGENT", "c", "attempt=1", "s=60"), ("ITER", "fail", "attempt=1"),
+                        ("AGENT", "c", "attempt=2", "s=120"), ("ITER", "budget", "attempt=2"))
+        self.assertEqual((t["agent_s_total"], t["agent_s_per_attempt"]), (180, 90.0))
+
+    def test_a_charged_attempt_without_its_agent_line_leaves_the_totals_empty(self):
+        t = self.ledger(("ITER", "fail", "attempt=1"),
+                        ("AGENT", "c", "attempt=2", "s=120"), ("ITER", "green", "attempt=2"))
+        self.assertEqual((t["agent_s_total"], t["agent_s_per_attempt"]), (None, None))
+        self.assertEqual(t["agent_s_by_attempt"], {"2": 120})

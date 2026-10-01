@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -277,6 +278,41 @@ def parse_iterations(log_path: Path) -> dict:
     }
 
 
+def parse_agent_time(log_path: Path) -> dict:
+    """The agent's wall-clock seconds per charged attempt, from the ledger's
+    AGENT lines. A charged attempt is one with an ITER line; a refunded one has
+    none and is not counted. An attempt run more than once keeps its last AGENT
+    line, the run whose work was judged. The totals are None when a charged
+    attempt has no AGENT line (cells that predate it)."""
+    charged, green_at, secs = [], None, {}
+    try:
+        lines = log_path.read_text(errors="replace").splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        f = line.split("\t")
+        if len(f) < 4:
+            continue
+        if f[1] == "ITER":
+            m = re.search(r"\battempt=(\d+)", f[3])
+            if m:
+                charged.append(int(m.group(1)))
+                if f[2] == "green" and green_at is None:
+                    green_at = int(m.group(1))
+        elif f[1] == "AGENT":
+            kv = dict(x.split("=", 1) for x in f[3:] if "=" in x)
+            if kv.get("attempt", "").isdigit() and kv.get("s", "").isdigit():
+                secs[int(kv["attempt"])] = int(kv["s"])
+    counted = [n for n in charged if green_at is None or n <= green_at]
+    complete = bool(counted) and all(n in secs for n in counted)
+    return {
+        "agent_s_by_attempt": {str(n): secs[n] for n in charged if n in secs},
+        "agent_s_total": sum(secs[n] for n in counted) if complete else None,
+        "agent_s_per_attempt": (round(sum(secs[n] for n in counted) / len(counted), 1)
+                                if complete else None),
+    }
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print(__doc__)
@@ -300,6 +336,8 @@ def score_one(cell_id: str) -> int:
                          parse_iterations)
     metrics = cached_input(cache, "metrics", ws / "metrics.json",
                            lambda _p: read_metrics(ws))
+    agent_time = cached_input(cache, "agent_time", ws / "iterations.log",
+                              parse_agent_time)
 
     # LLM Judge (defects.json)
     defects_path = ws / "defects.json"
@@ -368,6 +406,11 @@ def score_one(cell_id: str) -> int:
         "green": iters["green"],
         "revoked": iters["revoked"],
         "budget_exhausted": iters["budget_exhausted"],
+
+        # authoring time: the agent's wall-clock, charged attempts up to green
+        "agent_s_total": agent_time["agent_s_total"],
+        "agent_s_per_attempt": agent_time["agent_s_per_attempt"],
+        "agent_s_by_attempt": agent_time["agent_s_by_attempt"],
         
         # metric 4
         "author_surface": surface,

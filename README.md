@@ -7,7 +7,8 @@ Take one task and two or more ways to do it: two tools, two libraries, two
 architectures. An FAE experiment gives each way to the same coding agents
 (Claude, Gemini, DeepSeek, …), lets each agent try up to ten times, checks
 every attempt with the same automated verifier, and reports which way the
-agents get working, in how many attempts, and with how much code.
+agents get working, in how many attempts, in how much time, and with how much
+code.
 
 ```
   the task + one approach's docs
@@ -24,20 +25,23 @@ agents get working, in how many attempts, and with how much code.
 
 One run of that loop is a **cell**: one model, one approach, one set of docs,
 one repetition. An experiment is many cells, and its result is a table, one
-row per model and approach. This one is from a scripted agent that fails once
-on purpose:
+row per model and approach. This one is from the calculator example below:
+Claude Sonnet writing it in Zig, and a scripted agent that fails once on
+purpose:
 
 ```
-MODEL            | TREATMENT        | COND     | REPS | E2E   | GREEN | ITG mn/avg/mx  | SLoC avg -mn/+mx
-testagent        | python           | apidocs  | 1    | -     | 100%  | 2 / 2.0 / 2    |   12   -0/+0
+MODEL            | TREATMENT        | COND     | REPS | E2E   | GREEN | ITG mn/avg/mx  | MIN mn/avg/mx     | MIN/ATT | SLoC avg -mn/+mx
+sonnet-5         | zig              | apidocs  | 1    | -     | 100%  | 1 / 1.0 / 1    | 6 / 6.3 / 6       | 6.3     |   47   -0/+0
+testagent        | python           | apidocs  | 1    | -     | 100%  | 2 / 2.0 / 2    | 0 / 0.0 / 0       | 0.0     |   12   -0/+0
 ```
 
 `GREEN` is the share of cells the agents got working, `ITG` the attempts it
-took (iterations to green), `SLoC` the lines they wrote. `E2E` is the share
-of the verifier's end-to-end checks passed, `-` when the verifier reports
-none (the calculator's does not). The ledger also records how long the agent
-ran in each attempt. Until `results grade` has judged the cells, `results
-score` warns that the graded metrics (consistency defects) are missing; the
+took (iterations to green), `SLoC` the lines they wrote. `MIN` is the agent's
+authoring time in minutes up to green, summed over its attempts, and `MIN/ATT`
+the mean per attempt; each cell's `score.json` keeps the seconds of every
+attempt. `E2E` is the share of the verifier's end-to-end checks passed, `-`
+when the verifier reports none (the calculator's does not). Until `results
+grade` has judged the cells, `results score` warns that the graded metrics (consistency defects) are missing; the
 counted ones above do not need it.
 
 ## Try it in five minutes
