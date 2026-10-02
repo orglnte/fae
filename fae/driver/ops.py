@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import ujson as json
+from pathlib import Path
 from datetime import datetime, timezone
 
 from fae.driver import common
@@ -1006,11 +1007,17 @@ def _claimed(cid):
 
 
 def refresh_cell_creds(model):
-    """Master creds -> every live per-cell copy (staged once at cell start)."""
-    if not common.CREDS.exists():
+    """The agent's credentials -> every live per-cell copy of a claude agent
+    (staged once at cell start)."""
+    from fae.cell import config as _cellconfig
+    conf = _cellconfig.load(common.ROOT, env=dict(os.environ, MODEL=model))
+    if conf.get("AGENT_CLI") != "claude":
+        return
+    creds = Path(conf.get("AGENT_HOME", "")) / ".credentials.json"
+    if not creds.is_file():
         return
     for d in common.WS.glob(f"{model}_*/.agent-claude"):
-        (d / ".credentials.json").write_bytes(common.CREDS.read_bytes())
+        (d / ".credentials.json").write_bytes(creds.read_bytes())
 
 
 def tail(args):

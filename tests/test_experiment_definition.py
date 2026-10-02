@@ -241,5 +241,31 @@ class TestTheExperimentsOwnCommands(unittest.TestCase):
         self.assertEqual(exp.current().commands, {})
 
 
+class TestTheAgentsFile(unittest.TestCase):
+    """agents.toml: what the experiment compares; a malformed entry is refused
+    with its tag named, never half-read."""
+
+    def load(self, text):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "agents.toml"
+            f.write_text(text)
+            return exp.load_agents(f)
+
+    def test_a_declared_agent_is_read(self):
+        self.assertEqual(self.load('[agents.a]\ncli = "claude"\nmodel = "m-1"\neffort = "low"\n'),
+                         {"a": {"cli": "claude", "model": "m-1", "effort": "low"}})
+
+    def test_no_file_is_no_agents(self):
+        self.assertEqual(exp.load_agents("/nonexistent/agents.toml"), {})
+
+    def test_refusals_name_the_tag(self):
+        for text, why in (('[agents.a]\ncli = "nope"\nmodel = "m"\n', "cli must be one of"),
+                          ('[agents.a]\ncli = "claude"\n', "no model"),
+                          ('[agents.a]\ncli = "claude"\nmodel = "m"\nhome = "/x"\n', "unknown key"),
+                          ('[models]\na = 1\n', "unknown top-level")):
+            with self.assertRaisesRegex(ValueError, why):
+                self.load(text)
+
+
 if __name__ == "__main__":
     unittest.main()

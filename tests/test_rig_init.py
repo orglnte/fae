@@ -26,10 +26,11 @@ class TestTheRenderedDefaults(unittest.TestCase):
 
     def test_every_engine_section_is_there_with_its_default(self):
         self.assertEqual(self.doc["run"], {"shape_variation": 1, "model": "opus",
-                                           "effort": "high", "stream_agent": True})
+                                           "stream_agent": True})
         self.assertEqual(self.doc["paths"]["experiment_dir"], _config.DEFAULT_EXPERIMENT_DIR)
         self.assertEqual(self.doc["slots"]["work"], 8)
-        self.assertEqual(self.doc["models"], _config.DEFAULT_MODELS)
+        self.assertNotIn("models", self.doc)
+        self.assertNotIn("agent_home", self.doc["paths"])
         self.assertNotIn("rig", {k for k in self.doc if k not in ("store", "load")} - {"rig"} or set())
 
     def test_what_it_writes_loads_to_the_same_values_as_no_file(self):

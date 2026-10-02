@@ -72,7 +72,6 @@ VALIDATION = "validation.json"  # per-cell validator output; mandatory at DONE
 from fae import ledger, mutex  # noqa: E402
 from fae.cell import faults  # noqa: E402
 
-CREDS = ROOT / ".agent-home" / ".claude" / ".credentials.json"
 # The experiment definition (fae/cell/experiment.py) and its variants are
 # read through definition(); nothing here copies them.
 

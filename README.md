@@ -146,16 +146,19 @@ python3 cli.py results score
 
 ## Agents
 
-A model tag (`sonnet`, `haiku`, `opus`, `fable`, `gemini`, `g38f`, `dsv4f`, …)
-names a CLI and a model id; the list is `[models]` in `fae.toml`. Each agent
-signs in through `.agent-home/` in the experiment's root, never through a
-config value, and each cell gets a fresh copy of it.
+The agents an experiment compares are part of the experiment, in git:
+`agents.toml` beside its variants, one `[agents.<tag>]` per agent naming its
+CLI and model id. The tag (`sonnet`, `gemini`, `dsv4f`, …) names every cell
+id. Each agent signs in through a credentials home on this machine, never
+through a config value, and each cell gets a fresh copy of it. The home is
+`fae.toml`'s `[agents.<tag>] home` when set (two agents of one CLI can use
+two accounts), else the CLI's default:
 
-| CLI | what `.agent-home/` must hold |
-|---|---|
-| `claude` | `.claude/.credentials.json`: `claude auth login` inside the agent image, as above |
-| `opencode` | `.opencode/opencode.key`: the API key, written by you (`chmod 600`) |
-| `agy` | `.gemini/`: a signed-in agy home. Sign in once inside the agent image with that directory mounted at `/home/node/.gemini` (agy in Docker). |
+| CLI | default home | what it must hold |
+|---|---|---|
+| `claude` | `.agent-home/.claude` | `.credentials.json`: `claude auth login` inside the agent image, as above |
+| `opencode` | `.agent-home/.opencode` | `opencode.key`: the API key, written by you (`chmod 600`) |
+| `agy` | `.agent-home/.gemini` | a signed-in agy home: sign in once inside the agent image with it mounted at `/home/node/.gemini` |
 
 `.agent-home/` and `fae.toml` are gitignored. Keep secrets out of `fae.toml`.
 
