@@ -54,6 +54,14 @@ def daemon_answers(argv, timeout=15):
     return not any(m in err for m in _DAEMON_GONE)
 
 
+def host_ports(cid, ranges):
+    """{role: port} on the host's loopback for one cell: the same slot, by
+    the hash of its id, in each of `ranges` ({role: range}). Two cells can
+    hash to one slot."""
+    slot = cksum(cid) % min(len(r) for r in ranges.values())
+    return {role: r[slot] for role, r in ranges.items()}
+
+
 def cksum(text):
     """POSIX cksum of the text, the number the shell hooks hashed cell ids
     with — ports and cluster names must not move under a cell that resumes,
