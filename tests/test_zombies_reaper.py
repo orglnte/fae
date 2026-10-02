@@ -239,6 +239,12 @@ class TestFindZombiesHeartbeat(FindZombiesCase):
         self.assertEqual(zs, [])
 
 
+class TestFindZombiesWithoutAWorkspaceRoot(FindZombiesCase):
+    def test_a_missing_workspace_root_has_no_zombies(self):
+        with mock.patch.object(common, "WS", common.WS / "absent"):
+            self.assertEqual(zombies.find_zombies(), [])
+
+
 class TestFindZombiesLockholders(FindZombiesCase):
     def test_a_leaked_lock_is_reported_with_its_holder_name(self):
         with mock.patch.object(zombies, "_leaked_lock_holders",

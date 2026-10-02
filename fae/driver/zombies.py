@@ -33,16 +33,22 @@ ZOMBIE_UNKNOWN_GRACE_S = int(os.environ.get("ZOMBIE_UNKNOWN_GRACE_S", 3600))
 
 _CLMAP = {"key": None, "map": {}}
 
+
+def _workspace_entries():
+    """The workspace root's entries; none when the root does not exist yet
+    (a fresh checkout, a root no cell has run in)."""
+    try:
+        return list(common.WS.iterdir())
+    except OSError:
+        return []
+
+
 def _cluster_map():
     """cid -> the cluster a cell of that cid owns, as its variant names it
     (`substrate_identities`), cached per cid-set: a pure function of the cid,
     computed in-process — an owner map that could come back empty on a
     fault would strip every live cluster of its reaper protection."""
-    try:
-        entries = list(common.WS.iterdir())
-    except OSError:              # no workspaces yet: no cell owns a cluster
-        entries = []
-    cids = tuple(sorted(p.name for p in entries
+    cids = tuple(sorted(p.name for p in _workspace_entries()
                         if p.is_dir() and parse_cell_id(p.name)))
     if _CLMAP["key"] != cids:
         _CLMAP["key"] = cids
@@ -297,7 +303,7 @@ def find_zombies():
             continue
         if ppid == 1:
             zs.append(("tee", str(pid), cid, "orphaned logger (ppid 1)"))
-    for ws in common.WS.iterdir():
+    for ws in _workspace_entries():
         if ws.is_dir() and (ws / ".loop").exists() and state.heartbeat(ws) is None:
             zs.append(("heartbeat", str(ws / ".loop"), ws.name, "corpse file"))
     # No stale-lock class: a lock is held by fd, so the kernel frees it when
