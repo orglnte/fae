@@ -9,7 +9,7 @@
 
 Split this way because these are answerable separately: the FSM can be read
 against .tla/Runs.tla without a filesystem, and the verify is the part that
-needs a substrate. Sealing is a property of a cell, so it lives on Cell.
+needs an infra. Sealing is a property of a cell, so it lives on Cell.
 
 Usage from anywhere in the repo:
 

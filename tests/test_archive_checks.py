@@ -59,7 +59,7 @@ class TestTheChecks(unittest.TestCase):
     def test_many_refunds_of_any_stage_warn(self):
         ws = ws_with(("01-a1-A-refunded", {"stage": "verifier"}),
                      ("02-a1-A-interrupted", {"stage": "interrupted"}),
-                     ("03-a1-A-refunded", {"stage": "substrate"}),
+                     ("03-a1-A-refunded", {"stage": "infra"}),
                      ("04-a1-A-green", {}))
         self.assertIn("3 verify run(s) not charged", archive_warns(ws, iters(("green", 1, "")))[0])
 

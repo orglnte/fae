@@ -186,7 +186,7 @@ Resume(c) ==
   /\ UNCHANGED <<outcome, loop, attempts, slotHeld, verifyHeld, rigHeld>>
 
 (* kill (`cell stop --cancel` since 2026-08-12): intent first, then the loop
-   dies, substrate torn down; DONE cells are excluded (7219f9b). The plain
+   dies, infra torn down; DONE cells are excluded (7219f9b). The plain
    resumable `stop` is NOT this action — it is Pause + Crash. *)
 Kill(c) ==
   /\ ~Terminal(c)

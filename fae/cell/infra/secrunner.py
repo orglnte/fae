@@ -10,7 +10,7 @@ needs:
 - `/scratch`, when given: a writable directory for the program's own state
   (HOME, a Pulumi backend, temp files), inside the verify's own directory;
 - the networks the verifier names, or none, and a stable name on them
-  (`fae-secrun-<cid>`) that the verifier and the cell's substrate reach it by.
+  (`fae-secrun-<cid>`) that the verifier and the cell's infra reach it by.
 
 No other mount but the read-only extras a caller names, no Docker socket,
 the operator's uid, every capability dropped and no privilege escalation,
@@ -23,7 +23,7 @@ the container. `run` is start-wait-stop in one call.
 
 `SecRunnerVariant` is the variant of an experiment whose program needs
 nothing but a runtime image: it declares the image and the commands, and
-the engine supplies the substrate checks and the runner.
+the engine supplies the infra checks and the runner.
 """
 from __future__ import annotations
 
@@ -256,23 +256,23 @@ class SecRunnerVariant(Variant):
         rc, out, err = cls.runner(cid, workdir, argv).run(timeout_s, stdin=stdin, split=True)
         return (out, err, rc, None) if rc is not None else ("", "", None, err)
 
-    def substrate_alive(self):
+    def infra_alive(self):
         return daemon_answers(["docker", "version"])
 
-    def substrate_ok(self):
+    def infra_ok(self):
         from .. import image as _image
         if subprocess.run(["docker", "info"], capture_output=True).returncode:
-            self.log("HALT[substrate]: docker unreachable")
+            self.log("HALT[infra]: docker unreachable")
             return False
         if self.RUNTIME_DIR:
             try:
                 _image.ensure(self.runtime_name(), self.RUNTIME_DIR, log=self.log)
             except RuntimeError as e:
-                self.log(f"HALT[substrate]: {e}")
+                self.log(f"HALT[infra]: {e}")
                 return False
         elif subprocess.run(["docker", "image", "inspect", self.IMAGE],
                             capture_output=True).returncode:
-            self.log(f"HALT[substrate]: image {self.IMAGE} not present "
+            self.log(f"HALT[infra]: image {self.IMAGE} not present "
                      f"(docker pull {self.IMAGE})")
             return False
         return True

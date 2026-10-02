@@ -46,7 +46,7 @@ done <<<"$staged"
 if grep -qE '^(harness/|experiment/|\.tla/|fae/scoring/)' <<<"$staged" \
    && ! grep -qx 'AGENTS.md' <<<"$staged"; then
   echo "pre-commit: reminder — rig files changed but AGENTS.md was not updated." >&2
-  echo "  If this commit changes a lock, a substrate, an isolation boundary, a" >&2
+  echo "  If this commit changes a lock, an infra, an isolation boundary, a" >&2
   echo "  verdict derivation, or the delete/restart rules, update the matching" >&2
   echo "  section (see 'Keeping this file honest'). Not blocking." >&2
 fi

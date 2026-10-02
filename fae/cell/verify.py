@@ -24,7 +24,7 @@ and everything it started goes with it.
 What a verifier owes the rig, `verify(ctx)` being the whole interface:
 the program under judgment NEVER EXECUTES ON THE HOST, and neither does
 the verifier. It builds and runs the program inside the variant's
-substrate — a container of the variant's runtime image, the cell's dind
+infra — a container of the variant's runtime image, the cell's dind
 daemon, its kind cluster — over its own copy of the artifacts and with no
 network the experiment did not declare, so a judged program cannot reach
 the rig, the locks, other cells or the operator's machine.
@@ -265,7 +265,7 @@ class Verifier(ABC):
     `verify`.
 
     What it owes: the program under judgment never executes on the host —
-    build and run it inside the variant's substrate (a container of the
+    build and run it inside the variant's infra (a container of the
     variant's runtime image, the cell's dind daemon, its kind cluster), over
     its own copy of the artifacts, with no network the experiment did not
     declare. This code itself runs in the verify container, never on the
@@ -287,13 +287,13 @@ class Verifier(ABC):
     # The stages at which the verifier never ran to its end (no image, a
     # crash, a timeout): its outputs are not expected there.
     NOT_RUN_STAGES = frozenset({"verifier", "verifier-timeout", "verifier-image"})
-    SUBSTRATE_PREFIXES = {}   # {kind: name prefix} of what a verify provisions, for the reaper
+    INFRA_PREFIXES = {}   # {kind: name prefix} of what a verify provisions, for the reaper
     # A charged fail at one of these stages is voided when the variant's
-    # substrate is found dead afterwards; None: any charged fail.
+    # infra is found dead afterwards; None: any charged fail.
     MEASURED_STAGES = None
 
     @classmethod
-    def substrate_identities(cls, cid):
+    def infra_identities(cls, cid):
         """[(kind, name)] this verifier provisions for a cell, named as it
         names them — what a reaper may look for after the cell is gone."""
         return []

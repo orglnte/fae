@@ -465,7 +465,7 @@ def _supervise_pass(dry=False, only=""):
                 # A loop alive on a DONE cell is normal for the teardown
                 # window: END is written BEFORE the EXIT trap deletes the
                 # per-cell cluster/sidecar (minutes for a cluster). Killing it
-                # there orphans exactly the substrate the trap was removing
+                # there orphans exactly the infra the trap was removing
                 # (audit finding 14) — so give grace, and when we do kill,
                 # tear down explicitly like stop_cells.
                 if iter_age < T_HANG:
@@ -476,19 +476,19 @@ def _supervise_pass(dry=False, only=""):
                 if not dry:
                     os.kill(loop_pid, signal.SIGKILL)
                     subprocess.run(["docker", "rm", "-f", "-v", common.agent_container(cid),
-                                    *common.substrate_containers(st["treatment"], cid)],
+                                    *common.infra_containers(st["treatment"], cid)],
                                    capture_output=True)
                     ops._variant_teardown(st["treatment"], cid)
             elif st["state"] == "CRASHED" and not in_box and _conducts(cid):
                 continue    # claimed or queued: conduct restarts it, and
                             # says so when it does
-            elif st["state"] == "CRASHED" and st["why"] == "substrate" and not in_box:
+            elif st["state"] == "CRASHED" and st["why"] == "infra" and not in_box:
                 # a rig fault is RESUMABLE, not terminal: it burns no attempt,
                 # so the cell is respawned like any other crash (2026-07-24
                 # blind spot: a provision-race HALT sat unrespawned until a
                 # human noticed). No corpse-age guard anymore: a deliberate
                 # stop is a pause LOCK now, never an age to be guessed at.
-                common._rec_log(f"{cid} CRASHED/substrate, no loop (resumable)")
+                common._rec_log(f"{cid} CRASHED/infra, no loop (resumable)")
                 # Same reason as the CRASHED branch below: this runs every
                 # sweep while the cell stays crashed, so the reconcile at the
                 # top of the sweep is the one place that may emit the Crash.

@@ -11,7 +11,7 @@ The definition's `__init__.py` declares, all optional except `variant_classes`:
 
     NAME                 a short name
     variant_classes()    -> the Variant subclasses (a function: importing
-                            them pulls the substrate modules in, and the
+                            them pulls the infra modules in, and the
                             config reads this file before any of that)
     MATRIX               {arm: [variants]} — derived from the variants'
                             CONDITIONS when absent
@@ -23,7 +23,7 @@ The definition's `__init__.py` declares, all optional except `variant_classes`:
     verifier_class()     -> the Verifier subclass (fae/cell/verify.py: one
                             verify(ctx) -> Verdict, EXCLUSIVE — the lock the
                             engine holds around every run, "rig" for a
-                            singleton substrate — and FILES; what it owes is
+                            singleton infra — and FILES; what it owes is
                             on the base class; a function, like
                             variant_classes: `verifier` is the package)
     verbs()              -> {name: callable} hooks the engine's own verbs call

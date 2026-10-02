@@ -59,8 +59,8 @@ A cell yields:
 ## 3. Vocabulary
 
 - **Arm** — one way of authoring the task, declared as a variant class: the
-  docs the agent is given, the substrate it may touch, the tooling it
-  targets. Arms of one **tech** share a substrate, an image and a contract;
+  docs the agent is given, the infra it may touch, the tooling it
+  targets. Arms of one **tech** share an infra, an image and a contract;
   they may still be told different things (their docs name, §4).
 - **Condition** — what an arm's agent is told, on an information ladder
   (for example: source only, API docs, a how-to). The matrix says which
@@ -74,13 +74,13 @@ A cell yields:
   rotates with the attempt number, is the experiment's choice.
 - **Verdict** — pass or fail, the stage that failed, and whether the attempt
   is charged. An uncharged failure is the rig's, and the attempt is refunded.
-- **Substrate** — what an arm runs on, described by four independent
+- **Infra** — what an arm runs on, described by four independent
   properties:
-  1. the *authoring substrate*, provisioned for the cell's lifetime;
+  1. the *authoring infra*, provisioned for the cell's lifetime;
   2. *access*, whether the agent's container can reach it;
-  3. the *cap*, how many live substrates of that kind the host carries at
+  3. the *cap*, how many live infra of that kind the host carries at
      once (the arm lock);
-  4. the *verify substrate*, provisioned per arrangement by the verifier.
+  4. the *verify infra*, provisioned per arrangement by the verifier.
 - **Retired arm** — an arm that still names existing cells but is never
   scheduled again.
 
@@ -92,11 +92,11 @@ A cell yields:
    the fingerprint, the image builder, the agent CLIs, grading, the taint
    framework, and conformance of the orchestration to its formal model. It
    names no experiment.
-2. **Contrib blocks** (`fae/cell/contrib/`, `fae/cell/substrate/`) are
+2. **Contrib blocks** (`fae/cell/contrib/`, `fae/cell/infra/`) are
    mechanisms without policy that an experiment may use: a load-shape law
    for a resource scaled 0↔1 under load (judged relative to the store's own
    saturation, with closed-loop blips), Docker-in-Docker and kind-cluster
-   substrates, and the secure runner every judged program runs in.
+   infra, and the secure runner every judged program runs in.
 3. **Experiments** each live in a repository of their own beside the
    engine. An experiment's `cli.py` imports the engine from its checkout
    (`$FAE_DIR`, else `../fae`) and makes its own repository the root, so its
@@ -113,7 +113,7 @@ An experiment's `__init__.py` is loaded by path as the package
 
 1. **Arms** (`variant_classes()`): per arm its name, tech, conditions, lock
    and cap, the files the agent may author, its authoring and verify
-   substrate, preflight and liveness probes, the names of what it provisions
+   infra, preflight and liveness probes, the names of what it provisions
    (so the reaper can find leftovers), an optional image layer, and
    optionally a docs name (`DOCS`) when arms of one tech are told different
    things: the api doc is then `any.<DOCS>[.<condition>].api.md`.
@@ -155,7 +155,7 @@ one:
    down, the metrics, and the image it runs in. It reaches an arm only
    through the arm's class.
 3. **Each arm's verify hooks and contract** decide how that arm's artifacts
-   are brought up in the substrate the verifier measures, and check the
+   are brought up in the infra the verifier measures, and check the
    promises the arm's docs make. They hold no lock and give no verdict.
 
 The test of the split: changing the law touches only (2); adding an arm
@@ -196,7 +196,7 @@ by atomic renames. Conduct admits specs round-robin across model lanes under
 a global cap and a per-lane cap; stands cells down on provider walls and
 cools their lane; holds budget lanes near a weekly usage cap; repairs
 crashed or hung cells by requeuing them; validates finished cells; and reaps
-orphaned substrate by the names the arms and verifiers declare.
+orphaned infra by the names the arms and verifiers declare.
 
 Every lock is a `flock(2)` on a file held by the driver's own descriptor, so
 recovery after any crash is the kernel's. The orchestration's state machine
@@ -217,7 +217,7 @@ Grading is a separate, explicit step with a named judge model.
 ## 10. Trust and limits
 
 1. **The verifier is trusted.** It runs with the operator's uid and access
-   to the Docker daemon, so that it can provision substrate. Its container
+   to the Docker daemon, so that it can provision infra. Its container
    bounds what it leaves behind, not what it may do. Only the agent is
    sealed.
 2. **One host is one rig.** The verify lock serialises measurements across
@@ -251,7 +251,7 @@ answer as charged.**
    written for them.
 3. **Rig faults are separated from authoring failures.** A verifier that
    times out, crashes or never starts, a provider's rate or quota wall, and
-   a substrate that dies under the measurement are refunded; a verify the
+   an infra that dies under the measurement are refunded; a verify the
    host slept through is voided. AGENTS.md states each rule, and the ledger
    records each case as what it is.
 4. **The authoring surface.** Before every verify, a changed seeded file is

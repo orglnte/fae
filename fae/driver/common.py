@@ -94,10 +94,10 @@ def agent_container(cid):
     return _cellconfig.agent_container(cid)
 
 
-def substrate_containers(treatment, cid):
+def infra_containers(treatment, cid):
     """The containers a cell of this arm provisions, as its variant names them."""
     s = definition().variant(treatment)
-    return [i for k, i in (s.substrate_identities(cid) if s else []) if k == "container"]
+    return [i for k, i in (s.infra_identities(cid) if s else []) if k == "container"]
 
 
 def __getattr__(name):
@@ -107,7 +107,7 @@ def __getattr__(name):
 
 
 PAUSE_EXIT_RC = int(os.environ.get("PAUSE_EXIT", 44))
-SUBSTRATE_EXIT_RC = 45          # Cell.SUBSTRATE_EXIT: the driver halted on its substrate
+INFRA_EXIT_RC = 45          # Cell.INFRA_EXIT: the driver halted on its infra
 LOCK_EXIT_RC = 43               # Cell.LOCK_EXIT: another loop owns the workspace, benign
 GENERIC_CRASH_EXIT_RC = 47      # an uncaught driver-side exception, not otherwise classified
 # driver exit codes that mean EVERY cell would fail the same way:

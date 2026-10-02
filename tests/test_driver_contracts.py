@@ -53,7 +53,7 @@ class DriverCase(unittest.TestCase):
                                      "CONDITION=apidocs\nREPEAT=1\n")
         c = cell.Cell(self.CID, workspaces=self.wsdir, root=self.root)
         c.prepare = lambda fresh=False: c.ws
-        c.substrate_ok = lambda: True
+        c.infra_ok = lambda: True
         c.stage_agent = lambda: None
         return c
 
@@ -202,7 +202,7 @@ class TestASetupFailureIsLoud(DriverCase):
         self.assertIn("SETUP-FAILED rc=7", alert)
         self.assertNotIn("ITER", self.events(c))
 
-    def test_a_stub_still_provisions_the_substrate(self):
+    def test_a_stub_still_provisions_the_infra(self):
         c = self.cell()
         c.setup = lambda arena: (7, {})
         with self.assertRaises(cell.Halt) as cm:

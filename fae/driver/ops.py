@@ -81,7 +81,7 @@ def _spawn_detached(argv, env, cid, what="spawn"):
 
     The driver refuses a run BEFORE it writes anything for a whole class of
     reasons — a sealed cell (46), a seed-doc mismatch or the loop lock already
-    held (43), no credentials or a substrate fault (42 / 45).
+    held (43), no credentials or an infra fault (42 / 45).
     Both spawn paths sent stdout AND stderr to DEVNULL, so those messages went
     nowhere and the console printed "spawned <cid>" regardless. The worst case
     is the seed-doc FATAL: the guard that stops a cell being labelled with an
@@ -628,7 +628,7 @@ def _variant_teardown(treatment, cid, timeout=None):
     t.join(timeout)
     if t.is_alive():
         common._rec_log(f"{cid} treatment teardown still running after {timeout}s "
-                 f"— abandoned (inspect the {treatment} substrate by hand)")
+                 f"— abandoned (inspect the {treatment} infra by hand)")
 
 
 def _teardown_cell(cid, treatment=None, *, reason, grace=STOP_GRACE_S,
@@ -636,8 +636,8 @@ def _teardown_cell(cid, treatment=None, *, reason, grace=STOP_GRACE_S,
     """THE one way a cell dies by conduct's hand. Returns what it took:
     "cooperative" | "termed" | "killed" | "absent".
 
-    Cooperative first, and the substrate is gone before this returns. The arm
-    lock does not guard a process, it guards provisioned substrate — a kind
+    Cooperative first, and the infra is gone before this returns. The arm
+    lock does not guard a process, it guards provisioned infra — a kind
     cluster, a dind sidecar, a host daemon — and the kernel frees the slot
     the instant the owner dies. A kill that does not also tear down therefore
     hands the arm to a new cell while the old cluster is still running.
@@ -671,20 +671,20 @@ def _teardown_cell(cid, treatment=None, *, reason, grace=STOP_GRACE_S,
                 outcome = "termed"
             else:
                 _kill_group(pid, signal.SIGKILL)   # skips the trap: from here
-                _bringup_teardown(cid)             # the substrate is ours
+                _bringup_teardown(cid)             # the infra is ours
                 outcome = "killed"
 
     # Always, and always AFTER the loop is dead: running it under a live loop
-    # tears down substrate the loop is still using. Idempotent, so the
+    # tears down infra the loop is still using. Idempotent, so the
     # cooperative case re-runs a no-op.
     _variant_teardown(treatment, cid, timeout=TEARDOWN_TIMEOUT_S)
     subprocess.run(["docker", "rm", "-f", "-v", common.agent_container(cid),
-                    *common.substrate_containers(treatment, cid)], capture_output=True)
+                    *common.infra_containers(treatment, cid)], capture_output=True)
     return outcome
 
 
 def stop_cells(args):
-    """Halt ONE cell NOW: TERM its loop, tear down its substrate, take its
+    """Halt ONE cell NOW: TERM its loop, tear down its infra, take its
     queued specs out of the backlog (backed up). Default is RESUMABLE —
     the cell reads PAUSED·stopped and `cell resume CID` continues it.
     `--cancel` is the terminal verdict: writes `.cancelled`, the cell renders
@@ -696,7 +696,7 @@ def stop_cells(args):
 
     Order matters and is the lesson of 2026-07-24: the stop request goes in
     FIRST so reconcile cannot respawn into the gap, then the loop dies, then
-    the SUBSTRATE is torn down explicitly — a SIGKILLed loop never runs its
+    the INFRA is torn down explicitly — a SIGKILLed loop never runs its
     EXIT trap, so nothing would release the arm lock or delete the per-cell
     kind cluster / dind sidecar, and five orphan clusters once accumulated
     exactly that way.
@@ -781,7 +781,7 @@ def stop_cells(args):
         _bringup_teardown(cid)
         parsed = common.parse_cell_id(cid)
         subprocess.run(["docker", "rm", "-f", "-v", common.agent_container(cid),
-                        *common.substrate_containers(parsed[1] if parsed else "", cid)],
+                        *common.infra_containers(parsed[1] if parsed else "", cid)],
                        capture_output=True)
         st = state.cell_state(common.WS / cid, {}, set())
         if st:
@@ -793,12 +793,12 @@ def stop_cells(args):
     # was dead code once, and `resume all` resurrected killed cells — audit
     # finding 5.)
     if cancel:
-        print(f"cancelled {len(cids)} cell(s); substrate torn down, workspaces "
+        print(f"cancelled {len(cids)} cell(s); infra torn down, workspaces "
               f"untouched (un-cancel: rm workspaces.nosync/<cid>/.cancelled + "
               f"cli.py cell resume <cid>)")
     else:
         print(f"stopped {len(cids)} cell(s) — PAUSED·stopped, resumable "
-              f"(cli.py cell resume <cid>); substrate torn down, queued specs "
+              f"(cli.py cell resume <cid>); infra torn down, queued specs "
               f"backed up, workspaces untouched")
 
 

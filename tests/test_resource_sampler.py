@@ -30,7 +30,7 @@ class TestTheSamplerIsScopedToTheCell(unittest.TestCase):
             rows = rs.sample_docker(own)
         self.assertEqual(sorted(r["name"] for r in rows), sorted(own))
         tags = {r["name"]: r["tag"] for r in rows}
-        self.assertEqual(tags["exp-ka-111-control-plane"], "substrate")
+        self.assertEqual(tags["exp-ka-111-control-plane"], "infra")
         self.assertEqual(tags["fae-dind-cell-a"], "app")
 
     def test_no_scope_means_the_whole_machine(self):
@@ -42,7 +42,7 @@ class TestEveryNumberHasTwoSources(unittest.TestCase):
 
     def rows(self):
         return [{"plane": "docker", "name": "fae-dind-x", "tag": "app", "cpu_pct": 1, "mem_mb": 300.0},
-                {"plane": "docker", "name": "exp-ka-1-control-plane", "tag": "substrate",
+                {"plane": "docker", "name": "exp-ka-1-control-plane", "tag": "infra",
                  "cpu_pct": 1, "mem_mb": 2000.0},
                 {"plane": "k8s", "name": "ns-x/cache", "tag": "app", "cpu_pct": 1, "mem_mb": 50.0}]
 
@@ -77,7 +77,7 @@ class TestTheSummaryCarriesTheTrustFlags(unittest.TestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
         argv = ["resource_sampler", "--duration-s", "0.2", "--interval-s", "0.1",
                 "--csv-output", str(d / "r.csv"), "--json-output", str(d / "r.json"),
-                "--namespaces", "", "--substrate-namespaces", ""] + own
+                "--namespaces", "", "--infra-namespaces", ""] + own
         with mock.patch.object(rs, "_run", lambda cmd, timeout=8.0: STATS if cmd[:2] == ["docker", "stats"] else ""), \
              mock.patch.object(rs, "_cgroup_mem_mb", lambda name: cgroup_mb), \
              mock.patch.object(rs.time, "sleep", lambda s: None):

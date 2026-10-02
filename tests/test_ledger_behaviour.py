@@ -164,11 +164,11 @@ class TestDoneness(LedgerCase):
         self.assertEqual(p["verdict"], "failed")
 
     def test_a_halt_stays_authoritative_over_trailing_bookkeeping(self):
-        halt = ev("HALT", CID, "attempt=1", "substrate")
+        halt = ev("HALT", CID, "attempt=1", "infra")
         p = self.parse(ev("START", CID, "attempt=1"), halt,
                        ev("PAUSED", CID, "attempt=1", "operator"))
         self.assertEqual((p["last_ev"], p["last_line"]), ("HALT", halt))
-        self.assertEqual(p["halt_cause"], "substrate")
+        self.assertEqual(p["halt_cause"], "infra")
         self.assertEqual((p["att"], p["verdict"]), (0, None))
 
     def test_verify_nostart_is_a_halt_shape_that_burns_nothing(self):
@@ -181,11 +181,11 @@ class TestDoneness(LedgerCase):
 
     def test_a_start_after_a_halt_reopens_the_cell(self):
         p = self.parse(ev("START", CID, "attempt=1"),
-                       ev("HALT", CID, "attempt=1", "substrate"),
+                       ev("HALT", CID, "attempt=1", "infra"),
                        ev("START", CID, "attempt=1"))
         self.assertEqual(p["last_ev"], "START")
-        self.assertEqual(p["halt_cause"], "substrate")
-        p = self.parse(ev("HALT", CID, "attempt=1", "substrate"),
+        self.assertEqual(p["halt_cause"], "infra")
+        p = self.parse(ev("HALT", CID, "attempt=1", "infra"),
                        ev("START", CID, "attempt=1"),
                        ev("ITER", "fail", "attempt=1 stage=scaling"))
         self.assertEqual((p["last_ev"], p["verdict"]), ("ITER", None))
@@ -257,7 +257,7 @@ class TestReverifyGate(LedgerCase):
 
     def test_end_halt_and_nostart_close_the_gate(self):
         for closer in (ev("END", CID, "green=false"),
-                       ev("HALT", CID, "attempt=1", "substrate"),
+                       ev("HALT", CID, "attempt=1", "infra"),
                        ev("VERIFY_NOSTART", CID, "attempt=1", "no /health")):
             with self.subTest(closer=closer.split("\t")[1]):
                 p = self.parse(REVERIFY_START, closer)

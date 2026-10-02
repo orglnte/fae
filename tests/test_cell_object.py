@@ -372,7 +372,7 @@ class TestTheGateIsSixArrangementsByDefault(CellTestCase):
 
 
 class TestTheGateReportsItsProgress(CellTestCase):
-    """A gate in flight is ~15 minutes of substrate. Without a SHAPE event per
+    """A gate in flight is ~15 minutes of infra. Without a SHAPE event per
     arrangement the fleet's GATE column reads 0/6 for the whole of it, and a
     failed arrangement is never named in the next attempt's feedback."""
 
@@ -770,11 +770,11 @@ class TestTheIterNoteCarriesTheBashFields(CellTestCase):
 
 
 class TestAnUndeclaredLivenessProbeHaltsAtPreflight(CellTestCase):
-    """The base substrate_alive answers "dead"; a variant that never
+    """The base infra_alive answers "dead"; a variant that never
     overrides it would void every arrangement, refunded, forever. The
     preflight refuses it before an attempt is spent."""
 
-    def test_substrate_ok_is_false_and_names_the_variant(self):
+    def test_infra_ok_is_false_and_names_the_variant(self):
         from fae.cell.variants.base import Variant
 
         class Probeless(Variant):
@@ -782,8 +782,8 @@ class TestAnUndeclaredLivenessProbeHaltsAtPreflight(CellTestCase):
 
         c = self.cell()
         c._treatment = Probeless(c)
-        self.assertFalse(c.substrate_ok())
-        self.assertIn("Probeless declares no substrate_alive probe",
+        self.assertFalse(c.infra_ok())
+        self.assertIn("Probeless declares no infra_alive probe",
                       (c.ws / "hooks.log").read_text())
 
     def test_a_declared_probe_passes_the_check(self):
@@ -792,7 +792,7 @@ class TestAnUndeclaredLivenessProbeHaltsAtPreflight(CellTestCase):
         class Probed(Variant):
             ARM = "beta"
 
-            def substrate_alive(self):
+            def infra_alive(self):
                 return True
 
         self.assertTrue(liveness_declared(Probed))
@@ -803,7 +803,7 @@ class TestAnUndeclaredSurfaceHaltsAtPreflight(CellTestCase):
     """A variant that declares no AUTHORING_SURFACE has no surface to heal or check
     against; the preflight refuses the cell before an attempt is spent."""
 
-    def test_substrate_ok_is_false_and_names_the_variant(self):
+    def test_infra_ok_is_false_and_names_the_variant(self):
         from unittest import mock
         from fae.cell import experiment
         from fae.cell.variants.base import Variant
@@ -811,14 +811,14 @@ class TestAnUndeclaredSurfaceHaltsAtPreflight(CellTestCase):
         class Surfaceless(Variant):
             ARM = "beta"
 
-            def substrate_alive(self):
+            def infra_alive(self):
                 return True
 
         c = self.cell()
         c._treatment = Surfaceless(c)
         with mock.patch.object(experiment.Definition, "variant",
                                lambda self, arm: Surfaceless):
-            self.assertFalse(c.substrate_ok())
+            self.assertFalse(c.infra_ok())
         self.assertIn("HALT[definition]: Surfaceless (arm 'beta') declares no AUTHORING_SURFACE",
                       (c.ws / "hooks.log").read_text())
 

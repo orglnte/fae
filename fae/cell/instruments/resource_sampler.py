@@ -15,13 +15,13 @@ places, and counting only one plane would rig the comparison.
               this plane a variant whose pieces are processes would count as
               zero and look artificially free.
 
-Each running unit is tagged app|substrate. "component count" = app-tagged units
-(the thing under comparison); substrate (a cluster node, an autoscaler's operator,
+Each running unit is tagged app|infra. "component count" = app-tagged units
+(the thing under comparison); infra (a cluster node, an autoscaler's operator,
 metrics-server) is reported separately as platform overhead, never hidden but not
 charged to the variant's authored surface.
 
 Double-count guard: the kind node container's mem ~= the sum of the pods it hosts,
-so the kind node is tagged substrate and EXCLUDED from the app mem/cpu totals (the
+so the kind node is tagged infra and EXCLUDED from the app mem/cpu totals (the
 pods represent that memory). Report it as overhead context only.
 
 stdlib only. Every external command is best-effort: a plane that isn't present
@@ -94,7 +94,7 @@ def _cpu_to_pct(s: str) -> float:
 
 
 def sample_docker(own: set[str] | None = None) -> list[dict]:
-    """docker stats one-shot. Tag kind infra as substrate, the rest as app.
+    """docker stats one-shot. Tag kind infra as infra, the rest as app.
 
     `own` = the container names that belong to the cell being measured (its
     dind sidecar, its verify cluster's node, the harness store). docker stats
@@ -114,7 +114,7 @@ def sample_docker(own: set[str] | None = None) -> list[dict]:
         if own is not None and name not in own:
             continue
         used = mem.split("/")[0]
-        tag = "substrate" if _KIND_INFRA.search(name) else "app"
+        tag = "infra" if _KIND_INFRA.search(name) else "app"
         rows.append({
             "plane": "docker", "name": name, "tag": tag,
             "cpu_pct": _cpu_to_pct(cpu), "mem_mb": _mem_to_mb(used),
@@ -184,7 +184,7 @@ def cross_check(rows: list[dict], tolerance_pct: float,
     return not findings, findings
 
 
-def sample_k8s(namespaces: list[str], substrate_ns: set[str]) -> list[dict]:
+def sample_k8s(namespaces: list[str], infra_ns: set[str]) -> list[dict]:
     rows = []
     for ns in namespaces:
         out = _run(["kubectl", "top", "pods", "-n", ns, "--no-headers"])
@@ -193,7 +193,7 @@ def sample_k8s(namespaces: list[str], substrate_ns: set[str]) -> list[dict]:
             if len(parts) < 3:
                 continue
             name, cpu, mem = parts[0], parts[1], parts[2]
-            tag = "substrate" if ns in substrate_ns else "app"
+            tag = "infra" if ns in infra_ns else "app"
             rows.append({
                 "plane": "k8s", "name": f"{ns}/{name}", "tag": tag,
                 "cpu_pct": _cpu_to_pct(cpu), "mem_mb": _mem_to_mb(mem),
@@ -277,13 +277,13 @@ def _machine_totals(rows: list[dict]) -> dict:
     kind_nodes = [r for r in docker if _KIND_INFRA.search(r["name"])]
     non_kind_docker = [r for r in docker if not _KIND_INFRA.search(r["name"])]
     # deployed COMPONENTS = the app-tagged logical units this treatment runs
-    # (non-kind docker + app pods + host processes). Substrate pods (an
+    # (non-kind docker + app pods + host processes). Infra pods (an
     # autoscaler's operators, metrics-server) are NOT components — they are reported
-    # separately in substrate_pods so an observer can re-attribute them (for a
+    # separately in infra_pods so an observer can re-attribute them (for a
     # cluster-backed arm they are mechanism cost; for the others idle
     # platform). The kind node is the cluster host (its mem contains the
     # pods') — separate again. EVERYTHING observed lands in exactly one group:
-    #   app components | substrate pods | cluster host   -> auditable totals.
+    #   app components | infra pods | cluster host   -> auditable totals.
     components = [r for r in non_kind_docker + pods + host if r["tag"] == "app"]
     sub_pods = [r for r in pods if r["tag"] != "app"]
 
@@ -307,12 +307,12 @@ def _machine_totals(rows: list[dict]) -> dict:
             "docker_app":     {"mem_mb": d_mem, "cpu_pct": d_cpu},
             "k8s_app":        {"mem_mb": k_mem, "cpu_pct": k_cpu},
             "host_app":       {"mem_mb": h_mem, "cpu_pct": h_cpu},
-            "substrate_pods": {"mem_mb": s_mem, "cpu_pct": s_cpu},
+            "infra_pods": {"mem_mb": s_mem, "cpu_pct": s_cpu},
             "kind_node":      {"mem_mb": n_mem, "cpu_pct": n_cpu},
         },
         "component_count": len(components),
         "components_rows": components,
-        "substrate_rows": sub_pods,
+        "infra_rows": sub_pods,
         "cluster_host_rows": kind_nodes,
     }
 
@@ -326,7 +326,7 @@ def main(argv=None) -> int:
     ap.add_argument("--interval-s", type=float, default=3.0)
     ap.add_argument("--namespaces", default="",
                     help="k8s namespaces to sample (comma-separated); none = no k8s plane")
-    ap.add_argument("--substrate-namespaces", default="",
+    ap.add_argument("--infra-namespaces", default="",
                     help="namespaces counted as platform, not workload (comma-separated)")
     ap.add_argument("--pidfile", action="append", default=[],
                     help="pidfile of a process the bring-up started (repeatable)")
@@ -342,7 +342,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv[1:] if argv is not None else None)
 
     namespaces = [n for n in args.namespaces.split(",") if n]
-    substrate_ns = {n for n in args.substrate_namespaces.split(",") if n}
+    infra_ns = {n for n in args.infra_namespaces.split(",") if n}
     own = set(args.own) if args.own else None
     unreliable_samples, findings_seen = 0, []
 
@@ -365,7 +365,7 @@ def main(argv=None) -> int:
         t0 = time.monotonic()
         while time.monotonic() < deadline:
             ts = round(time.monotonic() - t0, 1)
-            rows = sample_docker(own) + sample_k8s(namespaces, substrate_ns) \
+            rows = sample_docker(own) + sample_k8s(namespaces, infra_ns) \
                 + sample_host(args.pidfile)
             if not args.no_cross_check:
                 ok, findings = cross_check(rows, args.tolerance_pct)
@@ -400,7 +400,7 @@ def main(argv=None) -> int:
                                     for k, v in r.items()}
                 peak = {
                     "ts": ts,
-                    # count == app-tagged components only; substrate pods and
+                    # count == app-tagged components only; infra pods and
                     # the kind node are reported in their own groups below.
                     "component_count": tot["component_count"],
                     "total_mem_mb": tot["total_mem_mb"],
@@ -411,7 +411,7 @@ def main(argv=None) -> int:
                     "app_cpu_pct": tot["app_cpu_pct"],
                     "by_group": tot["by_group"],
                     "components": [_round(r) for r in tot["components_rows"]],
-                    "substrate_pods": [_round(r) for r in tot["substrate_rows"]],
+                    "infra_pods": [_round(r) for r in tot["infra_rows"]],
                     "cluster_host": [_round(r) for r in tot["cluster_host_rows"]],
                 }
             time.sleep(max(0.0, args.interval_s - (time.monotonic() - t0 - ts)))

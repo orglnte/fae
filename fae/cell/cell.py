@@ -65,7 +65,7 @@ class Halt(RuntimeError):
 
     The EXIT CODE is the contract: `conduct` treats 42 as SYSTEMIC and stops
     the fleet (a broken CLI or missing credential would otherwise burn every
-    queued cell), while a per-cid code like LOCK_EXIT or SUBSTRATE_EXIT stops
+    queued cell), while a per-cid code like LOCK_EXIT or INFRA_EXIT stops
     only this cell.
     A halt that returns a verdict-shaped None instead reads to the supervisor
     as a clean end.
@@ -442,8 +442,8 @@ class Cell:
             # this host's checkpoint chain is broken, not the fleet.
             self._append("HALT", f"attempt={attempt}", f"restore-failed: {e}")
             self.apply(T.CRASH, "restore-failed")
-            raise Halt(f"HALT[substrate]: {self.cid} could not restore the "
-                       f"charged tree {base}: {e}", self.SUBSTRATE_EXIT) from e
+            raise Halt(f"HALT[infra]: {self.cid} could not restore the "
+                       f"charged tree {base}: {e}", self.INFRA_EXIT) from e
         # A checkout rewrites files; the seal is a property of the tree.
         try:
             self.surface.seal()
@@ -550,7 +550,7 @@ class Cell:
 
     def exclusive_acquire(self, name, poll=5.0):
         """The lock the verifier declares exclusive (`EXCLUSIVE` in the
-        definition: a singleton substrate concurrent holders would destroy
+        definition: a singleton infra concurrent holders would destroy
         for each other; None when every verify owns its own). Held on THIS
         process's fd around the verifier subprocess, which inherits no fd.
         Returns the open file (closing it is the release), or None past the
@@ -591,11 +591,11 @@ class Cell:
         definition = _experiment.current()
         self._archive_interrupted(out)
         self._mark_inflight(out, shape)
-        # a substrate already dead voids fast, before a deploy and a load
+        # an infra already dead voids fast, before a deploy and a load
         # are spent on a corpse
-        if not self.arm_variant.substrate_alive():
-            v = Verdict(ok=False, stage="substrate", charge=False,
-                        why="the arm's substrate was dead before the arrangement",
+        if not self.arm_variant.infra_alive():
+            v = Verdict(ok=False, stage="infra", charge=False,
+                        why="the arm's infra was dead before the arrangement",
                         arrangement=shape)
             self._persist_verdict(out, v)
             return VerifyResult.from_verdict(v, shape, out_dir)
@@ -639,10 +639,10 @@ class Cell:
                         arrangement=v.arrangement, seconds=v.seconds, files=v.files)
         measured = definition.verifier_class().MEASURED_STAGES
         if (not v.ok and v.charge and (measured is None or v.stage in measured)
-                and not self.arm_variant.substrate_alive()):
+                and not self.arm_variant.infra_alive()):
             # died under the measurement: what it measured is not the build's
-            v = Verdict(ok=False, stage="substrate", charge=False,
-                        why=f"the arm's substrate died during the arrangement (was: {v.stage})",
+            v = Verdict(ok=False, stage="infra", charge=False,
+                        why=f"the arm's infra died during the arrangement (was: {v.stage})",
                         metrics=v.metrics, arrangement=v.arrangement,
                         seconds=v.seconds, files=v.files)
         if self.expected_fp and self._fingerprint() != self.expected_fp:
@@ -834,7 +834,7 @@ class Cell:
     def gate(self, attempt=1, seed_shape=None):
         """The full shape gate. Stops at the first failure — the attempt is
         already lost, and the remaining arrangements would cost another quarter
-        of an hour of substrate to say the same thing.
+        of an hour of infra to say the same thing.
 
         Each arrangement's verdict is a SHAPE event: it is what the fleet's
         GATE column counts, so without it a gate in flight reads as 0/6 for its
@@ -899,7 +899,7 @@ class Cell:
         """
         out = self.ws / "reverify" / (stamp or f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}")
         out.mkdir(parents=True, exist_ok=True)
-        # The arm's substrate is provisioned the same way a run provisions it:
+        # The arm's infra is provisioned the same way a run provisions it:
         # the verify probes a cache that only the setup hook brings up.
         arena = self.arena().open()
         results = []
@@ -912,7 +912,7 @@ class Cell:
             rc, _ = self.setup(arena)
             if rc != 0:
                 raise RuntimeError(f"{self.treatment} cell_setup failed (rc={rc}) "
-                                   f"— cannot re-verify without its substrate")
+                                   f"— cannot re-verify without its infra")
             for s in self.gate_shapes:
                 results.append(self.verify(shape=s, out_dir=out))
                 if not results[-1].green:
@@ -1093,7 +1093,7 @@ class Cell:
         try:
             self.arm_variant.network_up()
         except RuntimeError as e:
-            self.arm_variant.log(f"HALT[substrate]: {e}")
+            self.arm_variant.log(f"HALT[infra]: {e}")
             return 1, {}
         try:
             return 0, self.arm_variant.author_setup()
@@ -1148,15 +1148,15 @@ class Cell:
                 except (OSError, IndexError):
                     pass
 
-    def substrate_ok(self):
+    def infra_ok(self):
         """An ENVIRONMENT fault must never burn an attempt, and must never be
         fed back to the agent as if its code had failed. The variant knows
-        what its substrate needs (a docker daemon, an image, nothing); the
+        what its infra needs (a docker daemon, an image, nothing); the
         image its cells are verified in is built here, before an attempt,
         never under the verify lock."""
         if not _treatments.liveness_declared(type(self.arm_variant)):
-            self.arm_variant.log(f"HALT[substrate]: {type(self.arm_variant).__name__} "
-                                 "declares no substrate_alive probe; every "
+            self.arm_variant.log(f"HALT[infra]: {type(self.arm_variant).__name__} "
+                                 "declares no infra_alive probe; every "
                                  "arrangement would be void")
             return False
         try:
@@ -1164,12 +1164,12 @@ class Cell:
         except RuntimeError as e:
             self.arm_variant.log(f"HALT[definition]: {e}")
             return False
-        if not self.arm_variant.substrate_ok():
+        if not self.arm_variant.infra_ok():
             return False
         try:
             self.arm_variant.image()
         except RuntimeError as e:
-            self.arm_variant.log(f"HALT[substrate]: verify image: {str(e).splitlines()[0]}")
+            self.arm_variant.log(f"HALT[infra]: verify image: {str(e).splitlines()[0]}")
             return False
         return True
 
@@ -1546,7 +1546,7 @@ class Cell:
 
     PAUSE_EXIT = 44
     LOCK_EXIT = 43          # another loop owns the workspace
-    SUBSTRATE_EXIT = 45     # the substrate failed under the cell; nothing to charge
+    INFRA_EXIT = 45     # the infra failed under the cell; nothing to charge
 
     def run(self, stub_overlay=None, agent_cmd=None, verify=None):
         """The attempt loop. Returns the cell's verdict, or None if it stood
@@ -1572,7 +1572,7 @@ class Cell:
         awake = hold_awake(os.getpid())
 
         # Default SIGTERM skips `finally`, so an operator stop would leave the
-        # arm's substrate running. Raising instead lets teardown happen.
+        # arm's infra running. Raising instead lets teardown happen.
         def _stop(signum, _frame):
             raise KeyboardInterrupt(f"signal {signum}")
 
@@ -1608,14 +1608,14 @@ class Cell:
                     self.apply(T.CRASH, "no-creds")
                     raise Halt(f"HALT[agent]: no creds to stage for "
                                f"{self.cid}: {e}", 42) from e
-            # a stub replaces the agent, never the substrate the gate runs on
+            # a stub replaces the agent, never the infra the gate runs on
             rc, setup_env = self.setup(arena)
             if rc != 0:
                 self._append("ALERT", f"SETUP-FAILED rc={rc}",
                              f"{self.treatment} cell_setup; investigate")
                 self.apply(T.CRASH, "setup-failed")
-                raise Halt(f"HALT[substrate]: {self.treatment} cell_setup "
-                           f"failed for {self.cid} (rc={rc})", self.SUBSTRATE_EXIT)
+                raise Halt(f"HALT[infra]: {self.treatment} cell_setup "
+                           f"failed for {self.cid} (rc={rc})", self.INFRA_EXIT)
 
             for attempt in range(prior + 1, budget + 1):
                 if (self.ws / ".paused").exists():
@@ -1623,11 +1623,11 @@ class Cell:
                     self._append("PAUSED", f"attempt={attempt}", "operator")
                     self.apply(T.STAND_DOWN, "attempt-boundary")
                     return None
-                if not self.substrate_ok():
-                    self._append("HALT", f"attempt={attempt}", "substrate")
-                    self.apply(T.CRASH, "substrate")
-                    raise Halt(f"HALT[substrate]: docker unreachable at "
-                               f"{self.cid} attempt {attempt}", self.SUBSTRATE_EXIT)
+                if not self.infra_ok():
+                    self._append("HALT", f"attempt={attempt}", "infra")
+                    self.apply(T.CRASH, "infra")
+                    raise Halt(f"HALT[infra]: docker unreachable at "
+                               f"{self.cid} attempt {attempt}", self.INFRA_EXIT)
                 self.restore_charged(attempt)
                 self._append("START", f"attempt={attempt}")
                 pre = self.checkpoint(f"pre attempt {attempt}")
@@ -1723,11 +1723,11 @@ class Cell:
                     if last is not None and not last.charge:
                         # Rig fault, not a verdict: the attempt is not consumed.
                         self._append("HALT", f"attempt={attempt}",
-                                     f"substrate: {stage}")
+                                     f"infra: {stage}")
                         self.apply(T.VERIFY_FAIL, f"attempt={attempt} void={stage}")
                         self.release_slot("void")
-                        raise Halt(f"HALT[substrate]: {self.cid} attempt "
-                                   f"{attempt} voided at stage {stage}", self.SUBSTRATE_EXIT)
+                        raise Halt(f"HALT[infra]: {self.cid} attempt "
+                                   f"{attempt} voided at stage {stage}", self.INFRA_EXIT)
 
                     # The verdict transition is the model's verify release
                     # (VerifyGreen/VerifyFail require the verify to be held

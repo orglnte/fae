@@ -46,7 +46,7 @@ class TestTheFixtureIsReady(CheckCase):
 
     def test_a_ready_run_with_docker_prints_the_next_commands(self):
         with mock.patch.object(check, "_docker", return_value=[check.Finding(True, "docker")]), \
-                mock.patch.object(check, "_substrate", return_value=[check.Finding(True, "arms")]):
+                mock.patch.object(check, "_infra", return_value=[check.Finding(True, "arms")]):
             self.assertEqual(self.run_check(check.Ctx(root=self.root)), 0)
         self.assertIn("READY. Next:", self.text())
         self.assertIn("python3 cli.py experiment smoke --full-gate", self.text())
@@ -83,9 +83,9 @@ class TestEachFailureNamesItsFix(CheckCase):
         self.assertIn("FAIL beta: not seeded, it has no authoring surface", self.text())
 
     def test_an_undeclared_liveness_probe(self):
-        with mock.patch.object(self.variant("alpha"), "substrate_alive", Variant.substrate_alive):
+        with mock.patch.object(self.variant("alpha"), "infra_alive", Variant.infra_alive):
             self.assertEqual(self.run_check(), 1)
-        self.assertIn("substrate_alive probe", self.text())
+        self.assertIn("infra_alive probe", self.text())
 
     def test_a_missing_api_doc_is_found_by_seeding(self):
         cls = self.variant("alpha")
@@ -182,7 +182,7 @@ class TestTheCli(unittest.TestCase):
     def test_experiment_check_is_registered_and_rig_keeps_only_the_harness_verbs(self):
         src = (Path(ROOT) / "fae" / "cli.py").read_text()
         self.assertIn('@experiment_app.command("check")', src)
-        for verb in ("init", "check", "substrate", "smoke", "prepare", "verb"):
+        for verb in ("init", "check", "infra", "smoke", "prepare", "verb"):
             self.assertIn(f'@experiment_app.command("{verb}"', src)
             self.assertNotIn(f'@rig_app.command("{verb}"', src)
 

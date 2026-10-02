@@ -67,7 +67,7 @@ loads `<EXPERIMENT_DIR>/__init__.py` BY PATH as the package `experiment`
 (one process, one experiment — a second definition is refused; tests call
 `unload()`), and every reader goes through the `Definition` it returns: the
 variant registry (`variant_classes()`, a function, because importing the
-variants pulls the substrate in and the config reads the definition first),
+variants pulls the infra in and the config reads the definition first),
 `MATRIX`, `SEED_DOCS`, `GATE`, `CONFIG`, `fingerprint_trees`,
 `verifier_class()`, `verbs()`, `taint_rules`, `reference_workspace`,
 `POOLED_MODELS`, `report_summary`, and the agent image's layer.
@@ -77,7 +77,7 @@ any experiment.
 
 **What the agent wrote never executes on the host, and neither does the
 verifier.** The verifier builds and runs the artifacts inside the variant's
-substrate (a container, a dind sidecar, a kind cluster), so a judged program
+infra (a container, a dind sidecar, a kind cluster), so a judged program
 cannot touch the rig; and the verifier itself runs in a container of an image
 the experiment declares (`Verifier.IMAGE_DIR`, a Dockerfile directory with
 every version pinned; a Variant may layer its own `IMAGE_DIR` on it), built
@@ -89,7 +89,7 @@ an image is `stage=verifier-image`, a void.
 Reusable verifier blocks are contrib — engine-owned mechanisms with no
 policy: `fae/cell/contrib/elastic_resource/` (the load-shape law for a
 resource scaled 0↔1: `load_shape`, `trace`, `k6`, `law`; §7) and the
-substrate blocks under `fae/cell/substrate/` (`dind`, `kind`, `secrunner`).
+infra blocks under `fae/cell/infra/` (`dind`, `kind`, `secrunner`).
 An experiment composes them with its own parameters. What a rig fault looks
 like in an experiment's evidence is its `taint_rules`, run by
 `fae/driver/validate.py` beside the engine's own rules.
@@ -203,7 +203,7 @@ supervision.** `ARM_HELD_ALERT_S` alerts and then stands the cell down; age
 alone never acts — overaged AND heartbeat-stalled does. Conduct is the only
 actor that ends a cell, and `_teardown_cell` the only way it does so,
 because a kill that does not also tear down frees the arm slot while the
-substrate it capped still runs. A kill signals the driver's whole session,
+infra it capped still runs. A kill signals the driver's whole session,
 not its pid. After the kill the arm's `verify_teardown` runs for the cell's
 last arrangement in a fresh container of the variant's image
 (`fae/cell/verify.py: run_teardown`): what the verify provisioned outside
@@ -219,9 +219,9 @@ the probe proves exclusion across a real second process. Probe by hand:
 |---|---|---|---|
 | loop lock | per cell | cell lifetime | two loops on one workspace corrupt its logs |
 | **verify lock** | **global, per machine** | one verify | the shared measurement surface: one load test at a time, fleet-wide |
-| **arm lock** | per variant `LOCK`, N-ary; declared by variants whose agents hold a live substrate | **cell lifetime, setup→teardown** | host contention: another live substrate distorts load-test timing |
+| **arm lock** | per variant `LOCK`, N-ary; declared by variants whose agents hold a live infra | **cell lifetime, setup→teardown** | host contention: another live infra distorts load-test timing |
 | work slot | global semaphore, `WORK_SLOTS` | cell lifetime | total concurrent cells |
-| exclusive lock | global, the name a verifier declares in `EXCLUSIVE` (none: no lock) | one arrangement, on the cell's own fd around the verifier | whatever singleton substrate a verifier declares |
+| exclusive lock | global, the name a verifier declares in `EXCLUSIVE` (none: no lock) | one arrangement, on the cell's own fd around the verifier | whatever singleton infra a verifier declares |
 
 **Lock ordering is slot ≺ arm**, globally consistent, so deadlock-free; it
 also keeps the scarce arm held only while the cell works. Release is the
@@ -261,18 +261,18 @@ writes an `ALERT SETUP-FAILED` ledger line.
   verifier child that inherits no fd (`_VERIFY_HOLDER_ARGV`,
   `fae/driver/zombies.py`); a predicate that knows only the loops reads a
   live verify as a leak. The verify container `fae-verify-<cid>` and the
-  cell network `fae-net-<cid>` are the engine's substrate
+  cell network `fae-net-<cid>` are the engine's infra
   (`fae/cell/image.py` names them; `Variant.network_up` creates the network
   first); what a verifier provisions for a cell is declared on the verifier
-  (`SUBSTRATE_PREFIXES`, `substrate_identities`). All are reaped like a
-  variant's substrate, a network only past the long grace.
+  (`INFRA_PREFIXES`, `infra_identities`). All are reaped like a
+  variant's infra, a network only past the long grace.
 - **Walls and stand-downs.** A cell waiting on a provider limit is stood
   down (pause `limit-wall`, by=conduct), requeued at the front, and its lane
   cools (`.orch/cooldown.<model>`: the provider's reset hint, or 3 h);
   expiry lifts the wall and retries. The other stand-downs conduct writes
   (arm-stuck, phase-stalled-*, verify-wedged, silent-hang) are lifted after
   `STANDDOWN_COOL_S`, each lift spending one `MAX_RESPAWNS` repair, flagged
-  when spent. **A repair, substrate void or contract hit on a scored cell is
+  when spent. **A repair, infra void or contract hit on a scored cell is
   investigated at its first occurrence** — `MAX_RESPAWNS` bounds a loop, it
   is not an investigation budget. The wall wording, the reset hint and the
   driver's retry decision come from `fae/cell/faults.py` alone. Every
@@ -297,7 +297,7 @@ writes an `ALERT SETUP-FAILED` ledger line.
 - **A spawn's exit code decides whether a crash spends repair budget.**
   `LOCK_EXIT` (43: another loop owns the workspace) is never charged; the
   claim stands for the next pass. Anything else conduct does not recognise
-  is `GENERIC_CRASH_EXIT` (47) and is charged, like a substrate HALT. The
+  is `GENERIC_CRASH_EXIT` (47) and is charged, like an infra HALT. The
   loop-lock refusal raises `Halt(msg, LOCK_EXIT)` explicitly, so a
   deterministic host fault never shares the benign race's number and
   respawns forever uncounted.
@@ -329,7 +329,7 @@ writes an `ALERT SETUP-FAILED` ledger line.
   `verify-lock`, `verify`. A phase for a step nothing waits on buys nothing
   and costs a state everything downstream must interpret.
 
-## 4. Variants and substrate
+## 4. Variants and infra
 
 The interface is `fae/cell/variants/base.py` (`Variant`); the classes are
 the experiment's, registered by arm on first use (§0). Each declares `ARM`,
@@ -349,20 +349,20 @@ checked against. It answers:
 
 | Call | Called by | Purpose |
 |---|---|---|
-| `substrate_ok()` | `Cell.substrate_ok()` before every attempt; `cli.py experiment substrate` | preflight, including whatever daemon the variant needs (the engine probes nothing itself); HALT, no attempt burned, if the environment is wrong |
-| `substrate_alive()` | `Cell.verify` before every arrangement and after a charged fail | the substrate answers RIGHT NOW (a hard connect failure is "no", a slow daemon is alive). Dead before → the arrangement is void without a deploy; dead after a charged fail at one of the verifier's `MEASURED_STAGES` (None: any) → the same void, stage `substrate`, refunded. The base answer is False, and a variant that never overrides it is refused at preflight (`liveness_declared`): with the base answer every arrangement would be void forever |
-| `sweep()` | `cli.py experiment substrate` | remove stale substrate left by dead cells |
+| `infra_ok()` | `Cell.infra_ok()` before every attempt; `cli.py experiment infra` | preflight, including whatever daemon the variant needs (the engine probes nothing itself); HALT, no attempt burned, if the environment is wrong |
+| `infra_alive()` | `Cell.verify` before every arrangement and after a charged fail | the infra answers RIGHT NOW (a hard connect failure is "no", a slow daemon is alive). Dead before → the arrangement is void without a deploy; dead after a charged fail at one of the verifier's `MEASURED_STAGES` (None: any) → the same void, stage `infra`, refunded. The base answer is False, and a variant that never overrides it is refused at preflight (`liveness_declared`): with the base answer every arrangement would be void forever |
+| `sweep()` | `cli.py experiment infra` | remove stale infra left by dead cells |
 | `author_setup()` | `Cell.run` / `Cell.reverify` / an experiment command (`cli.py experiment verb`), from the driver on the host | what the agent needs while it authors, kept for every attempt, on the cell network; returns the agent's docker args |
 | `author_teardown()` | the same, on their unconditional path; `cell stop`, the kill fallback, the reaper | tear it down, idempotently |
-| `verify_setup(ctx, env)` | the experiment's Verifier, inside the verify container over the daemon's socket | what one arrangement of the judged artifacts runs on, fresh every time; raise on a rig fault (refunded), raise a rejection once the substrate is up and the artifacts fail on it (charged); return what later stages need |
+| `verify_setup(ctx, env)` | the experiment's Verifier, inside the verify container over the daemon's socket | what one arrangement of the judged artifacts runs on, fresh every time; raise on a rig fault (refunded), raise a rejection once the infra is up and the artifacts fail on it (charged); return what later stages need |
 | `verify_teardown(ctx, env)` | the same, whether `verify_setup` finished or not; `run_teardown` after a kill | the world reset after the arrangement, derivable from the ctx alone |
 | `tool(argv, env, network)` | the variant's own `author_*` pair | a tool the host does not carry, run in a throwaway container of the variant's image over the daemon's socket |
 | `IMAGE_DIR`, `image_context(conf)` | `fae/cell/image.py` | the variant's layer over the verifier's image (`FROM $BASE`), versions pinned; none = the verifier's image as is |
-| `substrate_identities(cid)` | `fae/driver/zombies.py` | the names of what a cell of this arm provisions, from the one formula the provisioner uses |
-| `SUBSTRATE_PREFIXES`, `stray(live, workspaces)` | `fae/driver/zombies.py` | what a reaper may DISCOVER: name prefixes to scan by, and any substrate no name carries |
+| `infra_identities(cid)` | `fae/driver/zombies.py` | the names of what a cell of this arm provisions, from the one formula the provisioner uses |
+| `INFRA_PREFIXES`, `stray(live, workspaces)` | `fae/driver/zombies.py` | what a reaper may DISCOVER: name prefixes to scan by, and any infra no name carries |
 
-Who provisions what is a matter of PHASE: the authoring substrate is the
-Variant's `author_*` pair (the driver, on the host), the verify substrate
+Who provisions what is a matter of PHASE: the authoring infra is the
+Variant's `author_*` pair (the driver, on the host), the verify infra
 its `verify_*` pair (the Verifier, in the container), the instruments of the
 measurement the Verifier's own. Everything a cell provisions sits on the
 cell's network `fae-net-<cid>` and is addressed by NAME inside it; nothing
@@ -427,7 +427,7 @@ alert, and warns on one judged again once the rig was mended.
 
 **The judged program never runs in the verify container.** A verifier runs
 it in the cell's secure runner, `fae-secrun-<cid>`
-(`fae/cell/substrate/secrunner.py`), from the verify image
+(`fae/cell/infra/secrunner.py`), from the verify image
 (`FAE_VERIFY_IMAGE`) or the variant's runtime image: a fresh copy of the
 artifacts at `/workspace` and, when the program keeps state, a scratch dir
 at `/scratch` are its only mounts; no Docker socket; the operator's uid
@@ -527,13 +527,13 @@ every prior agent's memory — cross-run leakage invisible in the results.
   whose top is below the knee ends in `FAIL[load-shape]`, refunded. Two hosts
   tuned differently are the same experiment only if both pass all five. The
   experiment's AGENTS.md carries its numbers.
-- **A substrate that dies under the measurement is a void, not a verdict.**
+- **An infra that dies under the measurement is a void, not a verdict.**
   A verify that reached `VERIFY_READY` and collapsed minutes later reads
-  exactly like a build failure, so `Cell.verify` asks `substrate_alive()`
+  exactly like a build failure, so `Cell.verify` asks `infra_alive()`
   before every arrangement and after a charged fail (§4).
 - **`TRACE_MIN_VERIFY_S` (45 s).** A fail returned faster than this without
-  reaching `VERIFY_READY` is a substrate HALT, no attempt burned — except
-  `stage_failed=deploy` (the substrate came up and the agent's artifacts
+  reaching `VERIFY_READY` is an infra HALT, no attempt burned — except
+  `stage_failed=deploy` (the infra came up and the agent's artifacts
   failed on it), a legitimate authoring failure that can finish in seconds.
   Anything else a bring-up raises is `nostart`, refunded. Transient API
   faults (`fae/cell/faults.py`, the one vocabulary the driver and conduct
@@ -613,7 +613,7 @@ every prior agent's memory — cross-run leakage invisible in the results.
   in `cell.env`; no flag, spec field or environment override. A per-cell
   budget makes two cells incomparable and gives sealing an exception.
 - **`stop` is resumable; `--cancel` is the verdict, and a cancel is durable
-  before it is thorough.** A plain `cell stop` halts now (SIGKILL, substrate
+  before it is thorough.** A plain `cell stop` halts now (SIGKILL, infra
   teardown, queued specs backed up) and stays `PAUSED·stopped`. `cell stop
   --cancel` writes `.cancelled` FIRST, before the kill and the teardown, so
   an interruption in between cannot leave a cell that looks killed and is
@@ -657,7 +657,7 @@ Update the relevant section **in the same commit** as the change:
 | the cell id, the workspace roots | 1 |
 | how a verdict is derived or gated | 2, 7 |
 | a lock, its scope, or its hold duration | 3 |
-| the Variant interface, substrate or its phases | 4 |
+| the Variant interface, infra or its phases | 4 |
 | how the verifier runs, what refunds | 5 |
 | what the agent container mounts or can reach | 6 |
 | anything about deleting or restarting cells | 8 |

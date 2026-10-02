@@ -2,7 +2,7 @@
 
 selftest (cross-language invariants + TLA+ live-trace conformance), the
 zombie-reap CLI wrapper, trace-reset (transitions.log archive/reseed),
-substrate (per-arm preflight), smoke (pipeline check through the driver,
+infra (per-arm preflight), smoke (pipeline check through the driver,
 no agent) and prepare (seed the matrix's workspaces, launch nothing) — the
 verbs the plan's Milestone 2 clusters left in runs.py because none of them
 are entangled with the scheduler/backlog/scoring clusters; each is a
@@ -408,11 +408,11 @@ def _authorable_error(arm):
     return ""
 
 
-def substrate(args):
-    """Can this host carry each arm? Every arm's substrate preflight
-    (<Variant>.substrate_ok — the check a cell makes before every attempt)
+def infra(args):
+    """Can this host carry each arm? Every arm's infra preflight
+    (<Variant>.infra_ok — the check a cell makes before every attempt)
     and its verify image (built when missing), then a sweep of stale
-    substrate. Nothing per cell is created here. Exit 1 if any arm is
+    infra. Nothing per cell is created here. Exit 1 if any arm is
     refused."""
     bad = _probe_arms()
     sys.path.insert(0, str(ROOT))
@@ -420,26 +420,26 @@ def substrate(args):
     for cls in _tr.registry().values():
         cls.sweep()
     if bad:
-        sys.exit(f"substrate: {bad} arm(s) refused — see hooks.log lines above")
+        sys.exit(f"infra: {bad} arm(s) refused — see hooks.log lines above")
 
 
 def _probe_arms(arms=None):
-    """Every arm's own preflight (its substrate_ok: the daemon, the tools)
+    """Every arm's own preflight (its infra_ok: the daemon, the tools)
     and the image its cells are verified in, built here when missing —
     printed one per line; the count refused."""
     sys.path.insert(0, str(ROOT))
     from fae.cell import variants as _tr
     bad = 0
     for arm in sorted(arms or _tr.registry()):
-        cell = _tr._ShimCell(f"substrate-probe-{arm}", "/nonexistent", ROOT)
+        cell = _tr._ShimCell(f"infra-probe-{arm}", "/nonexistent", ROOT)
         cell.treatment = arm
         variant = _tr.for_cell(cell)
         ok, note = True, ""
         if not _tr.liveness_declared(type(variant)):
-            ok, note = False, f"{type(variant).__name__} declares no substrate_alive probe"
+            ok, note = False, f"{type(variant).__name__} declares no infra_alive probe"
         elif (undeclared := _authorable_error(arm)):
             ok, note = False, undeclared
-        elif not variant.substrate_ok():
+        elif not variant.infra_ok():
             ok = False
         if ok:
             try:
@@ -482,7 +482,7 @@ def _smoke_classify(ws):
                        f"scale ({m.get('scaling_why') or ''}). See {ws}/verify.log")
     stage = m.get("stage_failed") or ""
     where = {"deploy": f"DEPLOY FAILED — deploy.sh non-zero. See {ws}/deploy.log",
-             "nostart": f"NEVER STARTED — substrate/readiness. See {ws}/deploy.log",
+             "nostart": f"NEVER STARTED — infra/readiness. See {ws}/deploy.log",
              "e2e": f"E2E FAILED ({e2e}). See {ws}/verify.log",
              "k6": f"K6 STAGE ISSUE. See {ws}/k6.log"}
     return False, where.get(stage, f"NOT GREEN (stage={stage or '?'}). See {ws}/verify.log")
@@ -518,7 +518,7 @@ def smoke(args):
     print("=== SMOKE MODE: model=ref — pipeline check, NOT a scored run "
           f"(cells tagged ref_high_smoke_*, in {SMOKE_WORKSPACES.name}) ===")
     # each arm's own preflight, so a missing daemon, tool or image is named
-    # before any substrate is spent
+    # before any infra is spent
     if _probe_arms(arms):
         sys.exit("SMOKE ABORTED: an arm refused this host — see hooks.log lines above")
     env = dict(os.environ, WORKSPACES_DIR=str(SMOKE_WORKSPACES), MODEL="ref",

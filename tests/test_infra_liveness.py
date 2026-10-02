@@ -1,6 +1,6 @@
-"""A substrate that dies under a measurement is a rig fault, not a verdict:
-the cell probes the arm's substrate before every arrangement and again after
-a charged fail, and voids the arrangement (stage "substrate", refunded)
+"""An infra that dies under a measurement is a rig fault, not a verdict:
+the cell probes the arm's infra before every arrangement and again after
+a charged fail, and voids the arrangement (stage "infra", refunded)
 instead of sealing what a corpse measured."""
 import subprocess
 import unittest
@@ -44,11 +44,11 @@ class TestTheDefaultIsNotAlive(unittest.TestCase):
         class Bare(base.Variant):
             ARM = "bare"
         self.assertFalse(Bare(mock.Mock(cid="c", ws="/nonexistent", root=ROOT, conf=None,
-                                        condition="apidocs")).substrate_alive())
+                                        condition="apidocs")).infra_alive())
 
     def test_the_fixture_seam_is_alive(self):
         self.assertTrue(base.NoopVariant(mock.Mock(cid="c", ws="/nonexistent", root=ROOT,
-                                                     conf=None, condition="apidocs")).substrate_alive())
+                                                     conf=None, condition="apidocs")).infra_alive())
 
 
 class TestTheTwoGates(unittest.TestCase):
@@ -64,7 +64,7 @@ class TestTheTwoGates(unittest.TestCase):
         (d / "ws" / "c" / "artifacts").mkdir(parents=True)
         self.c = cell.Cell("c", workspaces=d / "ws", root=ROOT)
         self.alive = [True]
-        self.c._treatment = mock.Mock(substrate_alive=lambda: self.alive[0])
+        self.c._treatment = mock.Mock(infra_alive=lambda: self.alive[0])
 
     def verify_with(self, verdict, alive_after, measured=None):
         calls = []
@@ -87,14 +87,14 @@ class TestTheTwoGates(unittest.TestCase):
         self.alive[0] = False
         r, calls = self.verify_with(Verdict(ok=True), alive_after=False)
         self.assertEqual(calls, [])
-        self.assertEqual((r.green, r.stage_failed, r.charge), (False, "substrate", False))
+        self.assertEqual((r.green, r.stage_failed, r.charge), (False, "infra", False))
 
-    def test_a_charged_fail_with_the_substrate_dead_after_is_a_void(self):
+    def test_a_charged_fail_with_the_infra_dead_after_is_a_void(self):
         r, calls = self.verify_with(Verdict(ok=False, stage="scaling", charge=True), alive_after=False)
         self.assertEqual(len(calls), 1)
-        self.assertEqual((r.stage_failed, r.charge), ("substrate", False))
+        self.assertEqual((r.stage_failed, r.charge), ("infra", False))
 
-    def test_a_charged_fail_with_the_substrate_alive_stands(self):
+    def test_a_charged_fail_with_the_infra_alive_stands(self):
         r, _ = self.verify_with(Verdict(ok=False, stage="scaling", charge=True), alive_after=True)
         self.assertEqual((r.stage_failed, r.charge), ("scaling", True))
 
@@ -104,7 +104,7 @@ class TestTheTwoGates(unittest.TestCase):
         self.assertEqual((r.stage_failed, r.charge), ("deploy", True))
         r, _ = self.verify_with(Verdict(ok=False, stage="e2e", charge=True),
                                 alive_after=False, measured={"e2e", "scaling"})
-        self.assertEqual((r.stage_failed, r.charge), ("substrate", False))
+        self.assertEqual((r.stage_failed, r.charge), ("infra", False))
 
     def test_a_green_is_never_second_guessed(self):
         r, _ = self.verify_with(Verdict(ok=True), alive_after=False)

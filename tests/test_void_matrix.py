@@ -58,7 +58,7 @@ class VoidMatrixCase(unittest.TestCase):
                                      "CONDITION=apidocs\nREPEAT=1\n")
         c = cell.Cell(self.CID, workspaces=self.wsdir, root=self.root)
         c.prepare = lambda fresh=False: c.ws
-        c.substrate_ok = lambda: True        # no docker probe in a unit run
+        c.infra_ok = lambda: True        # no docker probe in a unit run
         return c
 
     def transitions(self):

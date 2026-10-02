@@ -102,7 +102,7 @@ Three things map onto three interfaces:
 | Directory | Interface | Answers |
 |---|---|---|
 | `__init__.py` | `Definition` | which variants, which docs, which gate, which verifier |
-| `variants/<tech>/` | `Variant` | what the agent authors, what it is handed, what substrate a cell needs |
+| `variants/<tech>/` | `Variant` | what the agent authors, what it is handed, what infra a cell needs |
 | `verifier/` | `Verifier` | how one attempt is judged, in what environment |
 
 Create the skeleton:
@@ -205,7 +205,7 @@ VARIANTS = (Python,)
 
 ```python
 """A Python program, run by the image's interpreter."""
-from fae.cell.substrate.secrunner import SecRunnerVariant
+from fae.cell.infra.secrunner import SecRunnerVariant
 
 
 class Python(SecRunnerVariant):
@@ -222,12 +222,12 @@ class Python(SecRunnerVariant):
 `SecRunnerVariant` is the variant of a program that needs nothing but a
 runtime image. It supplies what every variant owes the engine:
 
-- `substrate_ok()`, asked before every attempt: the docker daemon answers
+- `infra_ok()`, asked before every attempt: the docker daemon answers
   and the image is present (`docker pull` it, or give `RUNTIME_DIR`, a
   directory with a Dockerfile the engine builds and tags by content, in
   place of `IMAGE`). False halts the cell before an attempt is spent; the
   agent never sees a rig fault as its own failure.
-- `substrate_alive()`, asked before every arrangement and after a charged
+- `infra_alive()`, asked before every arrangement and after a charged
   fail: a daemon that died under the measurement voids the arrangement
   instead of scoring the agent. A variant of your own that does not
   override it is refused at preflight.
@@ -240,8 +240,8 @@ runtime image. It supplies what every variant owes the engine:
 a cluster, a docker-in-docker sidecar) and `verify_setup`/`verify_teardown`
 (what one arrangement runs on, brought up fresh) are no-ops by default; a
 program that runs in one container needs neither. An experiment whose
-program needs a substrate of its own subclasses `Variant` and writes them,
-with its own `substrate_ok` and `substrate_alive`.
+program needs an infra of its own subclasses `Variant` and writes them,
+with its own `infra_ok` and `infra_alive`.
 
 Now the seed: what the agent is handed on top of the skeleton.
 
@@ -344,7 +344,7 @@ The engine tags the image by the content of this directory
 it otherwise. Change a pin, get a new image.
 
 `shout/verifier/__init__.py`. The variant's `run` does the container work
-(the engine's `substrate/secrunner`: a container of the image over a
+(the engine's `infra/secrunner`: a container of the image over a
 directory, no network, memory, pid and CPU ceilings, removed when the
 program ends or times out); `secrunner.fresh_copy` is the verifier's own
 copy of the artifacts, so nothing writes into the judged tree.
@@ -356,7 +356,7 @@ import time
 from pathlib import Path
 
 from fae.cell import experiment as _experiment
-from fae.cell.substrate import secrunner
+from fae.cell.infra import secrunner
 from fae.cell.verify import Verdict, Verifier
 
 CASES = (
@@ -461,7 +461,7 @@ check goes in the order of this howto: the host, the config and the
 definition, each variant (its authoring surface, its liveness probe, its
 seed tree), every cell of the matrix seeded into a throwaway workspace
 root by the same `prepare()` a real cell runs, the docker daemon, and each
-variant's `substrate_ok()` with the verifier image built, so the first
+variant's `infra_ok()` with the verifier image built, so the first
 cell does not pay for the build under a lock. `--walk` explains each step
 before running it and, on a failure, names the fix and waits for you to
 retry. Without `--walk` it prints a checklist and exits 1 on any failure;
@@ -490,7 +490,7 @@ The exit code is the first thing to read:
 | Exit | Meaning |
 |---|---|
 | 0 | the cell ended with a verdict, green or failed |
-| 45 | `HALT[substrate]`: the host could not carry the cell; nothing charged |
+| 45 | `HALT[infra]`: the host could not carry the cell; nothing charged |
 | 46 | the workspace is already sealed; a finished cell is read-only |
 
 Then the workspace, `/tmp/shout-ws/stub_high_python_apidocs_T1_r1/`:
@@ -502,7 +502,7 @@ metrics.json          the last verify's numbers (your Verdict.metrics)
 verify.log            your verifier's log
 verifier.log          the engine's log of running your verifier
 arrangements/01-a1-seed-green/  every verify run: its logs and verdict.json
-hooks.log             what the variant logged (substrate checks)
+hooks.log             what the variant logged (infra checks)
 .sealed               written on green or on a spent budget; the cell is done
 ```
 
@@ -630,7 +630,7 @@ and a cell ends in one of:
 | `ITER green` + `.sealed verdict=green` | the agent solved it; attempts-to-green is the attempt number |
 | `.sealed` after 10 attempts, no green | budget spent; a failure, comparable across cells |
 | `HALT` | the rig could not carry the cell; nothing charged; the operator investigates |
-| `ALERT` | something the operator must read (a substrate fault, a stand-down) |
+| `ALERT` | something the operator must read (an infra fault, a stand-down) |
 
 `metrics.json` holds only the last verify's numbers and never decides
 doneness. `results score` reads the ledger, validates each cell against the
@@ -646,12 +646,12 @@ turns a directory of scored cells into the results table.
   first arrangement with the attempt number so an agent never sees the
   same first timeline twice; `feedback_note` is the sentence the retry
   prompt carries when one fails.
-- **A substrate per verify.** Override `verify_setup(ctx)` /
+- **An infra per verify.** Override `verify_setup(ctx)` /
   `verify_teardown(ctx)` on the variant when one arrangement needs a world
   brought up fresh (a cluster, a daemon, a stack). Your verifier calls them
   at its own point in the arrangement, inside the verify container, over
   the daemon's socket.
-- **A substrate per cell.** Override `author_setup()` /
+- **An infra per cell.** Override `author_setup()` /
   `author_teardown()` when the agent needs something while it authors (a
   sandbox cluster, its own docker daemon). `author_setup` returns the extra
   docker arguments for the agent's container; the driver calls both, and
@@ -696,11 +696,11 @@ all of the below, without docker.
 | `AUTHORING_SURFACE` | `(files, dir prefixes)` the agent may write; required, a cell of a variant without it is refused |
 | `LOCK`, `LOCK_SLOTS` | an exclusive lock held for the cell's life |
 | `IMAGE_DIR`, `image_context(conf)` | the variant's layer over the verifier's image |
-| `SUBSTRATE_PREFIXES`, `substrate_identities(cid)`, `stray()`, `sweep()` | what a reaper may find and remove |
-| `substrate_ok()` | preflight; False halts before an attempt |
-| `substrate_alive()` | liveness before/after each arrangement; **must be declared**, or the cell halts at preflight |
-| `author_setup()` / `author_teardown()` | the authoring substrate, driver-run |
-| `verify_setup(ctx)` / `verify_teardown(ctx)` | the per-arrangement substrate, verifier-run |
+| `INFRA_PREFIXES`, `infra_identities(cid)`, `stray()`, `sweep()` | what a reaper may find and remove |
+| `infra_ok()` | preflight; False halts before an attempt |
+| `infra_alive()` | liveness before/after each arrangement; **must be declared**, or the cell halts at preflight |
+| `author_setup()` / `author_teardown()` | the authoring infra, driver-run |
+| `verify_setup(ctx)` / `verify_teardown(ctx)` | the per-arrangement infra, verifier-run |
 | `seed_root()`, `verify_root()` | `seed/` and `verify/` beside the module unless `SEED`/`VERIFY` say otherwise |
 
 **Verifier** (`fae/cell/verify.py`):
@@ -711,8 +711,8 @@ all of the below, without docker.
 | `verify(ctx) -> Verdict` | the whole judgment |
 | `FILES` | archived per arrangement when the Verdict names none |
 | `EXCLUSIVE` | a lock the engine holds around every run |
-| `SUBSTRATE_PREFIXES`, `substrate_identities(cid)` | what a verify provisions, for the reaper |
-| `MEASURED_STAGES` | charged fails at these stages are voided when the substrate is found dead afterwards |
+| `INFRA_PREFIXES`, `infra_identities(cid)` | what a verify provisions, for the reaper |
+| `MEASURED_STAGES` | charged fails at these stages are voided when the infra is found dead afterwards |
 
 **Ctx** fields: `root`, `experiment_dir`, `workspace`, `artifacts`, `out`,
 `cid`, `task`, `variant`, `arrangement`, `expected_fp`, `mode`
@@ -726,6 +726,6 @@ one place (`fae/driver/common.py`).
 ### Status notes for reviewers
 
 This document describes the interface as it stands. For a variant whose
-substrate is more than one container, the engine's substrate blocks
-(`fae/cell/substrate/`: `dind`, `kind`, `secrunner`) are what its
+infra is more than one container, the engine's infra blocks
+(`fae/cell/infra/`: `dind`, `kind`, `secrunner`) are what its
 `verify_setup`/`verify_teardown` pair composes.

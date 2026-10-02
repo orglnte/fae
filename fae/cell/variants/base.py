@@ -16,7 +16,7 @@ ROOT = _paths.ROOT
 
 
 class HookFailure(RuntimeError):
-    """Provisioning could not give the cell its substrate. A rig fault: the
+    """Provisioning could not give the cell its infra. A rig fault: the
     driver halts the cell for review without spending an attempt."""
 
 
@@ -81,7 +81,7 @@ class Variant:
     """The interface every arm answers. `cell` is the Cell (cid, ws, root,
     conf, condition); the class reads config through cell.conf.
 
-    A variant's substrate is where the agent's program runs — for the
+    A variant's infra is where the agent's program runs — for the
     verifier as much as for the agent: a judged program executes only
     inside it (a container of the variant's image, a dind daemon, a kind
     cluster), never on the host (fae/cell/verify.py)."""
@@ -92,7 +92,7 @@ class Variant:
     # when arms of one tech are told different things; empty = TECH.
     DOCS = ""
     # The name a reader sees for the arm's family (status, reports); empty =
-    # TECH. Arms that share a TECH (substrate, image, lock) are told apart by it.
+    # TECH. Arms that share a TECH (infra, image, lock) are told apart by it.
     LABEL = ""
     # The variant's own trees, beside its module unless declared: seed/ (what
     # the agent is handed — overlay/, its docs, reference/overlay/) and
@@ -107,9 +107,9 @@ class Variant:
     # The doc variants this arm is run under (the matrix, when the
     # definition declares no MATRIX of its own).
     CONDITIONS = ()
-    # {kind: name prefix} — the substrate a reaper may discover by scanning
+    # {kind: name prefix} — the infra a reaper may discover by scanning
     # (containers, clusters) for a cell that left no live loop.
-    SUBSTRATE_PREFIXES = {}
+    INFRA_PREFIXES = {}
     # The directory holding this variant's Dockerfile: the tools its cells
     # are verified with, layered FROM the verifier's image; None = the
     # verifier's image as it is.
@@ -183,7 +183,7 @@ class Variant:
         one of the same image when the verify was killed, so everything it
         needs is derivable from `ctx` alone."""
 
-    def substrate_ok(self):
+    def infra_ok(self):
         """The host can carry this arm at all. False halts the cell without
         spending an attempt."""
         return True
@@ -205,9 +205,9 @@ class Variant:
         """The verify side: the contract, and whatever verify_setup reads."""
         return Path(cls.VERIFY) if cls.VERIFY else cls._own_dir() / "verify"
 
-    def substrate_alive(self):
-        """The arm's provisioning substrate answers RIGHT NOW: asked before
-        every arrangement and again after a charged fail, so a substrate
+    def infra_alive(self):
+        """The arm's provisioning infra answers RIGHT NOW: asked before
+        every arrangement and again after a charged fail, so an infra
         that died under the measurement voids the arrangement instead of
         scoring as a build verdict. Every variant declares its own: the
         preflight (`liveness_declared`) halts a cell of one that does not,
@@ -216,21 +216,21 @@ class Variant:
 
     @classmethod
     def stray(cls, live, workspaces):
-        """Substrate of this arm that only a scan can find (no name carries
+        """Infra of this arm that only a scan can find (no name carries
         the cid): [(kind, ident, owner cid)] whose owner is not in `live`,
         anchored at the workspace root so nothing outside the rig is ours."""
         return []
 
     @classmethod
     def sweep(cls):
-        """Operator preflight: remove this arm's stale substrate left by dead
-        cells (`cli.py experiment substrate`). Nothing by default."""
+        """Operator preflight: remove this arm's stale infra left by dead
+        cells (`cli.py experiment infra`). Nothing by default."""
 
     @classmethod
-    def substrate_identities(cls, cid):
-        """[(kind, name)] of the cell-lifetime substrate a cell of this arm
+    def infra_identities(cls, cid):
+        """[(kind, name)] of the cell-lifetime infra a cell of this arm
         provisions, named as this class names it — what a reaper may look
-        for after the cell is gone. Unnamed substrate (found by scanning)
+        for after the cell is gone. Unnamed infra (found by scanning)
         is not listed."""
         return []
 
@@ -292,19 +292,19 @@ class Variant:
 
 
 def liveness_declared(cls):
-    """Whether `cls` answers substrate_alive itself. The base answer is
+    """Whether `cls` answers infra_alive itself. The base answer is
     "dead", which would void every arrangement of the cell, refunded,
     forever; a variant that never declared a probe is a definition error,
     caught before the first attempt."""
-    return cls.substrate_alive is not Variant.substrate_alive
+    return cls.infra_alive is not Variant.infra_alive
 
 
 class NoopVariant(Variant):
-    """The seam a fixture root uses: no provisioning, no substrate demand,
+    """The seam a fixture root uses: no provisioning, no infra demand,
     no network."""
     ARM = "noop"
 
-    def substrate_alive(self):
+    def infra_alive(self):
         return True
 
     def network_up(self):
@@ -314,7 +314,7 @@ class NoopVariant(Variant):
         pass
 
 
-# --- shared substrate pieces ---------------------------------------------------
+# --- shared infra pieces ---------------------------------------------------
 
 
 def write_env(path, pairs):

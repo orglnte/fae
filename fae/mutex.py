@@ -244,7 +244,7 @@ def fs_enforces_flock(d):
     Every arm cap, work slot and verify lock is a flock on a file in this
     directory. A filesystem that accepts flock without enforcing it turns all
     of them into no-ops that report success, so two access cells provision two
-    substrates at once and nothing anywhere says so.
+    infra at once and nothing anywhere says so.
     """
     d = Path(d)
     try:

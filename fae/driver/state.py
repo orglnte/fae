@@ -478,9 +478,9 @@ def _cell_state(ws, loops, boxes):
         return st
     if L["last_ev"] == "HALT" and live[0] == "CRASHED":
         # the rig broke under it — not a verdict: no attempt burned. Cause
-        # routes the response: substrate respawns, agent/auth needs a human.
+        # routes the response: infra respawns, agent/auth needs a human.
         st["state"] = "CRASHED"
-        st["why"] = "substrate" if "substrate" in L["halt_cause"] else "agent"
+        st["why"] = "infra" if "infra" in L["halt_cause"] else "agent"
         st["detail"] = L["halt_cause"]
         return st
     st["state"], st["why"], st["detail"] = live

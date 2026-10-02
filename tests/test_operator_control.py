@@ -1242,14 +1242,14 @@ class TestVerbEdges(OperatorTestCase):
             out = self.out_of(runs.conduct.conduct_stop, mock.Mock(scope=["all"]))
         self.assertIn("conduct stopped (TERM)", out)
         # Cells stand down cooperatively and exit through their own teardown
-        # trap, which is the only path that releases substrate in order. A
+        # trap, which is the only path that releases infra in order. A
         # signal is the escalation, not the opening move.
         paused = {c for call in pause.call_args_list for c in call.args[0]}
         self.assertLessEqual({CIDS[0], CIDS[3]}, paused,
                              "both live loops must be stood down")
         self.assertIn((4242, runs.signal.SIGTERM), killed,
                       "the conductor itself is still TERMed")
-        self.assertTrue(sub.called, "the scope's substrate is torn down")
+        self.assertTrue(sub.called, "the scope's infra is torn down")
 
     def test_conduct_stop_survives_a_loop_that_already_exited(self):
         with mock.patch.object(runs.state, "loop_parents", return_value={CIDS[0]: 111}), \
