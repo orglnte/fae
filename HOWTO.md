@@ -204,68 +204,44 @@ VARIANTS = (Python,)
 `shout/variants/python/__init__.py`:
 
 ```python
-"""A Python program, run by the image's interpreter inside a throwaway container."""
-import subprocess
-
-from fae.cell.variants.base import Variant, daemon_answers
-
-PREFIX = "fae-shout-"
+"""A Python program, run by the image's interpreter."""
+from fae.cell.substrate.secrunner import SecRunnerVariant
 
 
-class Python(Variant):
+class Python(SecRunnerVariant):
     ARM = "python"
     TECH = "python"
     CONDITIONS = ("apidocs",)
-    # The authorable surface: (exact files, directory prefixes) the agent may
-    # write. Every other seeded file is restored before a verdict.
+    # (exact files, directory prefixes) the agent may write; every other
+    # seeded file is restored before a verdict
     AUTHORING_SURFACE = (("shout.py",), ())
-
     IMAGE = "python:3.12.3-slim"      # where the agent's program runs
     RUN = ("python3", "shout.py")
-    # {kind: name prefix} of what a cell provisions, so the reaper can find
-    # a container a dead cell left behind.
-    SUBSTRATE_PREFIXES = {"container": PREFIX}
-
-    @classmethod
-    def container_name(cls, cid):
-        return f"{PREFIX}{cid}"
-
-    @classmethod
-    def substrate_identities(cls, cid):
-        return [("container", cls.container_name(cid))]
-
-    def substrate_ok(self):
-        """Can this host carry a cell of this variant at all? False halts the
-        cell before an attempt is spent; the agent never sees a rig fault as
-        its own failure."""
-        if subprocess.run(["docker", "info"], capture_output=True).returncode:
-            self.log("HALT[substrate]: docker unreachable")
-            return False
-        if subprocess.run(["docker", "image", "inspect", self.IMAGE],
-                          capture_output=True).returncode:
-            self.log(f"HALT[substrate]: image {self.IMAGE} not present "
-                     f"(docker pull {self.IMAGE})")
-            return False
-        return True
-
-    def substrate_alive(self):
-        """Does the substrate answer right now? Asked before every arrangement
-        and again after a charged fail: a substrate that died under the
-        measurement voids the arrangement instead of scoring the agent."""
-        return daemon_answers(["docker", "version"])
 ```
 
-Two things worth knowing:
+`SecRunnerVariant` is the variant of a program that needs nothing but a
+runtime image. It supplies what every variant owes the engine:
 
-- `substrate_alive` has no useful default: the base answer is "dead", and
-  a variant that does not override it is refused at preflight
-  (`HALT[substrate]: … declares no substrate_alive probe`) before an
-  attempt is spent. Every variant declares its own probe.
-- `author_setup`/`author_teardown` (what the agent needs while it authors:
-  a sandbox cluster, a docker-in-docker sidecar) and
-  `verify_setup`/`verify_teardown` (what one arrangement runs on, brought
-  up fresh) are no-ops by default. A program that runs in one container
-  needs neither.
+- `substrate_ok()`, asked before every attempt: the docker daemon answers
+  and the image is present (`docker pull` it, or give `RUNTIME_DIR`, a
+  directory with a Dockerfile the engine builds and tags by content, in
+  place of `IMAGE`). False halts the cell before an attempt is spent; the
+  agent never sees a rig fault as its own failure.
+- `substrate_alive()`, asked before every arrangement and after a charged
+  fail: a daemon that died under the measurement voids the arrangement
+  instead of scoring the agent. A variant of your own that does not
+  override it is refused at preflight.
+- `run(cid, workdir, argv, stdin, timeout_s)`, which the verifier calls:
+  the program in a container of the image, no network, `workdir` at
+  `/workspace`, its exit code and its stdout and stderr apart. `BUILD`, an
+  argv, is what the verifier runs first when the program needs compiling.
+
+`author_setup`/`author_teardown` (what the agent needs while it authors:
+a cluster, a docker-in-docker sidecar) and `verify_setup`/`verify_teardown`
+(what one arrangement runs on, brought up fresh) are no-ops by default; a
+program that runs in one container needs neither. An experiment whose
+program needs a substrate of its own subclasses `Variant` and writes them,
+with its own `substrate_ok` and `substrate_alive`.
 
 Now the seed: what the agent is handed on top of the skeleton.
 
@@ -367,12 +343,11 @@ The engine tags the image by the content of this directory
 (`fae-shout-verifier:<sha12>`), builds it when missing and never rebuilds
 it otherwise. Change a pin, get a new image.
 
-`shout/verifier/__init__.py`. The engine's `substrate/sandbox` block does
-the container work: `sandbox.run` is one `docker run --rm` of an image over
-a directory, with no network, a memory and pid ceiling, stdin in and
-stdout out, and it removes the container on a timeout; `sandbox.fresh_copy`
-is the verifier's own copy of the artifacts, so nothing writes into the
-judged tree.
+`shout/verifier/__init__.py`. The variant's `run` does the container work
+(the engine's `substrate/secrunner`: a container of the image over a
+directory, no network, memory, pid and CPU ceilings, removed when the
+program ends or times out); `secrunner.fresh_copy` is the verifier's own
+copy of the artifacts, so nothing writes into the judged tree.
 
 ```python
 """The shout verifier: run the program over a fixed table of lines inside
@@ -381,7 +356,7 @@ import time
 from pathlib import Path
 
 from fae.cell import experiment as _experiment
-from fae.cell.substrate import sandbox
+from fae.cell.substrate import secrunner
 from fae.cell.verify import Verdict, Verifier
 
 CASES = (
@@ -395,9 +370,7 @@ TIMEOUT_S = 20
 
 def run_case(variant, cid, workdir, line):
     """(stdout, error) of one container run with `line` on stdin."""
-    out, err, rc, error = sandbox.run(variant.IMAGE, variant.container_name(cid),
-                                      workdir, variant.RUN, stdin=line + "\n",
-                                      timeout_s=TIMEOUT_S)
+    out, err, rc, error = variant.run(cid, workdir, variant.RUN, line + "\n", TIMEOUT_S)
     if error:
         return None, error
     if rc != 0:
@@ -419,7 +392,7 @@ class ShoutVerifier(Verifier):
                            metrics={"cases": len(CASES), "passed": passed},
                            seconds=time.time() - t0)
 
-        workdir = sandbox.fresh_copy(artifacts, out)
+        workdir = secrunner.fresh_copy(artifacts, out)
         passed, first_why = 0, ""
         with (out / "verify.log").open("w") as log:
             if not (workdir / "shout.py").is_file():
@@ -754,5 +727,5 @@ one place (`fae/driver/common.py`).
 
 This document describes the interface as it stands. For a variant whose
 substrate is more than one container, the engine's substrate blocks
-(`fae/cell/substrate/`: `dind`, `kind`, `sandbox`) are what its
+(`fae/cell/substrate/`: `dind`, `kind`, `secrunner`) are what its
 `verify_setup`/`verify_teardown` pair composes.
