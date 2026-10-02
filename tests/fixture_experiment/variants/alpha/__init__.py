@@ -7,7 +7,7 @@ class Alpha(Variant):
     LOCK = 'alpha'
     LOCK_SLOTS = 2
     CONDITIONS = ("apidocs", "howto", "openbook", "onlysrc")
-    AUTHORABLE = (("answer.txt",), ("app/", "k8s/"))
+    AUTHORING_SURFACE = (("answer.txt",), ("app/", "k8s/"))
     SUBSTRATE_PREFIXES = {"container": "fae-dind-", "cluster": "fx-cluster-"}
 
     @classmethod

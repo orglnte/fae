@@ -130,7 +130,7 @@ class TestFixedFilesAreSeededReadOnly(PrepareTestCase):
             self.assertTrue(p.stat().st_mode & 0o200, p)
 
     def test_a_file_the_variant_lets_the_agent_author_stays_writable(self):
-        # the seal keys on the variant's AUTHORABLE: the declared file stays
+        # the seal keys on the variant's AUTHORING_SURFACE: the declared file stays
         # writable while the rest of the skeleton is read-only
         for arm in ("beta",):
             ws = self.seed(treatment=arm)
