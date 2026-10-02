@@ -476,14 +476,24 @@ already exists, edit that key. `EXPERIMENT_DIR=shout` in the environment
 overrides the file on any single command; the rest of this howto passes
 it so the commands are self-contained whatever the file says.
 
-Pull the runtime image and run the preflight. The preflight asks every
-variant's `substrate_ok()` and builds the verifier image, so the first
-cell does not pay for the build under a lock:
+Pull the runtime image, then check that everything is in place:
 
 ```sh
 docker pull python:3.12.3-slim
-EXPERIMENT_DIR=shout python3 cli.py experiment substrate
+EXPERIMENT_DIR=shout python3 cli.py experiment check --walk
 ```
+
+`experiment init` offers the same walk when it has written the file. The
+check goes in the order of this howto: the host, the config and the
+definition, each variant (its authoring surface, its liveness probe, its
+seed tree), every cell of the matrix seeded into a throwaway workspace
+root by the same `prepare()` a real cell runs, the docker daemon, and each
+variant's `substrate_ok()` with the verifier image built, so the first
+cell does not pay for the build under a lock. `--walk` explains each step
+before running it and, on a failure, names the fix and waits for you to
+retry. Without `--walk` it prints a checklist and exits 1 on any failure;
+`--static` skips the docker steps while you are still writing the
+definition; `--smoke` adds section 8's reference run.
 
 ## 8. Run a cell with no agent
 
@@ -687,6 +697,9 @@ turns a directory of scored cells into the results table.
   what each invariant protects.
 
 ## 14. Interface cheat sheet
+
+`python3 cli.py experiment check --static` checks a definition against
+all of the below, without docker.
 
 **Definition** (`<EXPERIMENT_DIR>/__init__.py`, read by `fae/cell/experiment.py`):
 
