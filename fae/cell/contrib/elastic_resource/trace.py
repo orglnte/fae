@@ -8,12 +8,12 @@ Runs alongside k6 (k6 owns load generation; this owns observation) and writes:
   2. a small events JSON      (--events-output) — the load start_epoch, the
      saturation_epoch (the run's first tick whose p99 reaches --sat-p99-ms,
      a blip's included; the law and k6.py take each spike's own saturation
-     from the trace and the schedule), the substrate-gated mount_epoch, the
+     from the trace and the schedule), the infra-gated mount_epoch, the
      release_epoch.
 
-CONCURRENCY: the k6 JSONL tailer, the /health poller, and the substrate probe
+CONCURRENCY: the k6 JSONL tailer, the /health poller, and the infra probe
 each run on their OWN thread, so a slow /health (up to 1s under saturation) or a
-slow substrate probe (a docker/kubectl subprocess) can NEVER starve the tailer.
+slow infra probe (a docker/kubectl subprocess) can NEVER starve the tailer.
 An earlier single-threaded version stalled during the load burst and dropped
 thousands of k6 points (the response-mix columns undercounted by ~50x); the
 tailer must keep up in real time. Authoritative totals still come from k6's
@@ -21,7 +21,7 @@ tailer must keep up in real time. Authoritative totals still come from k6's
 
 The mount timestamp is GROUND-TRUTH gated: mount_epoch is the first moment the
 app reports the resource mounted (--mounted-field, default cache_mounted) AND
-the substrate probe confirms it is serving — so no variant can post a mount
+the infra probe confirms it is serving — so no variant can post a mount
 before its resource is provably up. The decision epoch is read off another
 health field (--decision-field/--decision-value, default scaler_state ==
 acquiring) where the variant exposes one.
@@ -49,7 +49,7 @@ from collections import deque
 from pathlib import Path
 
 _HEALTH_POLL_S = 0.5      # /health cadence
-_SUBSTRATE_POLL_S = 1.0   # substrate probe cadence (subprocess — kept off the tick path)
+_INFRA_POLL_S = 1.0   # infra probe cadence (subprocess — kept off the tick path)
 _LAT_WINDOW_S = 1.0       # sliding window for p90/p99
 
 
@@ -92,7 +92,7 @@ class _Shared:
         self.status = {"http_2xx": 0, "http_404": 0, "http_429": 0, "http_5xx": 0, "err": 0}
         self.latencies: deque[tuple[float, float]] = deque()
         self.health: dict = {}
-        self.substrate = False
+        self.infra = False
 
 
 def _tail_thread(path: Path, st: _Shared, stop: threading.Event) -> None:
@@ -175,7 +175,7 @@ def _health_thread(url: str, st: _Shared, stop: threading.Event) -> None:
         stop.wait(_HEALTH_POLL_S)
 
 
-def _substrate_thread(argv: list[str] | None, st: _Shared, stop: threading.Event) -> None:
+def _infra_thread(argv: list[str] | None, st: _Shared, stop: threading.Event) -> None:
     if not argv:
         return
     while not stop.is_set():
@@ -186,8 +186,8 @@ def _substrate_thread(argv: list[str] | None, st: _Shared, stop: threading.Event
         except Exception:  # noqa: BLE001
             up = False
         with st.lock:
-            st.substrate = up
-        stop.wait(_SUBSTRATE_POLL_S)
+            st.infra = up
+        stop.wait(_INFRA_POLL_S)
 
 
 HOST_SLEEP_GAP_S = 30.0
@@ -236,7 +236,7 @@ def main(argv=None) -> None:
         *[threading.Thread(target=_tail_thread, args=(p, st, stop), daemon=True)
           for p in args.k6_jsonl],
         threading.Thread(target=_health_thread, args=(f"{args.base_url}/health", st, stop), daemon=True),
-        threading.Thread(target=_substrate_thread, args=(probe_argv, st, stop), daemon=True),
+        threading.Thread(target=_infra_thread, args=(probe_argv, st, stop), daemon=True),
     ]
     for t in threads:
         t.start()
@@ -249,7 +249,7 @@ def main(argv=None) -> None:
     w = csv.writer(cf)
     w.writerow([
         "epoch", "ts_s", "offered_rps", "p90_ms", "p99_ms",
-        "cache_mounted", "substrate_cache_up", "pool_pressure",
+        "cache_mounted", "infra_cache_up", "pool_pressure",
         "inflight", "pool_size", "pool_waiting",
         "http_2xx", "http_404", "http_429", "http_5xx", "http_err", "k6_drop",
     ])
@@ -289,7 +289,7 @@ def main(argv=None) -> None:
                 dropped = st.dropped
                 status = dict(st.status)
                 snap = dict(st.health)
-                substrate = st.substrate
+                infra = st.infra
 
             cache_self = bool(snap.get(args.mounted_field, False))
             if decision_epoch is None and str(snap.get(args.decision_field, "")) == args.decision_value:
@@ -297,14 +297,14 @@ def main(argv=None) -> None:
                 if args.stream:
                     print(f"  >>> scaler DECISION: acquiring at ts={elapsed:.1f}s "
                           f"(saturation+latency sustained)", flush=True)
-            if mount_epoch is None and cache_self and substrate:
+            if mount_epoch is None and cache_self and infra:
                 mount_epoch = time.time()
                 if args.stream:
                     _prov = f" (provision {mount_epoch - decision_epoch:.1f}s)" if decision_epoch else ""
                     _md = f" — {mount_epoch - sat_epoch:.1f}s after saturation" if sat_epoch else ""
-                    print(f"  >>> cache MOUNTED (substrate-confirmed) at ts={elapsed:.1f}s{_prov}{_md}", flush=True)
+                    print(f"  >>> cache MOUNTED (infra-confirmed) at ts={elapsed:.1f}s{_prov}{_md}", flush=True)
             if (mount_epoch is not None and release_epoch is None
-                    and not cache_self and not substrate):
+                    and not cache_self and not infra):
                 release_epoch = time.time()
                 if args.stream:
                     print(f"  >>> cache RELEASED at ts={elapsed:.1f}s", flush=True)
@@ -327,7 +327,7 @@ def main(argv=None) -> None:
             w.writerow([
                 round(time.time(), 3), round(elapsed, 1), offered_rps,
                 round(p90, 1), round(p99, 1),
-                cache_self, substrate, pp,
+                cache_self, infra, pp,
                 int(snap.get("inflight", 0) or 0),
                 int(snap.get("pool_size", 0) or 0),
                 int(snap.get("pool_waiting", 0) or 0),
@@ -339,7 +339,7 @@ def main(argv=None) -> None:
             if args.stream:
                 print(f"{elapsed:5.1f} {offered_rps:6d} {p90:6.0f} {p99:7.0f} "
                       f"{pp:5.2f} {'y' if cache_self else 'n':>3} "
-                      f"{'y' if substrate else 'n':>3} "
+                      f"{'y' if infra else 'n':>3} "
                       f"{status['http_2xx']:7d} {status['http_404']:6d} "
                       f"{status['http_429']:6d} {status['http_5xx']:5d} "
                       f"{status['err']:5d} {dropped:5d}", flush=True)

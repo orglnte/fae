@@ -295,7 +295,7 @@ class TestPreflight(unittest.TestCase):
         self.assertFalse(any(c[:2] == ["docker", "pull"] for c in calls))
 
     def test_every_arm_is_probed_and_a_refusal_is_a_note(self):
-        # The experiment's substrate (its daemons, images, tools) is the
+        # The experiment's infra (its daemons, images, tools) is the
         # variants' own preflight; conduct runs it and reports, never installs.
         with mock.patch.object(runs.rig, "_probe_arms", return_value=2) as probe:
             ok, calls = self._run({})
@@ -492,8 +492,8 @@ class TestGates(ConductCase):
         self.assertEqual(self.spawned, [])
 
 
-class TestASubstrateHaltSpendsARepair(ConductCase):
-    """A driver that halts on its substrate at admission (exit 45) is not
+class TestAInfraHaltSpendsARepair(ConductCase):
+    """A driver that halts on its infra at admission (exit 45) is not
     "owned meanwhile": it is a repair, counted toward the cap, so a dead
     daemon cannot be respawned into forever."""
 
@@ -501,7 +501,7 @@ class TestASubstrateHaltSpendsARepair(ConductCase):
         self.spawn_rc = 45
         self.q("aaa", [self.spec(rep=1)])
         out = self.run_conduct()
-        self.assertIn("substrate HALT at admission", out)
+        self.assertIn("infra HALT at admission", out)
         self.assertNotIn("FROZEN", out)
         cid = self.spawned[0]
         self.assertGreaterEqual(runs.ops._respawn_count(cid), 1)
@@ -510,7 +510,7 @@ class TestASubstrateHaltSpendsARepair(ConductCase):
 class TestAGenericCrashSpendsARepair(ConductCase):
     """An uncaught driver exception (exit 47) used to collide with LOCK_EXIT
     (43) and skip the repair budget entirely, so a deterministic host fault
-    respawned forever, uncounted. It must be treated like a substrate HALT:
+    respawned forever, uncounted. It must be treated like an infra HALT:
     counted, not frozen."""
 
     def test_exit_47_is_counted_and_does_not_freeze_the_lane(self):
@@ -651,7 +651,7 @@ class TestNarration(ConductCase):
 
 class TestReapingBelongsToConduct(unittest.TestCase):
     """Supervision is conduct's, and the operator's on request. No other code
-    path may end a process or delete substrate the fleet is using."""
+    path may end a process or delete infra the fleet is using."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

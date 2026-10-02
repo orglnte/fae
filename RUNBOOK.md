@@ -16,9 +16,9 @@ verdict rules: [`AGENTS.md`](AGENTS.md).
 1. **Python 3.11+** with `typer` and `ujson`, and a **docker daemon**. That
    is the engine's whole host footprint: the verifier runs in a container
    of an image the experiment declares, and the judged program inside the
-   variant's substrate; the agent runs in the engine's base image plus the
+   variant's infra; the agent runs in the engine's base image plus the
    layer the experiment declares. Whatever else an experiment needs on the
-   host is its definition's to declare and `experiment substrate` to report.
+   host is its definition's to declare and `experiment infra` to report.
    New experiment: [`HOWTO.md`](HOWTO.md).
 2. Agent CLIs you plan to run: `claude` (logged in), `agy`, and/or `opencode`.
    For opencode the operator writes the API key **themselves** to
@@ -35,8 +35,8 @@ verdict rules: [`AGENTS.md`](AGENTS.md).
 Then let the preflight localize anything missing:
 
 ```sh
-python3 cli.py experiment check      # the definition, every seed, each arm's substrate (--walk: step by step)
-python3 cli.py experiment substrate  # [ok]/[MISS] per arm: its daemon, tools and images
+python3 cli.py experiment check      # the definition, every seed, each arm's infra (--walk: step by step)
+python3 cli.py experiment infra  # [ok]/[MISS] per arm: its daemon, tools and images
 python3 cli.py experiment smoke      # one reference cell per arm, one arrangement (--full-gate: the whole gate)
 ```
 
@@ -51,7 +51,7 @@ python3 cli.py cell spawn|pause|resume|stop|tail|log|seal|reverify …   # ONE c
 python3 cli.py conduct run|pause|resume|stop|diagnose|reconcile|queue-add …
 python3 cli.py fleet-status                              # read-only table
 python3 cli.py results score|grade|validate|aggregate …
-python3 cli.py experiment init|check|substrate|smoke|prepare|verb …   # the experiment this root runs; verb: its own commands
+python3 cli.py experiment init|check|infra|smoke|prepare|verb …   # the experiment this root runs; verb: its own commands
 python3 cli.py rig selftest|trace-reset|agent-image|zombies …          # the harness itself
 python3 cli.py tools run <name> [args]                   # one instrument standalone: the engine's, a contrib block's, the experiment's
 ```
@@ -163,7 +163,7 @@ fae/driver/              the orchestrator's library: spawn/queues/conduct/
                      reconcile/validate/score/rig, one module per concern
 fae/cell/           the Python cell driver: attempt loop, the Variant
                      interface + registry, verify, config, the contract base,
-                     contrib/ and substrate/ blocks
+                     contrib/ and infra/ blocks
 fae/                the engine package: cli.py, driver/, cell/, scoring/,
                      ledger.py (the one parser), mutex.py (the one flock),
                      agent-container/

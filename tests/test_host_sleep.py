@@ -71,7 +71,7 @@ class TestTheDriverRefundsIt(unittest.TestCase):
                                      "CONDITION=apidocs\nREPEAT=1\n")
         c = cell.Cell(self.CID, workspaces=self.wsdir, root=self.root)
         c.prepare = lambda fresh=False: c.ws
-        c.substrate_ok = lambda: True
+        c.infra_ok = lambda: True
         gate = lambda: [cell.VerifyResult(green=False, shape="G2",
                                           stage_failed="host-sleep", charge=False)]
         with self.assertRaises(cell.Halt) as cm:

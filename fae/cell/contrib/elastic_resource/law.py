@@ -51,13 +51,13 @@ def read_trace(trace: str) -> list[dict]:
         rows.append({
             "ts": float(r.get("ts_s") or 0),
             "p99": float(r.get("p99_ms") or 0),
-            "up": str(r.get("substrate_cache_up", "")).strip() == "True",
+            "up": str(r.get("infra_cache_up", "")).strip() == "True",
         })
     return rows
 
 
 def episodes(rows: list[dict]):
-    """[(start_ts, end_ts_or_None), ...] of substrate-confirmed cache episodes,
+    """[(start_ts, end_ts_or_None), ...] of infra-confirmed cache episodes,
     plus the last trace ts."""
     eps: list[list] = []
     prev = False

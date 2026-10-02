@@ -18,7 +18,7 @@ class TestTheVerifyReleasesOnEveryPath(unittest.TestCase):
 
     def test_the_engine_releases_the_exclusive_lock_after_the_verifier(self):
         # The lock is the cell's own fd, released LAST: the verifier still
-        # holds the rig while it tears down the substrate the lock is capping.
+        # holds the rig while it tears down the infra the lock is capping.
         src = (Path(ROOT) / "fae" / "cell" / "cell.py").read_text()
         block = src[src.index("    def verify(self"):src.index("    def _persist_verdict")]
         tail = block[block.index("try:"):]

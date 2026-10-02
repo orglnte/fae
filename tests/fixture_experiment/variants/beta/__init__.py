@@ -9,5 +9,5 @@ class Beta(Variant):
     CONDITIONS = ("apidocs", "onlysrc")
     AUTHORING_SURFACE = (("declaration.toml",), ("app/",))
 
-    def substrate_alive(self):
+    def infra_alive(self):
         return True

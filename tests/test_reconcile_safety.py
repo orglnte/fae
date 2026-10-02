@@ -269,7 +269,7 @@ class TestNoEditReachesTheStatus(unittest.TestCase):
         st = self._state(
             f"{TS}\tNOEDIT\tcid\tattempt=1\tINVESTIGATE — agent said: Error: 503",
             f"{TS}\tITER\tfail\tattempt=1 stage=no-edit",
-            f"{TS}\tHALT\tcid\tattempt=2\tsubstrate: docker unreachable")
+            f"{TS}\tHALT\tcid\tattempt=2\tinfra: docker unreachable")
         self.assertIn("docker unreachable", st["detail"])
 
 
@@ -687,7 +687,7 @@ class TestSweepClassification(SweepCase):
         _, sub, kill = self.sweep(self.st(state="DONE", why="green"),
                                   live={self.cid: 4242})
         kill.assert_called_once()
-        self.assertTrue(sub.run.called, "substrate teardown must be explicit")
+        self.assertTrue(sub.run.called, "infra teardown must be explicit")
 
     def test_a_fresh_orphan_gets_its_teardown_grace(self):
         _, sub, kill = self.sweep(self.st(state="DONE", why="green"),
@@ -830,8 +830,8 @@ class TestVerifyHeldAlert(SweepCase):
 
 
 class TestAStaleArmSlotSidecarIsNotAZombieForever(unittest.TestCase):
-    """An arm slot's holder note names the substrate its last holder had.
-    Once that substrate is gone the note is bookkeeping, not a zombie: the
+    """An arm slot's holder note names the infra its last holder had.
+    Once that infra is gone the note is bookkeeping, not a zombie: the
     finder must drop the note instead of re-reporting a reap that cannot
     happen on every tick."""
 

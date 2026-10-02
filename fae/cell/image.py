@@ -7,7 +7,7 @@ changed copied source is a different image, built when missing and never
 rebuilt otherwise. A variant's image builds `FROM $BASE`, the verifier's.
 
 The verify container (`fae-verify-<cid>`) and the cell network
-(`fae-net-<cid>`) are the engine's own substrate, named here.
+(`fae-net-<cid>`) are the engine's own infra, named here.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from pathlib import Path
 TAG_PREFIX = "fae-"
 VERIFY_PREFIX = "fae-verify-"
 TOOL_PREFIX = "fae-tool-"
-RUN_PREFIX = "fae-secrun-"     # the judged program's own container (substrate/secrunner.py)
+RUN_PREFIX = "fae-secrun-"     # the judged program's own container (infra/secrunner.py)
 NET_PREFIX = "fae-net-"
 _SKIP = {".git", "__pycache__", ".pytest_cache", ".venv", ".mypy_cache"}
 # the host, by the name Docker Desktop gives it, on Linux too: what a

@@ -36,7 +36,7 @@ BB_S = {"shape": "BBS", "events": [{"kind": "blip", "t0": 8.0, "t1": 14.0},
 
 def rows(total, saturated_from=None, mounted=(), p99_hot=800.0):
     """A synthetic per-second trace: p99 crosses at `saturated_from` (and
-    stays high until the cache is up), the substrate confirms the cache
+    stays high until the cache is up), the infra confirms the cache
     over each [a, b) in `mounted`."""
     out = []
     for ts in range(total):
@@ -109,7 +109,7 @@ class TestASpikeThatNeverSaturatesIsAVoid(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
             with (d / "trace.csv").open("w") as f:
-                f.write("ts_s,p99_ms,substrate_cache_up\n")
+                f.write("ts_s,p99_ms,infra_cache_up\n")
                 for ts in range(100):
                     f.write(f"{ts}.0,12.0,False\n")
             (d / "events.json").write_text("{}")

@@ -202,10 +202,10 @@ class TestRigCommands(unittest.TestCase):
         (ns,), _ = invoke("init", ["experiment", "init", "--experiment", "shout"], mod=cli.rig)
         self.assertEqual(ns.experiment, "shout")
 
-    def test_substrate_takes_no_arguments(self):
-        """fae/driver/rig.py's substrate ignores its namespace entirely; an
+    def test_infra_takes_no_arguments(self):
+        """fae/driver/rig.py's infra ignores its namespace entirely; an
         earlier cli signature accepted an `arm` argument it silently discarded."""
-        (ns,), _ = invoke("substrate", ["experiment", "substrate"], mod=cli.rig)
+        (ns,), _ = invoke("infra", ["experiment", "infra"], mod=cli.rig)
         self.assertEqual(vars(ns), {})
 
     def test_smoke_carries_every_field_runs_smoke_reads(self):

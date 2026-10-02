@@ -73,14 +73,14 @@ class DindSidecar:
                     "-p", f"127.0.0.1:{self.cache_port}:{self.inner_cache_port}",
                     "-e", "DOCKER_TLS_CERTDIR=",
                     "--memory", "1g", "--cpus", "1", self.image]):
-            raise HookFailure(f"HALT[substrate]: dind start failed for {self.cid}")
+            raise HookFailure(f"HALT[infra]: dind start failed for {self.cid}")
         for _ in range(30):
             if self.alive():
                 break
             time.sleep(2)
         if not self.alive():
             self.remove()
-            raise HookFailure(f"HALT[substrate]: dind API never came up for {self.cid}")
+            raise HookFailure(f"HALT[infra]: dind API never came up for {self.cid}")
         self.seed()
         return False
 
@@ -94,7 +94,7 @@ class DindSidecar:
         save.stdout.close()
         save.wait()
         if save.returncode != 0 or load.returncode != 0:
-            raise HookFailure(f"HALT[substrate]: seeding {self.cache_image} "
+            raise HookFailure(f"HALT[infra]: seeding {self.cache_image} "
                               f"into {self.name} failed")
 
 

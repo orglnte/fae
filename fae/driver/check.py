@@ -5,7 +5,7 @@ fix what it finds.
 Every check reuses the code a real run goes through: the definition is
 loaded by `experiment.load`, the authoring surface and the liveness probe
 by the preflight's own predicates, the seeds by `prepare()` itself into a
-temporary workspace root, the substrate by `experiment substrate`'s probe.
+temporary workspace root, the infra by `experiment infra`'s probe.
 A check therefore cannot pass while the run it stands for would fail on the
 same cause.
 
@@ -181,8 +181,8 @@ def _variants(ctx):
             out.append(Finding(False, str(e),
                                f"declare {name}.AUTHORING_SURFACE = ((files), (dir prefixes)): "
                                f"what the agent may write"))
-        out.append(Finding(liveness_declared(cls), f"{name}: substrate_alive probe",
-                           f"implement {name}.substrate_alive(): asked before every "
+        out.append(Finding(liveness_declared(cls), f"{name}: infra_alive probe",
+                           f"implement {name}.infra_alive(): asked before every "
                            f"arrangement; the base answers dead"))
         seed = cls.seed_root()
         out.append(Finding(seed.is_dir(), f"{name}: seed tree {seed}",
@@ -219,13 +219,13 @@ def _seeds(ctx):
     return out
 
 
-def _substrate(ctx):
+def _infra(ctx):
     from fae.driver import rig
     bad = rig._probe_arms(ctx.selected())
-    return [Finding(not bad, "every arm's substrate and verify image" if not bad
+    return [Finding(not bad, "every arm's infra and verify image" if not bad
                     else f"{bad} arm(s) refused this host (the lines above name why)",
                     "fix what the refused arm's line names; then "
-                    "python3 cli.py experiment substrate")]
+                    "python3 cli.py experiment infra")]
 
 
 def _pipeline(ctx):
@@ -255,7 +255,7 @@ STEPS = (
          "§3, §6", _definition, needs=("config",)),
     Step("variants", "Each variant",
          "What the agent may write (AUTHORING_SURFACE), how the engine tells the\n"
-         "substrate is alive, and the seed tree the agent starts from.",
+         "infra is alive, and the seed tree the agent starts from.",
          "§5", _variants, needs=("definition",)),
     Step("seeds", "Seeding every cell of the matrix",
          "Prepares each arm × condition, and each arm's reference, into a\n"
@@ -265,14 +265,14 @@ STEPS = (
          "Every agent, verifier and program under test runs in a container of\n"
          "this daemon.",
          "§1", _docker, docker=True),
-    Step("substrate", "This host can carry each arm",
-         "Each variant's own preflight (substrate_ok) and the verify image,\n"
+    Step("infra", "This host can carry each arm",
+         "Each variant's own preflight (infra_ok) and the verify image,\n"
          "built now if missing, so no cell pays for the build.",
-         "§7", _substrate, needs=("seeds", "docker"), docker=True),
+         "§7", _infra, needs=("seeds", "docker"), docker=True),
     Step("pipeline", "The reference passes the gate",
          "One reference cell per arm, no agent, one arrangement: proves the\n"
          "verifier judges the known answer green before any agent runs.",
-         "§8", _pipeline, needs=("substrate",), docker=True, opt_in="--smoke"),
+         "§8", _pipeline, needs=("infra",), docker=True, opt_in="--smoke"),
 )
 
 NEXT = (

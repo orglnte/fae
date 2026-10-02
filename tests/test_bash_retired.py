@@ -15,13 +15,13 @@ GONE = [
     "harness/lib.sh", "harness/config.example.sh", "harness/venv_template.sh",
     "harness/cache_probe.sh", "harness/alpha.sh",
     "harness/run_exp_artifact.sh", "harness/smoke.sh", "harness/prepare_cell.sh",
-    "harness/ensure_substrate.sh", "harness/_transitions.sh",
+    "harness/ensure_infra.sh", "harness/_transitions.sh",
     "harness/variants/_mutex.sh", "harness/variants/_work_slots.sh",
     "harness/variants/_arm_lock.sh", "harness/variants/_cell_venv.sh",
 ] + [f"harness/variants/{arm}/{hook}.sh"
      for arm in ("beta", "alpha", "beta", "alpha",
                  "beta", "alpha")
-     for hook in ("cell_setup", "cell_teardown", "substrate")]
+     for hook in ("cell_setup", "cell_teardown", "infra")]
 
 # The bash that remains: the agent image build.
 STAYS = ["fae/agent-container/build.sh"]

@@ -1,4 +1,4 @@
-"""fae/cell/substrate/secrunner: the judged program's own container. What it
+"""fae/cell/infra/secrunner: the judged program's own container. What it
 mounts, what it may do, its one lifecycle (start, wait or use, stop) for a
 program that ends and one that serves alike, the variant built on it, and
 that a program inside it cannot reach the host's records or its Docker
@@ -14,7 +14,7 @@ from unittest import mock
 
 from _ctx import ROOT  # noqa: F401
 
-from fae.cell.substrate import secrunner
+from fae.cell.infra import secrunner
 
 
 def make(tmp, **kw):

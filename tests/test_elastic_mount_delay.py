@@ -33,14 +33,14 @@ SSB = {"shape": "SSB", "events": [{"kind": "spike", "t0": 8.0, "t1": 50.0},
 
 def trace(total, hot=(), mounted=(), app_only=()):
     """Per second: p99 800 ms over each [a, b) in `hot`, the cache mounted
-    (app and substrate) over each [a, b) in `mounted`, the app alone claiming
+    (app and infra) over each [a, b) in `mounted`, the app alone claiming
     it over each [a, b) in `app_only`."""
     out = []
     for ts in range(total):
         inside = lambda spans: any(a <= ts < b for a, b in spans)  # noqa: E731
         up = inside(mounted)
         out.append({"ts_s": float(ts), "p99_ms": 800.0 if inside(hot) else 12.0,
-                    "cache_mounted": up or inside(app_only), "substrate_cache_up": up})
+                    "cache_mounted": up or inside(app_only), "infra_cache_up": up})
     return out
 
 
@@ -102,7 +102,7 @@ class TestEachSpikePairsWithItsOwnMount(unittest.TestCase):
 
     def rows(self, **kw):
         return [{"ts": r["ts_s"], "p99": r["p99_ms"],
-                 "mounted": r["cache_mounted"] and r["substrate_cache_up"]}
+                 "mounted": r["cache_mounted"] and r["infra_cache_up"]}
                 for r in trace(140, **kw)]
 
     def test_two_spikes_two_delays(self):

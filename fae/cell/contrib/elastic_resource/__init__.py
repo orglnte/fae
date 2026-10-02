@@ -13,7 +13,7 @@ Four instruments, run through fae/cell/verify.py's loader:
                  the schedule.json the law reads its windows from
     trace        the per-second sensor beside the load generator: offered
                  load, latency, the resource's own claim (a /health field),
-                 a substrate probe that confirms it, the mount/release epochs
+                 an infra probe that confirms it, the mount/release epochs
     k6           the load numbers out of k6's summary, and the mount delay
     law          the verdict: episodes against the schedule's windows
 

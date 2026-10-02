@@ -17,7 +17,7 @@ values on one line:
   content        content_errors alone (anti-gaming: hot 200s missing real data).
   mount_delay_s  PROVISIONING latency: seconds from the scaler's decision to
                  the cache becoming provably ready (mount_epoch: the app
-                 reports it mounted AND the substrate probe confirms it). A
+                 reports it mounted AND the infra probe confirms it). A
                  scaler that exposes no decision (an external autoscaler) is
                  measured from the store's saturation, the signal it reacts
                  to, instead: with a schedule, the first SPIKE's saturation
@@ -60,12 +60,12 @@ def k6_metrics(path: str) -> tuple[int, int, int, int]:
 
 def read_mounts(csv_path: str) -> list[dict]:
     """Per tick: ts, p99, and mounted as mount_epoch defines it (the app
-    reports the resource mounted AND the substrate confirms it)."""
+    reports the resource mounted AND the infra confirms it)."""
     out = []
     for r in csv.DictReader(open(csv_path)):
         out.append({"ts": float(r.get("ts_s") or 0), "p99": float(r.get("p99_ms") or 0),
                     "mounted": (str(r.get("cache_mounted", "")).strip() == "True"
-                                and str(r.get("substrate_cache_up", "")).strip() == "True")})
+                                and str(r.get("infra_cache_up", "")).strip() == "True")})
     return out
 
 
@@ -95,7 +95,7 @@ def mount_delay_s(csv_path: str, events_path: str, schedule_path: str = "") -> s
         return ""
     t1 = ev.get("mount_epoch")
     if t1 is None:
-        return ""  # cache never mounted / never confirmed by the substrate
+        return ""  # cache never mounted / never confirmed by the infra
     t0 = ev.get("decision_epoch")
     if t0 is not None:
         return str(round(max(float(t1) - float(t0), 0.0), 2))

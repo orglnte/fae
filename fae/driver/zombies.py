@@ -6,9 +6,9 @@ _VERIFY_HOLDER_ARGV / _is_driver_pid answer "is this pid entitled to hold the
 lock it has" for a verify running via `cli.py experiment verb|cell reverify|experiment
 smoke` in the FOREGROUND process — the regex tracks the real invoked argv,
 so moving the code that implements a verb changes nothing about what it
-matches; only a change to the invocation shape itself does. Substrate names
+matches; only a change to the invocation shape itself does. Infra names
 (the dind sidecar, the kind cluster) come from the variants that provision
-them (Variant.substrate_identities, SUBSTRATE_PREFIXES for what a scan may
+them (Variant.infra_identities, INFRA_PREFIXES for what a scan may
 discover, stray() for what carries no name at all): the reaper keeps no
 formula of its own, so a live cell's cluster cannot lose its owner to a
 divergent copy and be deleted out from under an agent.
@@ -45,7 +45,7 @@ def _workspace_entries():
 
 def _cluster_map():
     """cid -> the cluster a cell of that cid owns, as its variant names it
-    (`substrate_identities`), cached per cid-set: a pure function of the cid,
+    (`infra_identities`), cached per cid-set: a pure function of the cid,
     computed in-process — an owner map that could come back empty on a
     fault would strip every live cluster of its reaper protection."""
     cids = tuple(sorted(p.name for p in _workspace_entries()
@@ -55,31 +55,31 @@ def _cluster_map():
         m = {}
         for c in cids:
             tech = common.definition().tech_of(parse_cell_id(c)[1])
-            for kind, ident in _substrate_of(tech, c):
+            for kind, ident in _infra_of(tech, c):
                 if kind == "cluster":
                     m[c] = ident
         _CLMAP["map"] = m
     return _CLMAP["map"]
-def _substrate_of(tech, cid):
+def _infra_of(tech, cid):
     """[(kind, ident)] a cell of this tech provisions, named by its variants.
-    Unnamed substrate is found by scanning instead (`_strays`)."""
+    Unnamed infra is found by scanning instead (`_strays`)."""
     from fae.cell import variants as _tr
     out = []
     for cls in _tr.registry().values():
         if cls.TECH == tech:
-            for pair in cls.substrate_identities(cid):
+            for pair in cls.infra_identities(cid):
                 if pair not in out:
                     out.append(pair)
     return out
 
 
-def _verifier_substrate(cid):
+def _verifier_infra(cid):
     """[(kind, ident)] the engine and the experiment's verifier provision
     for a cell of any tech: the verify container and the cell network, then
     the verifier's own (a store), named as they name them."""
     from fae.cell import image as _image
     out = [("container", _image.verify_container(cid)), ("network", _image.cell_network(cid))]
-    for pair in common.definition().verifier_class().substrate_identities(cid):
+    for pair in common.definition().verifier_class().infra_identities(cid):
         if pair not in out:
             out.append(pair)
     return out
@@ -102,7 +102,7 @@ def _pid_alive(pid):
 
 
 def _strays(live):
-    """Substrate only a scan can find, from every variant: [(kind, ident,
+    """Infra only a scan can find, from every variant: [(kind, ident,
     owner cid)] whose owner has no live loop (Variant.stray)."""
     from fae.cell import variants as _tr
     out = []
@@ -115,7 +115,7 @@ def _strays(live):
 
 def _prefixes():
     """[(kind, prefix)] a reaper scans by: the engine's agent container,
-    each variant's SUBSTRATE_PREFIXES and the verifier's."""
+    each variant's INFRA_PREFIXES and the verifier's."""
     from fae.cell import image as _image
     from fae.cell import variants as _tr
     out = [("container", common.AGENT_CONTAINER_PREFIX),
@@ -124,7 +124,7 @@ def _prefixes():
            ("network", _image.NET_PREFIX)]
     classes = list(_tr.registry().values()) + [common.definition().verifier_class()]
     for cls in classes:
-        for kind, pfxs in cls.SUBSTRATE_PREFIXES.items():
+        for kind, pfxs in cls.INFRA_PREFIXES.items():
             for pfx in ((pfxs,) if isinstance(pfxs, str) else pfxs):
                 if (kind, pfx) not in out:
                     out.append((kind, pfx))
@@ -303,9 +303,9 @@ def find_zombies():
         if ws.is_dir() and (ws / ".loop").exists() and state.heartbeat(ws) is None:
             zs.append(("heartbeat", str(ws / ".loop"), ws.name, "corpse file"))
     # No stale-lock class: a lock is held by fd, so the kernel frees it when
-    # its holder dies. What can outlive a holder is SUBSTRATE, and an arm
+    # its holder dies. What can outlive a holder is INFRA, and an arm
     # slot's last-holder sidecar is the cheapest place to notice it.
-    present = None                      # substrate that exists, read once
+    present = None                      # infra that exists, read once
     for d in sorted(common.ORCH.glob("arm-*.slots/slot-*")):
         if d.name.endswith(".holder"):
             continue
@@ -315,7 +315,7 @@ def find_zombies():
         if present is None:
             present = _containers_all() | set(common.sh(["kind", "get", "clusters"]).split())
         arm = d.parent.name[len("arm-"):-len(".slots")]
-        named = [(k, i) for k, i in _substrate_of(arm, owner) + _verifier_substrate(owner)
+        named = [(k, i) for k, i in _infra_of(arm, owner) + _verifier_infra(owner)
                  if i in present]
         if not named:
             # The sidecar outlived everything it named: nothing left to reap,

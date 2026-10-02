@@ -366,7 +366,7 @@ class TestClusterMapAsksTheVariantForTheTech(unittest.TestCase):
             (ws / cid).mkdir()
             with mock.patch.object(common, "WS", ws), \
                     mock.patch.object(beta, "TECH", "shared"), \
-                    mock.patch.object(beta, "substrate_identities",
+                    mock.patch.object(beta, "infra_identities",
                                       classmethod(lambda cls, c: [("cluster", f"cl-{c}")])), \
                     mock.patch.dict(zombies._CLMAP, {"key": None, "map": {}}):
                 self.assertEqual(zombies._cluster_map(), {cid: f"cl-{cid}"})

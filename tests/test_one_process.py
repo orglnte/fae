@@ -51,14 +51,14 @@ USED = ["load_shape", "k6", "law", "trace", "resource_sampler"]
 class TestNoPythonChildProcesses(unittest.TestCase):
 
     def _no_venv_line(self, l):
-        # The cell's OWN venv is substrate, not an instrument child: rig.py
+        # The cell's OWN venv is infra, not an instrument child: rig.py
         # builds it (sys.executable -m venv) and runs its interpreter to
         # pip-install the SDK and check the imports, the way the shell
         # venv_template did. Those lines name an interpreter legitimately.
         return not any(t in l for t in ("venv", "template", "pybin"))
 
     def test_the_package_never_spawns_an_interpreter(self):
-        # rig.py builds the cell's own venv (a substrate step, not an
+        # rig.py builds the cell's own venv (an infra step, not an
         # instrument); verify.py names the interpreter only to compose the
         # sidecar's cache-probe command string, which the sidecar spawns.
         for f in sorted(PKG.glob("*.py")):
@@ -70,7 +70,7 @@ class TestNoPythonChildProcesses(unittest.TestCase):
     def test_it_never_shells_to_an_instrument(self):
         for f in sorted(PKG.glob("*.py")):
             # Interpreters the package may name that are not harness children:
-            # the experiment venv (EXP_VENV_PY) the substrate probe imports the
+            # the experiment venv (EXP_VENV_PY) the infra probe imports the
             # SDK through, the scripted testagent's OWN container, the
             # cell's own venv build (rig.py), and the verify container's own
             # interpreter (CHILD_ARGV: the one child, inside the image).
@@ -87,7 +87,7 @@ class TestNoPythonChildProcesses(unittest.TestCase):
         # The allowlist IS the claim: anything else appearing here should fail
         # the test and be argued for explicitly.
         allowed = {"bash", "docker", "kubectl", "cp", "k6", "git",
-                   "kind", "curl", "ps", "lsof",   # the variants' substrate CLIs
+                   "kind", "curl", "ps", "lsof",   # the variants' infra CLIs
                    "caffeinate"}                   # macOS idle-sleep assertion
         found = set()
         for f in sorted(PKG.glob("*.py")):

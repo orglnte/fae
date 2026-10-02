@@ -8,11 +8,11 @@ class Alpha(Variant):
     LOCK_SLOTS = 2
     CONDITIONS = ("apidocs", "howto", "openbook", "onlysrc")
     AUTHORING_SURFACE = (("answer.txt",), ("app/", "k8s/"))
-    SUBSTRATE_PREFIXES = {"container": "fae-dind-", "cluster": "fx-cluster-"}
+    INFRA_PREFIXES = {"container": "fae-dind-", "cluster": "fx-cluster-"}
 
     @classmethod
-    def substrate_identities(cls, cid):
+    def infra_identities(cls, cid):
         return [("container", f"fae-dind-{cid}")]
 
-    def substrate_alive(self):
+    def infra_alive(self):
         return True

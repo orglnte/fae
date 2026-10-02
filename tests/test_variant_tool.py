@@ -79,7 +79,7 @@ class TestTheToolContainer(unittest.TestCase):
         from fae.driver import zombies
         with mock.patch.object(zombies, "common") as c:
             c.AGENT_CONTAINER_PREFIX = "fae-agent-"
-            c.definition.return_value.verifier_class.return_value.SUBSTRATE_PREFIXES = {}
+            c.definition.return_value.verifier_class.return_value.INFRA_PREFIXES = {}
             with mock.patch("fae.cell.variants.registry", return_value={}):
                 self.assertIn(("container", "fae-tool-"), zombies._prefixes())
 

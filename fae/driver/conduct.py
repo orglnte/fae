@@ -156,12 +156,12 @@ def _converge_running(frozen):
                   f"{ops.MAX_RESPAWNS})", flush=True)
         elif rc in (common.LOCK_EXIT_RC, common.PAUSE_EXIT_RC):
             pass                       # owned or paused meanwhile: next pass
-        elif rc in (common.SUBSTRATE_EXIT_RC, common.GENERIC_CRASH_EXIT_RC):
-            # the substrate failed, or the driver crashed outright, under the
+        elif rc in (common.INFRA_EXIT_RC, common.GENERIC_CRASH_EXIT_RC):
+            # the infra failed, or the driver crashed outright, under the
             # fresh attempt: a repair that spends budget like any other, so a
             # deterministic host-level fault cannot spin forever uncounted.
             ops._respawn_count(cid, bump=True)
-            kind = "substrate HALT" if rc == common.SUBSTRATE_EXIT_RC else "crash"
+            kind = "infra HALT" if rc == common.INFRA_EXIT_RC else "crash"
             print(f"  [{common._hhmm()}] {kind} on repair of {cid} "
                   f"(repair {n + 1} of {ops.MAX_RESPAWNS})", flush=True)
         elif rc in common.SYSTEMIC_EXITS:
@@ -171,7 +171,7 @@ def _converge_running(frozen):
 
 
 def _conduct_preflight():
-    """Make the substrate usable before admitting anything, or say why not.
+    """Make the infra usable before admitting anything, or say why not.
 
     Builds the agent image when it is missing — a fresh clone and a reset
     Docker VM look identical from here, and every spawn dies at preflight
@@ -186,7 +186,7 @@ def _conduct_preflight():
               f"  Every arm cap, work slot and verify lock in this rig is a "
               f"flock(2) on a file in that directory. Without enforcement each "
               f"one succeeds for everyone at once: two access cells provision "
-              f"two substrates and the host falls over, silently.\n"
+              f"two infra and the host falls over, silently.\n"
               f"  Fix: put workspaces.nosync on a local disk. A network mount, "
               f"a synced folder, or some virtiofs/9p shares are the usual "
               f"causes.\n"
@@ -204,10 +204,10 @@ def _conduct_preflight():
               "Every spawn would die at preflight.", flush=True)
         return False
     # Every variant's own preflight — its daemon, its images (built here,
-    # not under a cell), its tools — and a sweep of its stale substrate:
-    # what `cli.py experiment substrate` shows, run once before admission.
+    # not under a cell), its tools — and a sweep of its stale infra:
+    # what `cli.py experiment infra` shows, run once before admission.
     from fae.driver import rig as _rig
-    print("conduct: substrate preflight", flush=True)
+    print("conduct: infra preflight", flush=True)
     bad = _rig._probe_arms()
     if bad:
         print(f"conduct: NOTE — {bad} arm(s) refused their preflight; cells of "
@@ -460,12 +460,12 @@ def conduct(args):
                     # in the claim->spawn window. Cell-specific, not lane-wide:
                     # the claim stands and the next converge decides.
                     idle_sweep += 1
-                elif rc in (common.SUBSTRATE_EXIT_RC, common.GENERIC_CRASH_EXIT_RC):
-                    # the substrate failed, or the driver crashed outright,
+                elif rc in (common.INFRA_EXIT_RC, common.GENERIC_CRASH_EXIT_RC):
+                    # the infra failed, or the driver crashed outright,
                     # under the driver at admission: keep the claim for
                     # converge, but count it toward the cap
                     ops._respawn_count(cid, bump=True)
-                    kind = "substrate HALT" if rc == common.SUBSTRATE_EXIT_RC else "crash"
+                    kind = "infra HALT" if rc == common.INFRA_EXIT_RC else "crash"
                     print(f"  [{common._hhmm()}] {kind} at admission of {cid} "
                           f"— counted toward its {ops.MAX_RESPAWNS} repairs", flush=True)
                     idle_sweep += 1

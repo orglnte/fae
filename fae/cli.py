@@ -4,7 +4,7 @@
 DESIGN: this is a CLI LAYER, not the orchestrator. Every command builds the
 namespace the target fae/driver/*.py function already expects and calls it
 directly — fae/driver/ is the library, this is its one client. That includes
-fae/driver/rig.py (the experiment's verbs: init, substrate, smoke, prepare,
+fae/driver/rig.py (the experiment's verbs: init, infra, smoke, prepare,
 verb; the rig's own: selftest, trace-reset, zombies) and the tail/log pair folded into fae/driver/ops.py.
 No orchestration logic is duplicated here.
 
@@ -15,7 +15,7 @@ GROUPS
            bulk verb: run, pause, resume, stop, diagnose, queue-add, reconcile
   results  what the experiment produced, and whether to trust it: score,
            grade, validate, aggregate
-  experiment  the experiment this root runs: init, check, substrate,
+  experiment  the experiment this root runs: init, check, infra,
            smoke, prepare, verb (the experiment's own commands)
   rig      the harness itself, not the experiment: selftest, trace-reset,
            agent-image, zombies
@@ -142,7 +142,7 @@ def cell_stop(selectors: list[str] = typer.Argument(..., help=SEL + " Must match
                                           help="TERMINAL: write .cancelled — DONE·cancelled, never comes back"),
               dry_run: bool = typer.Option(False, "--dry-run",
                                            help="list what would be stopped and dropped, do nothing")):
-    """Halt ONE cell NOW: loop killed, substrate torn down, queued specs
+    """Halt ONE cell NOW: loop killed, infra torn down, queued specs
     removed (backed up). Resumable — PAUSED·stopped — unless --cancel.
     Files are never touched. Bulk stop is `conduct stop`."""
     ops.stop_cells(_ns(selectors=list(selectors), cancel=cancel, dry_run=dry_run))
@@ -474,7 +474,7 @@ def experiment_check(walk: bool = typer.Option(False, "--walk",
                      arms: str = typer.Option("", "--arms", help="comma-separated (default: every arm)"),
                      task: str = typer.Option("T1", "--task", help="the task the seeds are checked for")):
     """Whether this root's experiment is ready to run: the host, the config,
-    the definition, each variant, every cell's seed, the substrate. Exit 1 on
+    the definition, each variant, every cell's seed, the infra. Exit 1 on
     any failure; each names its fix."""
     from fae.driver import check
     check.main(_ns(walk=walk, static=static, smoke=smoke, arms=arms, task=task))
@@ -493,12 +493,12 @@ def rig_trace_reset(dry_run: bool = typer.Option(False, "--dry-run",
     rig.trace_reset(_ns(dry_run=dry_run))
 
 
-@experiment_app.command("substrate")
-def experiment_substrate():
-    """Every arm's substrate preflight (variants.py substrate_ok) + a sweep
+@experiment_app.command("infra")
+def experiment_infra():
+    """Every arm's infra preflight (variants.py infra_ok) + a sweep
     of stale per-verify kind clusters. Creates nothing: each verify provisions
-    its own substrate."""
-    rig.substrate(_ns())
+    its own infra."""
+    rig.infra(_ns())
 
 
 @rig_app.command("agent-image")
