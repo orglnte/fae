@@ -61,7 +61,7 @@ DEFAULT_EXPERIMENT_DIR = "experiment"
 # The keys a child process (a bring-up script, a docker/kubectl call) reads.
 _EXPORT_KEYS = (
     "AGENT_CLI", "EXPERIMENT_DIR", "FP_EXTRA_FILES",
-    "REPO_ROOT", "SHAPE_VARIATION", "WORKSPACES_DIR", "WORK_SLOTS", "AGENT_IMAGE",
+    "REPO_ROOT", "WORKSPACES_DIR", "WORK_SLOTS", "AGENT_IMAGE",
     "AGENT_HOME", "CPUSET_MEASURED",
 )
 
@@ -133,9 +133,6 @@ def render_default_toml(definition, experiment_dir=None):
            "# authenticates through its own creds home, never a value here.",
            "",
            "[run]",
-           "# 1 = every attempt runs the experiment's full gate (all arrangements);",
-           "# 0 = the single seed arrangement. Env SHAPE_VARIATION overrides.",
-           "shape_variation = 1",
            "# The agent a spawn without MODEL= runs (a tag of the experiment's",
            "# agents.toml).",
            'model = "opus"',
@@ -221,7 +218,7 @@ def _fp_extra_files(root, trees):
 # Every env var _build consults; the cache key includes all of them, so a
 # changed override (a test's, or a spawn's) never reads a stale config.
 _KEY_ENV = (
-    "MODEL", "EFFORT", "SMOKE", "SHAPE_VARIATION", "SHAPE_GATE", "STREAM_AGENT",
+    "MODEL", "EFFORT", "SMOKE", "SHAPE_GATE", "STREAM_AGENT",
     "WORK_SLOTS", "AGENT_HOME", "AGENT_IMAGE", "RESULTS_DIR",
     "RIG_LOCK_DIR", "VERIFY_LOCK_DIR", "WORKSPACES_DIR", "SMOKE_WORKSPACES_DIR",
     "EXPERIMENT_DIR",
@@ -267,14 +264,12 @@ def _build(root, env, toml, definition=None):
     v = dict(_ENGINE_DEFAULTS)
     v.update({k: str(val) for k, val in rig.items() if k.isupper()})
     v["ATTEMPT_BUDGET"] = str(ATTEMPT_BUDGET)
-    sv = env.get("SHAPE_VARIATION")
-    v["SHAPE_VARIATION"] = sv if sv else str(run.get("shape_variation", 1))
-    if v["SHAPE_VARIATION"] not in ("0", "1"):
-        raise SystemExit(f"FATAL config: SHAPE_VARIATION must be 0 or 1, got {v['SHAPE_VARIATION']!r}")
-    # Not read through Config.get(): cell.py's gate_shapes reads this key raw
-    # off .values so an explicit "" (single-arrangement smoke) is not coerced
-    # back to the "all" default the way get()'s empty-is-falsy fallback would.
+    # The gate is the experiment's (its GATE); only a smoke cell, a pipeline
+    # check that is never scored, may cut it to the seed arrangement.
     v["SHAPE_GATE"] = env.get("SHAPE_GATE", "")
+    if v["SHAPE_GATE"] not in ("", "all") and not smoke:
+        raise SystemExit("FATAL config: SHAPE_GATE cuts the experiment's gate; "
+                         "only a smoke cell (SMOKE=1) may set it")
     v["STREAM_AGENT"] = env["STREAM_AGENT"] if "STREAM_AGENT" in env \
         else ("1" if run.get("stream_agent", True) else "")
     v["MODEL"] = model

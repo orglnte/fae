@@ -520,8 +520,8 @@ every prior agent's memory — cross-run leakage invisible in the results.
   attempt must pass, whether the seeded one rotates with the attempt number,
   and the sentence the retry prompt carries; the engine reads its arity
   wherever a gate is counted (`ledger.parse`'s `gate_n`, the fleet's GATE
-  column). `SHAPE_VARIATION=0` (or `SHAPE_GATE` ≠ `all`) runs the single seed
-  arrangement.
+  column). Only a smoke cell may set `SHAPE_GATE` ≠ `all` for the single
+  seed arrangement; the config refuses it for any other cell.
 - **The elastic-resource law** (`fae/cell/contrib/elastic_resource/`)
   judges a resource scaled 0↔1 under load relative to the store's knee, not
   to the generator's clock, so the verdict does not depend on how fast this

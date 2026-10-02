@@ -466,18 +466,12 @@ class Cell:
     def gate_shapes(self):
         """The arrangements this attempt must pass.
 
-        With SHAPE_VARIATION on (the fleet's setting), GREEN means the policy
-        handles every arrangement the experiment declares — for the load
-        shape, the multi-spike orderings that test RE-ACQUISITION, where a
-        latch that never re-arms is exactly what a single pass cannot see.
-        Off, or SHAPE_GATE set to anything but "all", is the single seed
-        arrangement.
+        Every arrangement the experiment's gate declares: GREEN means the
+        build passes all of them. A smoke cell (a pipeline check, never
+        scored) may set SHAPE_GATE to anything but "all" for the single seed
+        arrangement; the config refuses it anywhere else.
         """
-        # From config, and by raw value: the setting is not exported, so the
-        # environment reports it unset; and get() would coerce the empty string
-        # — which is how the gate is switched off — back to the default.
-        if str(self.conf.values.get("SHAPE_VARIATION", "1")) == "1" and \
-                str(self.conf.values.get("SHAPE_GATE") or "all") == "all":
+        if str(self.conf.values.get("SHAPE_GATE") or "all") == "all":
             return tuple(self.gate_def.arrangements)
         return (None,)
 
@@ -904,10 +898,8 @@ class Cell:
         # the verify probes a cache that only the setup hook brings up.
         arena = self.arena().open()
         results = []
-        # gate_shapes reads conf.values, not the environment (the setting is
-        # never exported), so forcing the full gate must write there too.
-        prev = {k: self.conf.values.get(k) for k in ("SHAPE_VARIATION", "SHAPE_GATE")}
-        self.conf.values["SHAPE_VARIATION"] = "1"
+        # a re-verify always runs the full gate
+        prev = {"SHAPE_GATE": self.conf.values.get("SHAPE_GATE")}
         self.conf.values["SHAPE_GATE"] = "all"
         try:
             rc, _ = self.setup(arena)

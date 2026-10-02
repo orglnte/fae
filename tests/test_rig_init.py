@@ -25,8 +25,7 @@ class TestTheRenderedDefaults(unittest.TestCase):
         self.doc = tomllib.loads(self.text)
 
     def test_every_engine_section_is_there_with_its_default(self):
-        self.assertEqual(self.doc["run"], {"shape_variation": 1, "model": "opus",
-                                           "stream_agent": True})
+        self.assertEqual(self.doc["run"], {"model": "opus", "stream_agent": True})
         self.assertEqual(self.doc["paths"]["experiment_dir"], _config.DEFAULT_EXPERIMENT_DIR)
         self.assertEqual(self.doc["slots"]["work"], 8)
         self.assertNotIn("models", self.doc)
@@ -39,7 +38,7 @@ class TestTheRenderedDefaults(unittest.TestCase):
             env = {"EXPERIMENT_DIR": os.environ["EXPERIMENT_DIR"]}
             with_file = _config._build(d, env, tomllib.loads(self.text)).values
             without = _config._build(d, env, {}).values
-        for key in ("MODEL", "EFFORT", "SHAPE_VARIATION", "WORK_SLOTS", "AGENT_IMAGE"):
+        for key in ("MODEL", "EFFORT", "WORK_SLOTS", "AGENT_IMAGE"):
             self.assertEqual(with_file[key], without[key], key)
         # a lock cap is written as the variant's own default; with no file the
         # arena reads that default from the variant instead
