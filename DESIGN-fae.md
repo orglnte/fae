@@ -311,8 +311,9 @@ answer as charged.**
 **Validated: the engine behaves as specified.**
 
 5. **State machine.** `.tla/Runs.tla` specifies the orchestration; `cli.py
-   rig selftest` replays the logged live transitions against it when
-   `tla_verify` is available, and says so when it is not.
+   experiment check --trace` replays the logged live transitions against it
+   when `tla_verify` is available, and names the missing checker when it is
+   not.
 6. **Tests.** `tests/` is the engine's suite. `pyproject.toml` configures
    `mutmut` over `fae/` and `cli.py`; no mutation score is published.
 7. **Provenance.** Every verdict carries the fingerprint of the task,

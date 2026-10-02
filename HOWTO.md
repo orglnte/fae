@@ -442,13 +442,19 @@ EXPERIMENT_DIR=shout python3 cli.py experiment check --walk
 check goes in the order of this howto: the host, the config and the
 definition, each variant file (its authoring surface, its liveness probe,
 its template and inputs), every active variant seeded into a throwaway workspace
-root by the same `prepare()` a real cell runs, the docker daemon, and each
-variant's infra preflight (`ok()`) with the verifier image built, so the first
-cell does not pay for the build under a lock. `--walk` explains each step
-before running it and, on a failure, names the fix and waits for you to
-retry. Without `--walk` it prints a checklist and exits 1 on any failure;
-`--static` skips the docker steps while you are still writing the
-definition; `--smoke` adds section 8's reference run.
+root by the same `prepare()` a real cell runs, the engine's and the corpus's
+invariants (the engine's own functions, a shell that names cells as the
+scheduler does, the experiment's own checks, finished cells whose record
+disagrees with their state), the docker daemon, each variant's infra
+preflight (`ok()`) with the verifier image built, so the first cell does not
+pay for the build under a lock, the agents' images (built when missing; a
+CLI behind upstream is noted), and no leftovers of dead cells (`experiment
+repair` reaps them). `--walk` explains each step before running it and, on
+a failure, names the fix and waits for you to retry. Without `--walk` it
+prints a checklist and exits 1 on any failure; `--static` skips the docker
+steps while you are still writing the definition; `--smoke` adds section 8's
+reference run; `--trace` replays the fleet's recorded transitions against
+the TLA+ model of the cell lifecycle.
 
 ## 8. Run a cell with no agent
 
@@ -515,7 +521,8 @@ starts an agent shows up here instead of after a night of tokens.
 
 Build the agent base image once (it holds the three real clients too; a
 variant whose file names `[authoring] tools` gets its own layer over it,
-built by the engine — `python3 cli.py rig agent-image --rebuild`):
+built by the engine — `python3 cli.py experiment check` builds what is
+missing):
 
 ```sh
 bash fae/agent-container/build.sh

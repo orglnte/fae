@@ -36,7 +36,7 @@ verdict rules: [`AGENTS.md`](AGENTS.md).
 Then let the preflight localize anything missing:
 
 ```sh
-python3 cli.py experiment check      # the definition, every variant file, each variant's infra (--walk: step by step)
+python3 cli.py experiment check      # the definition, every variant file, the invariants, each variant's infra, the agents' images, no leftovers (--walk: step by step; --trace: the TLA+ replay)
 python3 cli.py experiment infra  # [ok]/[HALT] per variant: its daemon, tools and images
 python3 cli.py experiment smoke      # one reference cell per way of being judged, one arrangement (--full-gate: the whole gate)
 ```
@@ -53,8 +53,8 @@ python3 cli.py experiment run|pause|resume|stop|diagnose|reconcile|queue-add …
 python3 cli.py experiment status                              # read-only table
 python3 cli.py results score|grade|validate|aggregate …
 python3 cli.py experiment init|check|infra|smoke|prepare|verb …   # the experiment this root runs; verb: its own commands
-python3 cli.py rig selftest|trace-reset|agent-image|zombies …          # the harness itself
-python3 cli.py tools run <name> [args]                   # one instrument standalone: the engine's, a contrib block's, the experiment's
+python3 cli.py rig trace-reset|tool …                    # the harness itself
+python3 cli.py rig tool <name> [args]                    # one instrument standalone: the engine's, a contrib block's, the experiment's
 ```
 
 **The rule**: a verb acts directly iff it touches exactly one cell; anything

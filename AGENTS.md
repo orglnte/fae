@@ -256,9 +256,9 @@ writes an `ALERT SETUP-FAILED` ledger line.
   fleet. It runs in
   the foreground; Ctrl-C stops admission and supervision while live cells
   keep running. `experiment diagnose` is the read-only preview; `experiment
-  repair` the one-shot engine verb. Nothing else reaps: the fleet console
-  lists zombies and touches none, a spawn clears only its own cid, and
-  `cli.py rig zombies --reap` is the operator's deliberate verb.
+  repair` the one-shot engine verb, and the operator's deliberate reap.
+  Nothing else reaps: the fleet console and `experiment check` list zombies
+  and touch none, and a spawn clears only its own cid.
 - **A reaper's predicates name every holder shape.** A cell loop, `exp1`,
   `reverify` and `smoke` all hold the verify lock in-process around a
   verifier child that inherits no fd (`_VERIFY_HOLDER_ARGV`,
@@ -581,10 +581,11 @@ every prior agent's memory — cross-run leakage invisible in the results.
   unexplained errors taint. Parsers of recorded verdict text are pinned by
   selftest cases taken verbatim from real `metrics.json`.
 - **TLA+ conformance.** `.tla/Runs.tla` plus `tla_verify` (`$FAE_TLA_VERIFY`,
-  else `tla_verify` on `PATH`; with neither, selftest says so and skips
-  the replay): `--trace` replays
+  else `tla_verify` on `PATH`; with neither, the check names the missing
+  checker): `--trace` replays
   one cell's ledger per attempt at verify-end; `--live-trace` replays the
-  global `.orch/transitions.log` against the spec (`cli.py rig selftest`). A
+  global `.orch/transitions.log` against the spec (`cli.py experiment check
+  --trace`). A
   fresh prepare that wipes a workspace logs `Retire <cid>`: the id then names
   a NEW cell, which the replay judges from Init as `<cid>#<n>` — without it
   the new cell's `Spawn` is judged against the old cell's verdict and every
@@ -648,8 +649,8 @@ every prior agent's memory — cross-run leakage invisible in the results.
   root) — are hashed, content and path, into the fingerprint
   (`fae/cell/rig.py:fp()`) that pins a cell; a mismatch between a cell's
   start and any of its verifies voids that attempt. Edit them only with no
-  cell running, apply multi-hunk patches whole, and run `cli.py rig selftest`
-  after. An empty experiment tree or a missing declared file is FATAL, never
+  cell running, apply multi-hunk patches whole, and run `cli.py experiment
+  check` after. An empty experiment tree or a missing declared file is FATAL, never
   a silently smaller surface. `fae/mutex.py`, `cli.py`, `fae/driver/*.py`
   and the root docs are not guarded.
 - **A drain is only a window because it stops CONDUCT.** Pausing covers
