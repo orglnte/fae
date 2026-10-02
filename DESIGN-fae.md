@@ -13,7 +13,7 @@ runbook, and [`HOWTO.md`](HOWTO.md) builds an experiment from nothing.
 
 ## 1. What is measured
 
-The unit is a **cell**: one model, one arm, one condition, one task and one
+The unit is a **cell**: one model, one variant, one task and one
 repetition, run in a workspace of its own. A cell is a sequence of attempts
 under a fixed budget. Each attempt has three steps:
 
@@ -30,7 +30,7 @@ or **revoked** (the operator withdrew it).
 A cell yields:
 
 1. **Attempts to green**, the primary measure. Across repetitions it is a
-   distribution per (model, arm, condition), read as a reliability curve.
+   distribution per (model, variant), read as a reliability curve.
 2. **The authored surface**: the lines, files and languages the agent wrote,
    counted from content, not from file names.
 3. **Graded defects**, when a grading pass is run: codes from the
@@ -58,31 +58,41 @@ A cell yields:
 
 ## 3. Vocabulary
 
-- **Arm** — one way of authoring the task, declared as a variant class: the
-  docs the agent is given, the infra it may touch, the tooling it
-  targets. Arms of one **tech** share an infra, an image and a contract;
-  they may still be told different things (their docs name, §4).
-- **Condition** — what an arm's agent is told, on an information ladder
-  (for example: source only, API docs, a how-to). The matrix says which
-  conditions each arm runs under.
-- **Task** — the skeleton the agent starts from, the prompt, and the docs
-  per arm and condition. It is versioned together with the verifier, since
-  the two are correlated by construction.
+- **Variant** — one complete set of what the agent is given and how its
+  work is judged: the code it starts from, what it may write, what it
+  reads, its tools, how the verifier runs what it wrote, and the infra
+  around both. Experimental design calls this a *treatment* (a
+  *condition* in psychology, an *arm* in clinical trials); "variant"
+  because more readers know the word. A variant is one file,
+  `<experiment>/variants/<id>.toml` (§5), and the file is the whole of it:
+  two variants differ exactly where their files differ.
+- **Factors** — what a variant is a level of, as data in its file (for
+  example `tech`, `access`, `docs`). The engine pools nothing by them;
+  results group by variant and by each factor (§9).
+- **Task** — the skeleton every variant's template starts from, and the
+  prompt. It is versioned together with the verifier, since the two are
+  correlated by construction.
 - **Arrangement** and **gate** — the verifier judges an attempt under
   several arrangements (for example, orderings of load events); the gate
   passes only if all of them pass. How many, and whether the first one
   rotates with the attempt number, is the experiment's choice.
 - **Verdict** — pass or fail, the stage that failed, and whether the attempt
   is charged. An uncharged failure is the rig's, and the attempt is refunded.
-- **Infra** — what an arm runs on, described by four independent
-  properties:
-  1. the *authoring infra*, provisioned for the cell's lifetime;
-  2. *access*, whether the agent's container can reach it;
+- **Infra** — what exists around a variant's program, an object of its
+  own (an `Infra` class the variant file names, instantiated per cell with
+  the variant), described by four independent properties:
+  1. the *cell infra*, provisioned for the cell's lifetime;
+  2. *access*, whether the agent's container can reach it
+     (`access_infra` in the file);
   3. the *cap*, how many live infra of that kind the host carries at
-     once (the arm lock);
-  4. the *verify infra*, provisioned per arrangement by the verifier.
-- **Retired arm** — an arm that still names existing cells but is never
-  scheduled again.
+     once (the variant's lock);
+  4. the *verify infra*, provisioned per arrangement inside the
+     verifier's container.
+  Variants that share an infra class share its code; what one variant
+  sets differently (its access, its parameters) the class reads from the
+  variant.
+- **Retired variant** — a variant that still names existing cells but is
+  never scheduled again (`retired = true`).
 
 ## 4. Layers
 
@@ -109,34 +119,66 @@ everything the verifier runs executes in containers.
 ## 5. The experiment definition
 
 An experiment's `__init__.py` is loaded by path as the package
-`experiment`. It declares:
+`experiment`. Its variants are the files beside it, one per variant:
 
-1. **Arms** (`variant_classes()`): per arm its name, tech, conditions, lock
-   and cap, the files the agent may author, its authoring and verify
-   infra, preflight and liveness probes, the names of what it provisions
-   (so the reaper can find leftovers), an optional image layer, and
-   optionally a docs name (`DOCS`) when arms of one tech are told different
-   things: the api doc is then `any.<DOCS>[.<condition>].api.md`.
-2. **Matrix, retired arms and seed docs** (`MATRIX`, `RETIRED`,
-   `SEED_DOCS`): which conditions each arm runs; the arms kept only for
-   their existing cells; and the doc each (arm, condition) must receive,
-   with a floor on its size, so a missing or truncated doc stops the cell
-   instead of falling back silently.
-3. **Gate** (`GATE`): the arrangements and the sentence the retry prompt
+```toml
+# experiment/variants/<id>.toml — the id is the file's stem
+label = "..."                       # what reports show; the id by default
+retired = false
+factors = { ... }                   # what this variant is a level of
+
+[authoring]                         # what the agent gets
+template = ["task/skeleton", ...]   # directories merged into the workspace, in order
+surface = { files = [...], prefixes = [...] }   # what it may write, within the template
+tools = "..."                       # its image layer, over the agents' base
+access_infra = false                # its container reaches the cell's infra
+[authoring.inputs]                  # workspace path = source file it reads
+"TODO.md" = "task/T1.PROMPT.md"
+
+[verify]                            # how the result is judged
+image_dir = "..."                   # the verify container's layer
+reference = "..."                   # the known answer, for smoke
+[verify.run]                        # how the verifier runs the artifacts
+command = [...]
+serves = 8080                       # kept running on the cell's network; else run once
+image = "..."                       # or image_dir; none: the verify image
+build = [...]
+
+[infra]                             # optional: the default checks docker and the run image
+class = "module:Class"              # an Infra subclass of the experiment package
+lock = "..."                        # held for the cell's life; lock_slots its default cap
+params = { ... }                    # the class's own settings
+```
+
+Paths are relative to the experiment directory. A key the engine does not
+know is refused, so a typo cannot drop a declaration; an input the template
+also provides is refused, so the agent's input has one source. Seeding is
+the template directories merged in order plus each input copied to its
+path, recorded in the manifest the surface is checked against. Everything
+an agent of a variant reads is therefore named in that variant's file.
+
+`__init__.py` declares the rest:
+
+1. **Gate** (`GATE`): the arrangements and the sentence the retry prompt
    carries.
-4. **Verifier** (`verifier_class()`, §6).
-5. **Configuration** (`CONFIG`): the machine-local keys it reads from
+2. **Verifier** (`verifier_class()`, §6).
+3. **Configuration** (`CONFIG`): the machine-local keys it reads from
    `fae.toml`, with their defaults. Host paths, caps, load tuning and model
    tags are machine-local and stay out of version control; the defaults do
    not.
-6. **Fingerprint trees** (`fingerprint_trees`): source outside the
+4. **Fingerprint trees** (`fingerprint_trees`): source outside the
    experiment directory that a verdict depends on, such as an SDK.
-7. **Taint rules, reporting and verbs**: how a rig fault shows in this
+5. **Taint rules, reporting and verbs**: how a rig fault shows in this
    experiment's evidence, the reference workspace the grader compares
    against, how model ids pool into scoreboard rows, the experiment's own
    reading of the results table, and its reference cell and self-test.
-8. **The agent image layer**: the tools its agents need on top of the
-   engine's clients.
+6. **The agents' base image** (`Dockerfile.agent-base` at the root): the
+   engine's clients and what every variant's agent needs.
+
+Python exists in an experiment only for its infra classes (one per kind of
+infra; the methods: `cell_setup`/`cell_teardown`, `verify_setup`/
+`verify_teardown`, `ok`, `alive`, and the names it provisions, `PREFIXES`
+and `identities`) and for its verifier.
 
 ## 6. Verification and the fingerprint
 
@@ -150,19 +192,22 @@ one:
    re-check, persistence, the ledger, the gate loop, refunds and stand-downs.
    It knows no stage name and no technology.
 2. **The experiment's verifier** decides what green means, the same way for
-   every arm: the arrangements, the load profile, the law, the end-to-end
+   every variant: the arrangements, the load profile, the law, the end-to-end
    checks, which failures are the rig's, which contract breaks stand a cell
-   down, the metrics, and the image it runs in. It reaches an arm only
-   through the arm's class.
-3. **Each arm's verify hooks and contract** decide how that arm's artifacts
-   are brought up in the infra the verifier measures, and check the
-   promises the arm's docs make. They hold no lock and give no verdict.
+   down, the metrics, and the image it runs in. It runs the artifacts as
+   the variant's `[verify.run]` says (`secrunner.for_variant`): it starts
+   them, holds their readiness and stops them before the infra's teardown.
+   It reaches a variant's infra only through the infra class.
+3. **Each infra class's verify hooks and contract** decide what world an
+   arrangement runs in (`verify_setup` / `verify_teardown`), and check the
+   promises the variant's docs make. They hold no lock and give no verdict.
 
-The test of the split: changing the law touches only (2); adding an arm
-touches only (3); changing how verifiers run or refund touches only (1).
+The test of the split: changing the law touches only (2); adding a variant
+is a file, and a new kind of infra touches only (3); changing how verifiers
+run or refund touches only (1).
 
 **The fingerprint** records provenance: this verdict came from exactly this
-task, verifier, arms and engine. It hashes the content and path of every
+task, verifier, variants and engine. It hashes the content and path of every
 file in the experiment tree, the declared fingerprint trees and the engine's
 cell package. It is pinned when a cell's driver starts, and a mismatch at a
 verify voids that verify. It hashes content rather than git objects, so an
@@ -196,7 +241,7 @@ by atomic renames. Conduct admits specs round-robin across model lanes under
 a global cap and a per-lane cap; stands cells down on provider walls and
 cools their lane; holds budget lanes near a weekly usage cap; repairs
 crashed or hung cells by requeuing them; validates finished cells; and reaps
-orphaned infra by the names the arms and verifiers declare.
+orphaned infra by the names the infra classes and verifiers declare.
 
 Every lock is a `flock(2)` on a file held by the driver's own descriptor, so
 recovery after any crash is the kernel's. The orchestration's state machine
@@ -207,11 +252,12 @@ that log, so a reused id is a new cell rather than a contradiction.
 ## 9. Reporting
 
 `cli.py results score` validates every finished cell, writes its
-`score.json`, and prints the ranked table: per (model, arm, condition), the
-green rate, attempts to green, authored lines and error rates, with
-significance against a baseline. It can cut the table to one driver and
-compare it with its predecessor. The engine's table names no experiment's
-arms or metrics; the experiment's `report_summary` adds its own reading.
+`score.json`, and prints the ranked table: per (model, variant), the green
+rate, attempts to green, authored lines and error rates, with significance
+against a baseline; the aggregate also groups by each factor the variant
+files declare. It can cut the table to one driver and compare it with its
+predecessor. The engine's table names no experiment's variants or metrics;
+the experiment's `report_summary` adds its own reading.
 Grading is a separate, explicit step with a named judge model.
 
 ## 10. Trust and limits
@@ -222,7 +268,7 @@ Grading is a separate, explicit step with a named judge model.
    sealed.
 2. **One host is one rig.** The verify lock serialises measurements across
    the whole fleet on a machine. Concurrency is bounded by the work slots and
-   the arm caps; changing either changes the conditions every cell is
+   the infra caps; changing either changes the circumstances every cell is
    measured under.
 3. **Host sleep and host speed are rig faults, not verdicts.** Supervision
    excludes host sleep from every age it judges, a verify the host slept
@@ -237,7 +283,7 @@ Each check below names where to run or read it.
 **Validated: the rig judges a known answer as green and a known wrong
 answer as charged.**
 
-1. **Reference solutions.** Every arm of the example experiments carries a
+1. **Reference solutions.** Every variant of the example experiments carries a
    known-good answer; `cli.py experiment smoke` runs each through the full
    pipeline (sealed workspace, the verifier's container, the ledger) with
    no agent, and `--full-gate` runs every arrangement. A reference that is
@@ -268,7 +314,7 @@ answer as charged.**
 6. **Tests.** `tests/` is the engine's suite. `pyproject.toml` configures
    `mutmut` over `fae/` and `cli.py`; no mutation score is published.
 7. **Provenance.** Every verdict carries the fingerprint of the task,
-   verifier, arms and engine that produced it (§6), every cell records its
+   verifier, variants and engine that produced it (§6), every cell records its
    driver (`IMPL`), and every attempt records the agent client and version
    it ran with (the ledger's AGENT line). Client versions follow upstream
    and are not part of the fingerprint.
@@ -276,7 +322,7 @@ answer as charged.**
 **Not validated yet.**
 
 8. **Run-to-run variance.** Cells are repeated (reps), but no test-retest
-   study of the same model and arm, run at different times, is reported
+   study of the same model and variant, run at different times, is reported
    with the framework. How much of a difference between two rows is noise
    is left to each experiment's statistics.
 9. **Grader reliability.** `fae/scoring/grader_agreement.py` computes

@@ -4,7 +4,7 @@
 
 An FAE experiment runs coding agents against a task, judges every attempt
 with a verifier you write, and records how many attempts each agent needed.
-The unit of work is a **cell**: one `(model, variant, condition, task, rep)`
+The unit of work is a **cell**: one `(model, variant, task, rep)`
 run with its own workspace, its own attempt budget (10) and its own ledger.
 A fleet of cells under one scheduler is an experiment.
 
@@ -68,8 +68,8 @@ git clone <fae repo> fae && cd fae
 one setting, `EXPERIMENT_DIR` (the environment, else `[paths]
 experiment_dir` in `fae.toml`, default `experiment`), and loads that
 directory as a Python package by path. It never imports your experiment by
-name and knows nothing about its vocabulary: arms, stages, metrics, the
-lot, come from your definition.
+name and knows nothing about its vocabulary: variants, stages, metrics, the
+lot, come from your definition and its variant files.
 
 The experiment we are about to write is called **shout**: the agent must
 make a program that reads one line from stdin and prints it upper-cased.
@@ -77,20 +77,18 @@ Its tree:
 
 ```
 shout/
-├── __init__.py                 # the definition: what the engine reads
+├── __init__.py                 # the definition: the gate, the verifier
 ├── task/
 │   ├── T1.PROMPT.md            # the agent's brief (becomes TODO.md)
 │   └── skeleton/
 │       └── README.md           # every variant's common files
 ├── variants/
-│   ├── __init__.py             # VARIANTS = (Python,)
+│   ├── python.toml             # the variant: what the agent gets, how it is judged
 │   └── python/
-│       ├── __init__.py         # class Python(Variant)
-│       └── seed/
+│       └── seed/               # the files python.toml names
 │           ├── overlay/shout.py                 # the stub the agent starts from
 │           ├── T1.python.project_layout.md      # what the agent may change
-│           ├── any.python.api.md                # the contract (base doc)
-│           ├── any.python.apidocs.api.md        # the contract, "apidocs" condition
+│           ├── any.python.api.md                # the contract
 │           └── reference/overlay/shout.py       # the known-good answer
 └── verifier/
     ├── __init__.py             # class ShoutVerifier(Verifier)
@@ -99,11 +97,15 @@ shout/
 
 Three things map onto three interfaces:
 
-| Directory | Interface | Answers |
+| Path | Interface | Answers |
 |---|---|---|
-| `__init__.py` | `Definition` | which variants, which docs, which gate, which verifier |
-| `variants/<tech>/` | `Variant` | what the agent authors, what it is handed, what infra a cell needs |
+| `__init__.py` | `Definition` | which gate, which verifier, which config |
+| `variants/<id>.toml` | a variant | what the agent starts from, may write, reads, runs with; how its program is run; its infra |
 | `verifier/` | `Verifier` | how one attempt is judged, in what environment |
+
+A variant that needs infra beyond a container of an image (a sidecar, a
+cluster) names an infra class, `[infra] class = "module:Class"`, Python in
+your package (§13). Shout needs none.
 
 Create the skeleton:
 
@@ -114,25 +116,15 @@ mkdir -p shout/task/skeleton shout/variants/python/seed/overlay \
 
 ## 3. Write the definition
 
-`shout/__init__.py` is what the engine loads. Keep it light: the variants
-and the verifier are returned by functions so importing the definition does
-not pull docker-touching code in before the config has been read.
+`shout/__init__.py` is what the engine loads. Keep it light: the verifier
+is returned by a function so importing the definition does not pull
+docker-touching code in before the config has been read.
 
 ```python
 """shout — read one line, print it upper-cased. The smallest experiment."""
 from fae.cell.experiment import Gate
 
 NAME = "shout"
-
-
-def variant_classes():
-    from .variants import VARIANTS
-    return VARIANTS
-
-
-# (arm, condition) -> (the doc file the agent is handed, its minimum line count).
-# The engine checks the file exists and is at least that long before a cell starts.
-SEED_DOCS = {("python", "apidocs"): ("any.python.apidocs.api.md", 5)}
 
 # One arrangement per attempt. Gate(("A", "B", "C")) would run the verifier
 # three times per attempt, and green means all three passed.
@@ -144,16 +136,17 @@ def verifier_class():
     return ShoutVerifier
 ```
 
-Everything except `variant_classes` is optional and has an engine default.
-The full list is the docstring of `fae/cell/experiment.py`; the ones you
-will meet later are `MATRIX` (derived from each variant's `CONDITIONS` when
-absent), `CONFIG` (machine-local keys your experiment needs from
-`fae.toml`), `taint_rules` and `verbs`.
+Everything here is optional and has an engine default except
+`verifier_class` (a cell cannot verify without one). The full list is the
+docstring of `fae/cell/experiment.py`; the ones you will meet later are
+`CONFIG` (machine-local keys your experiment needs from `fae.toml`),
+`taint_rules` and `verbs`. The variants are not declared here: they are
+the files in `variants/`.
 
-A **condition** is the information axis of the study: the same task under
-different documentation. `apidocs` is the only one here. A **variant** (in
-the paper, an arm) is the design alternative: `python` here, three
-languages in the calculator.
+A **variant** is one complete set of what the agent is given and how its
+work is judged; experimental design calls it a treatment. `python` here,
+three languages in the calculator. Two variants that differ only in the
+docs the agent reads are two files that differ in one input.
 
 ## 4. Write the task
 
@@ -188,62 +181,58 @@ experiment can carry several tasks side by side.
 
 ## 5. Write the variant
 
-A variant answers three questions: what does the agent author, what is it
-handed, and what does a cell of this variant need from the host. It also
-declares the image its program is built and run in, because the verifier
-will run the agent's program only inside a container of that image.
+A variant is a file. It answers what the agent starts from and may write,
+what it reads, and how the verifier runs what it wrote.
 
-`shout/variants/__init__.py`:
+`shout/variants/python.toml` (the id is the file's stem, `python`):
 
-```python
-from .python import Python
+```toml
+[authoring]
+template = ["task/skeleton", "variants/python/seed/overlay"]
+surface = { files = ["shout.py"] }      # the agent may write this; the rest is restored
 
-VARIANTS = (Python,)
+[authoring.inputs]
+"TODO.md" = "task/T1.PROMPT.md"
+"docs/project.md" = "variants/python/seed/T1.python.project_layout.md"
+"docs/python.md" = "variants/python/seed/any.python.api.md"
+
+[verify]
+reference = "variants/python/seed/reference/overlay"
+
+[verify.run]
+image = "python:3.12.3-slim"            # where the agent's program runs
+command = ["python3", "shout.py"]
 ```
 
-`shout/variants/python/__init__.py`:
+What each part does:
 
-```python
-"""A Python program, run by the image's interpreter."""
-from fae.cell.infra.secrunner import SecRunnerVariant
+- `[authoring] template`: directories merged into the agent's workspace, in
+  order, a later one winning on a shared path. `surface`: the exact files
+  (`files`) and directory prefixes (`prefixes`) the agent may write;
+  every other seeded file is restored before a verdict. Required: a cell
+  of a variant without one is refused.
+- `[authoring.inputs]`: what the agent reads, each source file copied to
+  its workspace path. That is the whole seal on what an agent can read: an
+  input the template also provides is refused, so every file has one
+  source. The prompt tells the agent to read `TODO.md`.
+- `[verify] reference`: the known answer, laid over the template for a
+  reference (smoke) cell.
+- `[verify.run]`: how the verifier runs the artifacts
+  (`secrunner.for_variant`): `command` in `image` (a pinned tag, or
+  `image_dir`, a directory with a Dockerfile the engine builds and tags by
+  content; none: the verify image), `build` first when the program needs
+  compiling. A program that `serves` a port is kept running on the cell's
+  network; any other runs once, with no network.
 
+A key the engine does not know is refused, so a typo cannot drop a
+declaration. A file with no `[infra]` gets the engine's default infra:
+before every attempt the docker daemon answers and the run image is
+present (`docker pull` it, or built from `image_dir`), else the cell halts
+before an attempt is spent; before every arrangement, and after a charged
+fail, the daemon still answers, else the arrangement is void rather than
+scored against the agent.
 
-class Python(SecRunnerVariant):
-    ARM = "python"
-    TECH = "python"
-    CONDITIONS = ("apidocs",)
-    # (exact files, directory prefixes) the agent may write; every other
-    # seeded file is restored before a verdict
-    AUTHORING_SURFACE = (("shout.py",), ())
-    IMAGE = "python:3.12.3-slim"      # where the agent's program runs
-    RUN = ("python3", "shout.py")
-```
-
-`SecRunnerVariant` is the variant of a program that needs nothing but a
-runtime image. It supplies what every variant owes the engine:
-
-- `infra_ok()`, asked before every attempt: the docker daemon answers
-  and the image is present (`docker pull` it, or give `RUNTIME_DIR`, a
-  directory with a Dockerfile the engine builds and tags by content, in
-  place of `IMAGE`). False halts the cell before an attempt is spent; the
-  agent never sees a rig fault as its own failure.
-- `infra_alive()`, asked before every arrangement and after a charged
-  fail: a daemon that died under the measurement voids the arrangement
-  instead of scoring the agent. A variant of your own that does not
-  override it is refused at preflight.
-- `run(cid, workdir, argv, stdin, timeout_s)`, which the verifier calls:
-  the program in a container of the image, no network, `workdir` at
-  `/workspace`, its exit code and its stdout and stderr apart. `BUILD`, an
-  argv, is what the verifier runs first when the program needs compiling.
-
-`author_setup`/`author_teardown` (what the agent needs while it authors:
-a cluster, a docker-in-docker sidecar) and `verify_setup`/`verify_teardown`
-(what one arrangement runs on, brought up fresh) are no-ops by default; a
-program that runs in one container needs neither. An experiment whose
-program needs an infra of its own subclasses `Variant` and writes them,
-with its own `infra_ok` and `infra_alive`.
-
-Now the seed: what the agent is handed on top of the skeleton.
+Now the files it names: what the agent is handed on top of the skeleton.
 
 `shout/variants/python/seed/overlay/shout.py`, the stub:
 
@@ -272,8 +261,7 @@ if __name__ == "__main__":
 The verifier runs `python3 shout.py` with one line on stdin.
 ```
 
-`shout/variants/python/seed/any.python.api.md` and, identical for now,
-`any.python.apidocs.api.md`:
+`shout/variants/python/seed/any.python.api.md`:
 
 ```markdown
 # The contract
@@ -289,14 +277,7 @@ dropped.
 | `42`         | `42`         |
 ```
 
-The doc grammar is `<task|any>.<tech>[.<condition>].api.md` and
-`<task>.<tech|arm>.project_layout.md`: the engine copies the prompt to
-`TODO.md`, the layout to `docs/project.md` and the api doc (the condition's
-when one exists, else the base) to `docs/<tech>.md` in the agent's
-workspace. That is the whole seal on what an agent can read. Two arms of
-one tech that must be told different things set `DOCS` on their variant
-class: their api doc is then `any.<DOCS>[.<condition>].api.md`, while the
-overlay, the layout fallback and `docs/<tech>.md` stay the tech's.
+The names are yours: the file says where each one goes.
 
 `shout/variants/python/seed/reference/overlay/shout.py`, the known-good
 answer. It is what you verify the rig with before any agent runs, and what
@@ -343,8 +324,8 @@ The engine tags the image by the content of this directory
 (`fae-shout-verifier:<sha12>`), builds it when missing and never rebuilds
 it otherwise. Change a pin, get a new image.
 
-`shout/verifier/__init__.py`. The variant's `run` does the container work
-(the engine's `infra/secrunner`: a container of the image over a
+`shout/verifier/__init__.py`. `secrunner.for_variant` does the container
+work from the variant's `[verify.run]` (a container of its image over a
 directory, no network, memory, pid and CPU ceilings, removed when the
 program ends or times out); `secrunner.fresh_copy` is the verifier's own
 copy of the artifacts, so nothing writes into the judged tree.
@@ -370,9 +351,10 @@ TIMEOUT_S = 20
 
 def run_case(variant, cid, workdir, line):
     """(stdout, error) of one container run with `line` on stdin."""
-    out, err, rc, error = variant.run(cid, workdir, variant.RUN, line + "\n", TIMEOUT_S)
-    if error:
-        return None, error
+    rc, out, err = secrunner.for_variant(variant, cid, workdir).run(
+        TIMEOUT_S, stdin=line + "\n", split=True)
+    if rc is None:
+        return None, err          # it never started, or it timed out
     if rc != 0:
         return None, f"exit {rc}: {err.strip()[-200:]}"
     return out.strip(), None
@@ -458,10 +440,10 @@ EXPERIMENT_DIR=shout python3 cli.py experiment check --walk
 
 `experiment init` offers the same walk when it has written the file. The
 check goes in the order of this howto: the host, the config and the
-definition, each variant (its authoring surface, its liveness probe, its
-seed tree), every cell of the matrix seeded into a throwaway workspace
+definition, each variant file (its authoring surface, its liveness probe,
+its template and inputs), every active variant seeded into a throwaway workspace
 root by the same `prepare()` a real cell runs, the docker daemon, and each
-variant's `infra_ok()` with the verifier image built, so the first
+variant's infra preflight (`ok()`) with the verifier image built, so the first
 cell does not pay for the build under a lock. `--walk` explains each step
 before running it and, on a failure, names the fix and waits for you to
 retry. Without `--walk` it prints a checklist and exits 1 on any failure;
@@ -476,13 +458,12 @@ artifacts", one attempt, the full gate:
 
 ```sh
 EXPERIMENT_DIR=shout MODEL=stub WORKSPACES_DIR=/tmp/shout-ws \
-  python3 -m fae.cell T1 python apidocs 1 \
+  python3 -m fae.cell T1 python 1 \
   --stub shout/variants/python/seed/reference/overlay
 ```
 
-The positional arguments are `TASK VARIANT CONDITION [REP]`; `MODEL` and
-`EFFORT` come from the environment and name the cell:
-`stub_high_python_apidocs_T1_r1`. `WORKSPACES_DIR` keeps this dry run out
+The positional arguments are `TASK VARIANT [REP]`; `MODEL` and `EFFORT`
+come from the environment and name the cell: `stub_high_python_T1_r1`. `WORKSPACES_DIR` keeps this dry run out
 of the real workspace root (default `workspaces.nosync/`).
 
 The exit code is the first thing to read:
@@ -493,7 +474,7 @@ The exit code is the first thing to read:
 | 45 | `HALT[infra]`: the host could not carry the cell; nothing charged |
 | 46 | the workspace is already sealed; a finished cell is read-only |
 
-Then the workspace, `/tmp/shout-ws/stub_high_python_apidocs_T1_r1/`:
+Then the workspace, `/tmp/shout-ws/stub_high_python_T1_r1/`:
 
 ```
 artifacts/            the workspace the agent (here: the stub) saw and edited
@@ -502,14 +483,14 @@ metrics.json          the last verify's numbers (your Verdict.metrics)
 verify.log            your verifier's log
 verifier.log          the engine's log of running your verifier
 arrangements/01-a1-seed-green/  every verify run: its logs and verdict.json
-hooks.log             what the variant logged (infra checks)
+hooks.log             what the variant's infra logged (its checks)
 .sealed               written on green or on a spent budget; the cell is done
 ```
 
 Look for the green line in the ledger:
 
 ```sh
-grep -P '\tITER\t' /tmp/shout-ws/stub_high_python_apidocs_T1_r1/iterations.log
+grep -P '\tITER\t' /tmp/shout-ws/stub_high_python_T1_r1/iterations.log
 ```
 
 Now prove a wrong answer is a **charged** fail, not a rig fault:
@@ -517,7 +498,7 @@ Now prove a wrong answer is a **charged** fail, not a rig fault:
 ```sh
 mkdir -p /tmp/broken && printf 'print(input())\n' > /tmp/broken/shout.py
 EXPERIMENT_DIR=shout MODEL=stub WORKSPACES_DIR=/tmp/shout-ws2 \
-  python3 -m fae.cell T1 python apidocs 1 --stub /tmp/broken
+  python3 -m fae.cell T1 python 1 --stub /tmp/broken
 ```
 
 The ledger should carry `ITER failed … stage=cases`, `metrics.json` should
@@ -532,8 +513,8 @@ sealed container, with the same two mounts and the same invocation as a
 real agent, and it audits what it was handed, so a bug in how the engine
 starts an agent shows up here instead of after a night of tokens.
 
-Build the agent base image once (it holds the three real clients too;
-an experiment that declares `AGENT_IMAGE_DIR` gets its own layer over it,
+Build the agent base image once (it holds the three real clients too; a
+variant whose file names `[authoring] tools` gets its own layer over it,
 built by the engine — `python3 cli.py rig agent-image --rebuild`):
 
 ```sh
@@ -545,7 +526,7 @@ Then run a cell whose agent fails twice and solves on the third attempt:
 ```sh
 EXPERIMENT_DIR=shout MODEL=testagent TESTAGENT_PLAN=fail,fail,green \
   WORKSPACES_DIR=/tmp/shout-ws3 \
-  python3 -m fae.cell T1 python apidocs 1
+  python3 -m fae.cell T1 python 1
 ```
 
 The ledger now shows three attempts: two `ITER failed`, then `ITER green`,
@@ -567,25 +548,25 @@ every attempt. `README.md` §1 has the per-CLI details.
 Start one cell in the background and watch it:
 
 ```sh
-EXPERIMENT_DIR=shout python3 cli.py cell spawn sonnet python apidocs --rep 1
+EXPERIMENT_DIR=shout python3 cli.py cell spawn sonnet python --rep 1
 EXPERIMENT_DIR=shout python3 cli.py fleet-status
-EXPERIMENT_DIR=shout python3 cli.py cell tail sonnet_high_python_apidocs_T1_r1
+EXPERIMENT_DIR=shout python3 cli.py cell tail sonnet_high_python_T1_r1
 ```
 
 `fleet-status` shows the cell's phase (`agent`, `verify`, a waiting phase),
 its attempt count against the budget and its gate progress. When it seals,
 the same files as in section 8 are under
-`workspaces.nosync/sonnet_high_python_apidocs_T1_r1/`, plus one log per
+`workspaces.nosync/sonnet_high_python_T1_r1/`, plus one log per
 attempt with the agent's full transcript.
 
 ## 11. Run the fleet
 
-An experiment is a matrix, not a cell. `conduct` is the one scheduler and
+An experiment is many cells, not one. `conduct` is the one scheduler and
 the one supervisor: you fill a backlog, it admits cells under its caps,
 repairs crashed ones, validates finished ones.
 
 ```sh
-# three reps of every (variant, condition) in the matrix, for two models
+# three reps of every active variant, for two models
 EXPERIMENT_DIR=shout python3 cli.py conduct queue-add sonnet --matrix --reps 3
 EXPERIMENT_DIR=shout python3 cli.py conduct queue-add haiku  --matrix --reps 3
 
@@ -646,24 +627,37 @@ turns a directory of scored cells into the results table.
   first arrangement with the attempt number so an agent never sees the
   same first timeline twice; `feedback_note` is the sentence the retry
   prompt carries when one fails.
-- **An infra per verify.** Override `verify_setup(ctx)` /
-  `verify_teardown(ctx)` on the variant when one arrangement needs a world
-  brought up fresh (a cluster, a daemon, a stack). Your verifier calls them
-  at its own point in the arrangement, inside the verify container, over
-  the daemon's socket.
-- **An infra per cell.** Override `author_setup()` /
-  `author_teardown()` when the agent needs something while it authors (a
-  sandbox cluster, its own docker daemon). `author_setup` returns the extra
-  docker arguments for the agent's container; the driver calls both, and
-  teardown runs on every path.
-- **An exclusive resource.** `LOCK = "gpu"` and `LOCK_SLOTS = 1` on a
-  variant serialise its cells fleet-wide; the cap is `[slots] arm_gpu` in
+- **Several variants.** One file each. Variants that read different docs
+  differ in one `[authoring.inputs]` line; `factors = { docs = "..." }`
+  says what each is a level of, and the results table groups by it.
+- **An infra of its own.** `[infra] class = "infra:Sidecar"` names a
+  subclass of `fae.cell.infra.base.Infra` in your package, instantiated per
+  cell with the variant (`self.variant`: its file's data). It writes
+  `ok()` (preflight; False halts before an attempt) and `alive()`
+  (liveness; **must be declared**, or the cell halts at preflight), and
+  any of:
+  - `cell_setup()` / `cell_teardown()`, what exists for the cell's life (a
+    sandbox cluster, its own docker daemon). `cell_setup` returns the extra
+    docker arguments for the agent's container when the file says
+    `access_infra = true`; the driver calls both, and teardown runs on
+    every path.
+  - `verify_setup(ctx, env)` / `verify_teardown(ctx, env)`, the world one
+    arrangement runs in, brought up fresh. Your verifier calls them inside
+    the verify container, over the daemon's socket, and runs the
+    artifacts on that world from `[verify.run]` in between; it stops them
+    before `verify_teardown`.
+  - `PREFIXES` and `identities(cid)`, the names of what it provisions, so
+    the reaper can find what a dead cell left.
+
+  Variants that differ only in what the agent may reach share one class:
+  it reads `self.variant.ACCESS_INFRA` and `self.variant.PARAMS`.
+- **An exclusive resource.** `[infra] lock = "gpu"` and `lock_slots = 1`
+  serialise a variant's cells fleet-wide; the cap is `[slots] arm_gpu` in
   `fae.toml`.
 - **Tools your verifier needs.** Put them in the verifier's Dockerfile.
-  A variant that needs more (a compiler, a load generator) declares its own
-  `IMAGE_DIR` and builds `FROM $BASE`, the verifier's image.
-- **Several conditions.** Add to `CONDITIONS` and ship one
-  `any.<tech>.<condition>.api.md` per condition; `SEED_DOCS` pins each.
+  A variant that needs more (a compiler, a load generator) names its own
+  layer, `[verify] image_dir`, a Dockerfile built `FROM $BASE`, the
+  verifier's image.
 - **Taint rules, grading, reporting.** `taint_rules`,
   `reference_workspace`, `POOLED_MODELS` on the definition; see
   `experiment/__init__.py` for a full-size example and `AGENTS.md` for
@@ -671,37 +665,48 @@ turns a directory of scored cells into the results table.
 
 ## 14. Interface cheat sheet
 
-`python3 cli.py experiment check --static` checks a definition against
-all of the below, without docker.
+`python3 cli.py experiment check --static` checks a definition and its
+variant files against all of the below, without docker.
 
 **Definition** (`<EXPERIMENT_DIR>/__init__.py`, read by `fae/cell/experiment.py`):
 
 | Name | Required | Default |
 |---|---|---|
-| `variant_classes()` | yes | |
 | `verifier_class()` | yes (a cell cannot verify without one) | |
 | `NAME` | no | the directory name |
-| `MATRIX` | no | `{arm: CONDITIONS}` from the variants |
-| `SEED_DOCS` | no | `{}` |
 | `GATE` | no | `Gate()`: one arrangement |
 | `CONFIG` | no | `{}` |
 | `fingerprint_trees(conf)` | no | `[]` |
 | `taint_rules`, `report_text`, `reference_workspace`, `POOLED_MODELS`, `verbs()` | no | none |
 
-**Variant** (`fae/cell/variants/base.py`):
+**Variant file** (`<EXPERIMENT_DIR>/variants/<id>.toml`, read by
+`fae/cell/variants/files.py`; paths relative to the experiment directory,
+unknown keys refused):
+
+| Key | Purpose |
+|---|---|
+| `label`, `retired`, `factors` | what reports show; never scheduled again; what it is a level of |
+| `[authoring] template` | directories merged into the workspace, in order |
+| `[authoring] surface` | `{ files, prefixes }` the agent may write; required |
+| `[authoring] tools` | the agent's image layer, over the base |
+| `[authoring] access_infra` | the agent's container reaches the cell's infra |
+| `[authoring.inputs]` | workspace path = the source file the agent reads |
+| `[verify] image_dir` | the verify container's layer, over the verifier's image |
+| `[verify] reference` | the known answer, for a reference cell |
+| `[verify.run] command, serves, image, image_dir, build` | how the verifier runs the artifacts |
+| `[infra] class` | `module:Class`, an `Infra` subclass; none: the engine's default |
+| `[infra] lock, lock_slots, params` | an exclusive lock held for the cell's life; the class's settings |
+
+**Infra** (`fae/cell/infra/base.py`, instantiated with the variant and the cell):
 
 | Member | Purpose |
 |---|---|
-| `ARM`, `TECH`, `CONDITIONS` | identity; the tech names the seed docs |
-| `AUTHORING_SURFACE` | `(files, dir prefixes)` the agent may write; required, a cell of a variant without it is refused |
-| `LOCK`, `LOCK_SLOTS` | an exclusive lock held for the cell's life |
-| `IMAGE_DIR`, `image_context(conf)` | the variant's layer over the verifier's image |
-| `INFRA_PREFIXES`, `infra_identities(cid)`, `stray()`, `sweep()` | what a reaper may find and remove |
-| `infra_ok()` | preflight; False halts before an attempt |
-| `infra_alive()` | liveness before/after each arrangement; **must be declared**, or the cell halts at preflight |
-| `author_setup()` / `author_teardown()` | the authoring infra, driver-run |
-| `verify_setup(ctx)` / `verify_teardown(ctx)` | the per-arrangement infra, verifier-run |
-| `seed_root()`, `verify_root()` | `seed/` and `verify/` beside the module unless `SEED`/`VERIFY` say otherwise |
+| `ok()` | preflight; False halts before an attempt |
+| `alive()` | liveness before/after each arrangement; **must be declared**, or the cell halts at preflight |
+| `cell_setup()` / `cell_teardown()` | the cell-lifetime infra, driver-run |
+| `verify_setup(ctx, env)` / `verify_teardown(ctx, env)` | the per-arrangement infra, verifier-run |
+| `PREFIXES`, `identities(cid)`, `stray()`, `sweep()` | what a reaper may find and remove |
+| `image_context(conf)`, `agent_image_context(conf)` | sources staged beside the variant's verify and agent Dockerfiles |
 
 **Verifier** (`fae/cell/verify.py`):
 
@@ -710,15 +715,16 @@ all of the below, without docker.
 | `IMAGE_DIR` | **required**: the Dockerfile of the environment it runs in |
 | `verify(ctx) -> Verdict` | the whole judgment |
 | `FILES` | archived per arrangement when the Verdict names none |
+| `RUN_LOG` | where the artifacts' runner's output is kept when it is stopped |
 | `EXCLUSIVE` | a lock the engine holds around every run |
-| `INFRA_PREFIXES`, `infra_identities(cid)` | what a verify provisions, for the reaper |
+| `PREFIXES`, `identities(cid)` | what a verify provisions, for the reaper |
 | `MEASURED_STAGES` | charged fails at these stages are voided when the infra is found dead afterwards |
 
 **Ctx** fields: `root`, `experiment_dir`, `workspace`, `artifacts`, `out`,
 `cid`, `task`, `variant`, `arrangement`, `expected_fp`, `mode`
 (`cell` | `reverify` | `exp1`).
 
-**Cell id**: `<model>_<effort>_<arm>_<condition>_<task>_r<rep>`, encoded in
+**Cell id**: `<model>_<effort>[_smoke]_<variant>_<task>_r<rep>`, encoded in
 one place (`fae/driver/common.py`).
 
 ---
@@ -727,5 +733,5 @@ one place (`fae/driver/common.py`).
 
 This document describes the interface as it stands. For a variant whose
 infra is more than one container, the engine's infra blocks
-(`fae/cell/infra/`: `dind`, `kind`, `secrunner`) are what its
-`verify_setup`/`verify_teardown` pair composes.
+(`fae/cell/infra/`: `dind`, `kind`, `secrunner`) are what its infra
+class composes.

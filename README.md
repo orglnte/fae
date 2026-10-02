@@ -23,16 +23,16 @@ code.
        repeat until green, at most 10 attempts; every step goes in the ledger
 ```
 
-One run of that loop is a **cell**: one model, one approach, one set of docs,
-one repetition. An experiment is many cells, and its result is a table, one
-row per model and approach. This one is from the calculator example below:
+One run of that loop is a **cell**: one model, one variant (one approach,
+with one set of docs), one repetition. An experiment is many cells, and its
+result is a table, one row per model and variant. This one is from the calculator example below:
 Claude Sonnet writing it in Zig, and a scripted agent that fails once on
 purpose:
 
 ```
-MODEL            | TREATMENT        | COND     | REPS | E2E   | GREEN | ITG mn/avg/mx  | MIN mn/avg/mx     | MIN/ATT | SLoC avg -mn/+mx
-sonnet-5         | zig              | apidocs  | 1    | -     | 100%  | 1 / 1.0 / 1    | 6 / 6.3 / 6       | 6.3     |   47   -0/+0
-testagent        | python           | apidocs  | 1    | -     | 100%  | 2 / 2.0 / 2    | 0 / 0.0 / 0       | 0.0     |   12   -0/+0
+MODEL            | VARIANT                  | REPS | E2E   | GREEN | ITG mn/avg/mx  | MIN mn/avg/mx     | MIN/ATT | SLoC avg -mn/+mx
+sonnet-5         | zig                      | 1    | -     | 100%  | 1 / 1.0 / 1    | 6 / 6.3 / 6       | 6.3     |   47   -0/+0
+testagent        | python                   | 1    | -     | 100%  | 2 / 2.0 / 2    | 0 / 0.0 / 0       | 0.0     |   12   -0/+0
 ```
 
 `GREEN` is the share of cells the agents got working, `ITG` the attempts it
@@ -64,7 +64,7 @@ python3 cli.py experiment smoke      # one cell per language, the known answer i
   ok   python         GREEN at attempt 1
   ok   brainfuck      GREEN at attempt 1
   ok   zig            GREEN at attempt 1
-  PIPELINE OK on every arm.
+  PIPELINE OK on every variant.
 ```
 
 That ran the whole pipeline (a sealed workspace, the verifier in its
@@ -74,12 +74,12 @@ the agent image once, log Claude in inside it, and start one cell.
 ```sh
 bash ../fae/fae/agent-container/build.sh
 docker run -it --rm -v "$PWD/.agent-home/.claude:/home/node/.claude" fae-agent:latest claude auth login
-python3 cli.py cell spawn sonnet zig apidocs --rep 1
+python3 cli.py cell spawn sonnet zig --rep 1
 python3 cli.py fleet-status   # its phase, its attempt, its verdict
 python3 cli.py results score  # the table
 ```
 
-The cell's workspace is `workspaces.nosync/sonnet_high_zig_apidocs_T1_r1/`:
+The cell's workspace is `workspaces.nosync/sonnet_high_zig_T1_r1/`:
 what the agent wrote (`artifacts/`), each attempt's transcript, the
 verifier's log, and `iterations.log`, the ledger.
 
