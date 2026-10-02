@@ -457,6 +457,25 @@ def experiment_init(experiment: str = typer.Option("", "--experiment",
     rig.init(_ns(experiment=experiment))
 
 
+@experiment_app.command("check")
+def experiment_check(walk: bool = typer.Option(False, "--walk",
+                                               help="step by step: why each step matters, "
+                                                    "then run it; on a failure, fix and retry"),
+                     static: bool = typer.Option(False, "--static",
+                                                 help="no docker: the definition, the variants "
+                                                      "and the seeds only"),
+                     smoke: bool = typer.Option(False, "--smoke",
+                                                help="also run each arm's reference through "
+                                                     "the gate (experiment smoke)"),
+                     arms: str = typer.Option("", "--arms", help="comma-separated (default: every arm)"),
+                     task: str = typer.Option("T1", "--task", help="the task the seeds are checked for")):
+    """Whether this root's experiment is ready to run: the host, the config,
+    the definition, each variant, every cell's seed, the substrate. Exit 1 on
+    any failure; each names its fix."""
+    from fae.driver import check
+    check.main(_ns(walk=walk, static=static, smoke=smoke, arms=arms, task=task))
+
+
 @rig_app.command("selftest")
 def rig_selftest():
     """Invariants of the rig itself, incl. TLA+ live-trace conformance."""
