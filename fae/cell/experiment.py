@@ -26,8 +26,12 @@ The definition's `__init__.py` declares, all optional except `variant_classes`:
                             singleton substrate — and FILES; what it owes is
                             on the base class; a function, like
                             variant_classes: `verifier` is the package)
-    verbs()              -> {name: callable} the rig verbs it owns
-                            ("exp1", "exp1_arms", "reference_cell", "selftest")
+    verbs()              -> {name: callable} hooks the engine's own verbs call
+                            ("reference_cell" for smoke, "selftest")
+    commands()           -> {name: callable(argv) -> exit code} the
+                            experiment's own operator commands, run as
+                            `cli.py experiment verb NAME [ARGS...]`; each
+                            parses its own arguments
     taint_rules          rules(ws, workspaces, metrics, it_text, v_text,
                             rc_text, verdict) -> (taints, warns, fields):
                             what a rig fault looks like in this experiment's
@@ -191,6 +195,11 @@ class Definition:
     @property
     def verbs(self):
         fn = getattr(self.module, "verbs", None)
+        return dict(fn()) if fn else {}
+
+    @property
+    def commands(self):
+        fn = getattr(self.module, "commands", None)
         return dict(fn()) if fn else {}
 
 

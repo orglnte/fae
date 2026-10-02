@@ -51,7 +51,7 @@ python3 cli.py cell spawn|pause|resume|stop|tail|log|seal|reverify …   # ONE c
 python3 cli.py conduct run|pause|resume|stop|diagnose|reconcile|queue-add …
 python3 cli.py fleet-status                              # read-only table
 python3 cli.py results score|grade|validate|aggregate …
-python3 cli.py experiment init|check|substrate|smoke|prepare|exp1 …   # the experiment this root runs
+python3 cli.py experiment init|check|substrate|smoke|prepare|verb …   # the experiment this root runs; verb: its own commands
 python3 cli.py rig selftest|trace-reset|agent-image|zombies …          # the harness itself
 python3 cli.py tools run <name> [args]                   # one instrument standalone: the engine's, a contrib block's, the experiment's
 ```

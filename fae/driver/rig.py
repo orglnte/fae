@@ -621,10 +621,21 @@ def prepare(args):
     print(f"Prepared matrix: {n} workspace(s).")
 
 
-def exp1_cmd(args):
-    """The exp-1 reference benchmark under the rig noun group — the
-    experiment's own verb (its definition declares `exp1` and `exp1_arms`)."""
-    verbs = common.definition().verbs
-    if not getattr(args, "arms", None):
-        args.arms = ",".join(verbs["exp1_arms"])
-    return verbs["exp1"](args)
+def verb_cmd(name, argv):
+    """`experiment verb`: one of the experiment's own commands (its
+    definition's commands()), `argv` passed through; no name lists them."""
+    try:
+        commands = common.definition().commands
+    except FileNotFoundError as e:
+        sys.exit(f"verb: {e} — `python3 cli.py experiment check` names what is missing")
+    if not name:
+        if not commands:
+            print("this experiment defines no commands (commands() in its definition)")
+        for n, fn in sorted(commands.items()):
+            doc = (fn.__doc__ or "").strip().splitlines()
+            print(f"  {n:16s} {doc[0] if doc else ''}")
+        return 0
+    if name not in commands:
+        sys.exit(f"verb: {name!r} is not a command of this experiment "
+                 f"({', '.join(sorted(commands)) or 'it defines none'})")
+    return commands[name](list(argv))

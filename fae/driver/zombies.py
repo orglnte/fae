@@ -3,7 +3,7 @@ longer owns, and the reaper's owner-protection logic that must never touch a
 live cell.
 
 _VERIFY_HOLDER_ARGV / _is_driver_pid answer "is this pid entitled to hold the
-lock it has" for a verify running via `cli.py experiment exp1|cell reverify|experiment
+lock it has" for a verify running via `cli.py experiment verb|cell reverify|experiment
 smoke` in the FOREGROUND process — the regex tracks the real invoked argv,
 so moving the code that implements a verb changes nothing about what it
 matches; only a change to the invocation shape itself does. Substrate names
@@ -177,19 +177,15 @@ def _fd_holders(path):
     out = common.sh(["lsof", "-t", "-n", str(path)])
     return [int(x) for x in out.split() if x.strip().isdigit()]
 # The processes entitled to hold the rig lock or the verify lock: a cell loop
-# (found by loop_parents(), default root only) and the out-of-loop verbs that
-# run a verify through the cell — `exp1` (the reference benchmark, in
-# smoke-workspaces), `reverify` (under <ws>/reverify/<ts>/), and `smoke`
-# (whose stub cells live in ws-test.nosync, invisible to loop_parents).
-# cli.py's noun-grouped invocation shape (`cli.py experiment exp1`, `cli.py cell
-# reverify`, `cli.py experiment smoke` — not a flat `cli\.py\s+(exp1|reverify|
-# smoke)`, since the group token differs per verb). Used to also match
-# `runs.py exp1|reverify|smoke` as an OR while runs.py stayed invocable
-# (Milestone 5); dropped at Milestone 6 when runs.py was deleted — no
-# process can be invoked that way any more.
+# (found by loop_parents(), default root only) and the out-of-loop commands
+# that run a verify through a cell — an experiment's own command
+# (`cli.py experiment verb ...`, e.g. a reference benchmark in
+# smoke-workspaces), `cli.py cell reverify` (under <ws>/reverify/<ts>/) and
+# `cli.py experiment smoke` (stub cells in ws-test.nosync, invisible to
+# loop_parents). Matched on the invoked argv, group token included.
 
 
-_VERIFY_HOLDER_ARGV = r"cli\.py\s+(experiment\s+exp1|cell\s+reverify|experiment\s+smoke)\b"
+_VERIFY_HOLDER_ARGV = r"cli\.py\s+(experiment\s+(verb|smoke)|cell\s+reverify)\b"
 
 
 def _verify_holders_alive():
@@ -202,14 +198,14 @@ def _leaked_lock_holders():
 
     Both locks are held IN-PROCESS, as a file object: the rig lock by
     Cell.exclusive_acquire, the verify lock by Cell.verify_lock_acquire —
-    inside a cell loop, or inside `cli.py experiment exp1|cell reverify|experiment smoke`. Either held
+    inside a cell loop, or inside `cli.py experiment verb|cell reverify|experiment smoke`. Either held
     with no such process alive means something else inherited the fd and
     never let go, which blocks the next verify indefinitely — the holder
     cannot be identified while a legitimate one is running, so the absence is
     what makes the remaining fd holders nameable.
 
     The predicate must name EVERY holder shape: one that knows only the loops
-    reads a live exp1 verify as a leak and reaps it mid-run.
+    reads a live `experiment verb` verify as a leak and reaps it mid-run.
     """
     out = []
     entitled = {
@@ -255,7 +251,7 @@ def find_zombies():
             age = _iter_age_s(cid)
             # UNKNOWN age gets the LONG grace, never none: _iter_age_s is None
             # for any cid without an iterations.log under WS — the normal case
-            # for exp1/smoke cells, which live under smoke-workspaces.nosync —
+            # for verb/smoke cells, which live under smoke-workspaces.nosync —
             # and `zombies --reap` acts on a single sighting, so no grace here
             # means deleting a running benchmark's sidecar mid-measurement.
             grace = ZOMBIE_GRACE_S if age is not None else ZOMBIE_UNKNOWN_GRACE_S
@@ -279,7 +275,7 @@ def find_zombies():
         if age is None:
             continue              # age unknown => conservative: never reap
         if age < grace:
-            continue              # young; smoke/exp1 verifies own unmapped
+            continue              # young; smoke/verb verifies own unmapped
                                   # clusters briefly — long grace covers them
         zs.append(("cluster", cl, owner or "?", "no live owner"))
     net_prefixes = tuple(p for k, p in prefixes if k == "network")
