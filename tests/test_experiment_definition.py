@@ -159,7 +159,7 @@ import os, tempfile
 from pathlib import Path
 from fae.cell import Cell
 root = Path(tempfile.mkdtemp()); (root / "workspaces").mkdir()
-os.environ["EXPERIMENT_DIR"] = str(d.path); os.environ["SHAPE_VARIATION"] = "1"
+os.environ["EXPERIMENT_DIR"] = str(d.path)
 c = Cell("m_high_only_v_T1_r1", workspaces=root / "workspaces", root=root)
 print(c.gate_shapes, c.gate_def.arity, c.gate_def.rotate)
 ''')

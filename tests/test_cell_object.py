@@ -254,9 +254,9 @@ class TestJudgement(CellTestCase):
         c = self.cell()
         self.assertEqual(c.judge(1, [self.result(True)] * 6), "green")
 
-    def test_without_shape_variation_one_arrangement_is_the_gate(self):
+    def test_a_smoke_gate_is_the_seed_arrangement(self):
         c = self.cell()
-        c.conf.values["SHAPE_VARIATION"] = "0"
+        c.conf.values["SHAPE_GATE"] = "one"
         self.assertEqual(c.gate_shapes, (None,))
         self.assertEqual(c.judge(1, [self.result(True)]), "green")
 
@@ -354,7 +354,7 @@ class TestTheGateIsSixArrangementsByDefault(CellTestCase):
 
     def test_config_can_still_turn_it_off_deliberately(self):
         c = self.cell()
-        c.conf.values["SHAPE_VARIATION"] = "0"
+        c.conf.values["SHAPE_GATE"] = "one"
         self.assertEqual(c.gate_shapes, (None,))
 
     def test_smoke_env_reaches_the_gate(self):
@@ -364,11 +364,19 @@ class TestTheGateIsSixArrangementsByDefault(CellTestCase):
         direct .values mutation like the tests above."""
         from fae.cell import config as cfgmod
         cfgmod._cache.clear()
-        v = cfgmod.load(str(self.root), env=dict(os.environ, SHAPE_GATE="one"))
+        v = cfgmod.load(str(self.root), env=dict(os.environ, SHAPE_GATE="one", SMOKE="1"))
         self.assertEqual(v.values.get("SHAPE_GATE"), "one")
         cfgmod._cache.clear()
         v = cfgmod.load(str(self.root), env=dict(os.environ, SHAPE_GATE=""))
         self.assertEqual(v.values.get("SHAPE_GATE"), "")
+
+    def test_a_cut_gate_outside_a_smoke_cell_is_refused(self):
+        from fae.cell import config as cfgmod
+        cfgmod._cache.clear()
+        env = {k: v for k, v in os.environ.items() if k != "SMOKE"}
+        with self.assertRaisesRegex(SystemExit, "only a smoke cell"):
+            cfgmod.load(str(self.root), env=dict(env, SHAPE_GATE="one"))
+        cfgmod._cache.clear()
 
 
 class TestTheGateReportsItsProgress(CellTestCase):
@@ -381,7 +389,6 @@ class TestTheGateReportsItsProgress(CellTestCase):
         seq = iter(greens)
         c.verify = lambda shape=None, out_dir=None: cell.VerifyResult(
             green=next(seq), shape=shape)
-        c.conf.values["SHAPE_VARIATION"] = "1"
         return c, c.gate(attempt=3)
 
     def shape_lines(self, c):
@@ -403,7 +410,6 @@ class TestTheGateReportsItsProgress(CellTestCase):
         seq = iter([True] * 6)
         c.verify = lambda shape=None, out_dir=None: cell.VerifyResult(
             green=next(seq), shape=shape)
-        c.conf.values["SHAPE_VARIATION"] = "1"
         c.gate(attempt=1)
         from fae import ledger
         self.assertEqual(ledger.parse(c.ws)["live_shape_pass"], 6)
@@ -427,7 +433,6 @@ class TestTheGateReportsItsProgress(CellTestCase):
         seq = iter([True, False])
         c.verify = lambda shape=None, out_dir=None: cell.VerifyResult(
             green=next(seq), shape=shape)
-        c.conf.values["SHAPE_VARIATION"] = "1"
         c.gate(attempt=6)
         self.assertEqual((c.ws / "shapegate.last").read_text(), "G6|\n")
 
@@ -437,7 +442,6 @@ class TestTheGateReportsItsProgress(CellTestCase):
         seq = iter([True] * 6)
         c.verify = lambda shape=None, out_dir=None: cell.VerifyResult(
             green=next(seq), shape=shape)
-        c.conf.values["SHAPE_VARIATION"] = "1"
         c.gate(attempt=1)
         self.assertEqual((c.ws / "shapegate.last").read_text(), "G1|old\n")
 
@@ -627,7 +631,6 @@ class TestTheSeededArrangementRotatesPerAttempt(CellTestCase):
             return cell.VerifyResult(green=False, shape=shape)
 
         c.verify = v
-        c.conf.values["SHAPE_VARIATION"] = "1"
         c.gate(attempt=attempt)
         return seen[0]
 
@@ -647,7 +650,6 @@ class TestTheSeededArrangementRotatesPerAttempt(CellTestCase):
             return cell.VerifyResult(green=False, shape=shape)
 
         c.verify = v
-        c.conf.values["SHAPE_VARIATION"] = "1"
         c.gate(attempt=1, seed_shape="G5")
         self.assertEqual(seen[0], "G5")
 
@@ -660,7 +662,7 @@ class TestTheSeededArrangementRotatesPerAttempt(CellTestCase):
             return cell.VerifyResult(green=True, shape=shape)
 
         c.verify = v
-        c.conf.values["SHAPE_VARIATION"] = "0"
+        c.conf.values["SHAPE_GATE"] = "one"
         c.gate(attempt=4)
         self.assertEqual(seen, [None])
 
@@ -679,7 +681,6 @@ class TestDriverDecisionsAreDeterministic(CellTestCase):
             return cell.VerifyResult(green=True, shape=shape)
 
         c.verify = v
-        c.conf.values["SHAPE_VARIATION"] = "1"
         c.gate(attempt=attempt)
         return seen
 
@@ -692,7 +693,6 @@ class TestDriverDecisionsAreDeterministic(CellTestCase):
 
     def test_the_verdict_is_a_function_of_the_results(self):
         c = self.cell()
-        c.conf.values["SHAPE_VARIATION"] = "1"
         green6 = [cell.VerifyResult(green=True, shape=s) for s in SHAPES]
         self.assertEqual(c.judge(1, green6), "green")
         self.assertEqual(c.judge(1, green6), "green")
@@ -703,7 +703,6 @@ class TestDriverDecisionsAreDeterministic(CellTestCase):
 
     def test_the_note_is_byte_identical_for_identical_state(self):
         c = self.cell()
-        c.conf.values["SHAPE_VARIATION"] = "1"
         r = cell.VerifyResult(green=False, shape="G3", stage_failed="scaling",
                               metrics={"e2e_pass": 7, "e2e_total": 7},
                               seconds=138.9)
@@ -864,13 +863,13 @@ class TestReverifyIsInvisibleToTheModel(CellTestCase):
 
     def test_it_runs_the_full_gate_even_if_config_disables_it(self):
         # reverify exists to re-judge under the CURRENT rules, and the rule is
-        # six arrangements; a config with SHAPE_VARIATION=0 must not shrink it.
+        # six arrangements; a config with a cut gate must not shrink it.
         c, _, seen = self.reverified()
         self.assertEqual(seen, list(SHAPES))
 
     def test_even_when_config_turns_the_gate_off(self):
         c = self.cell(sealed=self.SEAL)
-        c.conf.values["SHAPE_VARIATION"] = "0"
+        c.conf.values["SHAPE_GATE"] = "one"
         c.setup = lambda arena: (0, {})
         c.teardown = lambda: None
         seen = []
