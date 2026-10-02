@@ -182,9 +182,9 @@ class TestTheCli(unittest.TestCase):
     def test_experiment_check_is_registered_and_rig_keeps_only_the_harness_verbs(self):
         src = (Path(ROOT) / "fae" / "cli.py").read_text()
         self.assertIn('@experiment_app.command("check")', src)
-        for verb in ("init", "check", "substrate", "smoke", "prepare", "exp1"):
-            self.assertIn(f'@experiment_app.command("{verb}")', src)
-            self.assertNotIn(f'@rig_app.command("{verb}")', src)
+        for verb in ("init", "check", "substrate", "smoke", "prepare", "verb"):
+            self.assertIn(f'@experiment_app.command("{verb}"', src)
+            self.assertNotIn(f'@rig_app.command("{verb}"', src)
 
 
 if __name__ == "__main__":

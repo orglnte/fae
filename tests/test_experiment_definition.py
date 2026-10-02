@@ -9,6 +9,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from _ctx import ROOT
 
@@ -179,6 +180,47 @@ class TestConfigReadsNoSubject(unittest.TestCase):
                             "print('experiment' in sys.modules)" % str(ROOT)],
                            capture_output=True, text=True)
         self.assertEqual(r.stdout.strip(), "False", r.stderr)
+
+
+class TestTheExperimentsOwnCommands(unittest.TestCase):
+    """`cli.py experiment verb NAME ARGS`: the engine names no command of any
+    experiment; it lists and runs what the definition's commands() declares."""
+
+    def _with(self, commands):
+        from fae.driver import rig
+        d = exp.current()
+        return mock.patch.object(type(d), "commands", new_callable=mock.PropertyMock,
+                                 return_value=commands), rig
+
+    def test_a_named_command_gets_its_arguments_and_its_exit_code_is_returned(self):
+        seen = []
+
+        def bench(argv):
+            """Run the bench."""
+            seen.append(argv)
+            return 3
+        patch, rig = self._with({"bench": bench})
+        with patch:
+            self.assertEqual(rig.verb_cmd("bench", ("--reps", "2")), 3)
+        self.assertEqual(seen, [["--reps", "2"]])
+
+    def test_no_name_lists_each_command_with_its_first_doc_line(self):
+        def bench(argv):
+            """Run the bench.
+
+            More."""
+        patch, rig = self._with({"bench": bench})
+        with patch, mock.patch("builtins.print") as p:
+            self.assertEqual(rig.verb_cmd("", []), 0)
+        self.assertIn("Run the bench.", p.call_args_list[0].args[0])
+
+    def test_an_unknown_name_is_refused_naming_the_known_ones(self):
+        patch, rig = self._with({"bench": lambda argv: 0})
+        with patch, self.assertRaisesRegex(SystemExit, "'nosuch' is not a command.*bench"):
+            rig.verb_cmd("nosuch", [])
+
+    def test_a_definition_without_commands_has_none(self):
+        self.assertEqual(exp.current().commands, {})
 
 
 if __name__ == "__main__":

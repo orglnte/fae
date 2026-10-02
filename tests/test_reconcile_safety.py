@@ -1001,7 +1001,7 @@ class TestArmStuckMeasuresProgressNotLiveness(SweepCase):
 
 class TestLeakedLockHolders(unittest.TestCase):
     """A lock held while nothing entitled to hold it is running. Both locks
-    are held in-process — by a cell loop, or by `cli.py experiment exp1|cell
+    are held in-process — by a cell loop, or by `cli.py experiment verb|cell
     reverify|experiment smoke` verifying outside one; either held with no such process means an
     inherited fd was never released, and the next verify blocks on it while
     holding the GLOBAL verify lock.
@@ -1051,21 +1051,22 @@ class TestLeakedLockHolders(unittest.TestCase):
                                  fd_pids=[4242]))
 
     def test_a_live_verifier_means_the_holder_is_legitimate(self):
-        # The whole safety argument: while `cli.py experiment exp1` (or cell
+        # The whole safety argument: while `cli.py experiment verb` (or cell
         # reverify, or experiment smoke) runs, the fd holders include it and its
         # children, and none may be killed.
         self.assertEqual(self._find(held=True, entitled_running=True,
                                     fd_pids=[4242]), [])
 
     def test_the_out_of_loop_verifiers_are_the_ones_named(self):
-        for argv in ("python3 cli.py experiment exp1 --reps 3",
+        for argv in ("python3 cli.py experiment verb bench --reps 3",
                      "python3 cli.py cell reverify x --all",
-                     "python3 cli.py experiment smoke --only keda"):
+                     "python3 cli.py experiment smoke --only alpha"):
             self.assertRegex(argv, runs.zombies._VERIFY_HOLDER_ARGV)
             with mock.patch.object(runs.common, "sh", return_value=argv + "\n"):
                 self.assertTrue(runs.zombies._is_driver_pid(4242), argv)
         for argv in ("python3 cli.py fleet-status", "python3 cli.py conduct run",
-                     "python3 cli.py rig reverify x"):   # wrong group: not a real invocation
+                     "python3 cli.py rig reverify x",    # wrong group: not a real invocation
+                     "python3 cli.py experiment bench"):  # an experiment command runs only through verb
             self.assertNotRegex(argv, runs.zombies._VERIFY_HOLDER_ARGV)
 
     def test_a_live_python_cell_holds_the_rig_lock_itself(self):

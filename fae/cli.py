@@ -5,7 +5,7 @@ DESIGN: this is a CLI LAYER, not the orchestrator. Every command builds the
 namespace the target fae/driver/*.py function already expects and calls it
 directly — fae/driver/ is the library, this is its one client. That includes
 fae/driver/rig.py (the experiment's verbs: init, substrate, smoke, prepare,
-exp1; the rig's own: selftest, trace-reset, zombies) and the tail/log pair folded into fae/driver/ops.py.
+verb; the rig's own: selftest, trace-reset, zombies) and the tail/log pair folded into fae/driver/ops.py.
 No orchestration logic is duplicated here.
 
 GROUPS
@@ -16,7 +16,7 @@ GROUPS
   results  what the experiment produced, and whether to trust it: score,
            grade, validate, aggregate
   experiment  the experiment this root runs: init, check, substrate,
-           smoke, prepare, exp1
+           smoke, prepare, verb (the experiment's own commands)
   rig      the harness itself, not the experiment: selftest, trace-reset,
            agent-image, zombies
   tools    instruments/*.py scripts, run standalone for debugging — the
@@ -93,6 +93,10 @@ app.add_typer(conduct_app, name="conduct")
 app.add_typer(results_app, name="results")
 app.add_typer(rig_app, name="rig")
 app.add_typer(tools_app, name="tools")
+
+# A passthrough command hands every argument, --help included, to what it runs.
+_PASSTHROUGH = {"allow_extra_args": True, "ignore_unknown_options": True,
+                "help_option_names": []}
 
 SEL = "cid, model name, or a whole `_`-separated token run. Anchored: `r1` "
 SEL += "does not match `r10`."
@@ -531,15 +535,13 @@ def experiment_prepare(model: str = typer.Option("", "--model", help="lane name 
     rig.prepare(_ns(model=model, reps=reps, task=task))
 
 
-@experiment_app.command("exp1")
-def experiment_exp1(reps: int = typer.Option(3, "--reps", help="runs per arm"),
-             arms: Optional[str] = typer.Option(None, "--arms",
-                                                help="comma-separated; default the sealed trio"),
-             report_only: bool = typer.Option(False, "--report-only",
-                                              help="aggregate existing ref workspaces; run nothing")):
-    """The experiment's reference benchmark (its `exp1` verb: the reference
-    implementation of each arm through the verifier)."""
-    rig.exp1_cmd(_ns(reps=reps, arms=arms, report_only=report_only))
+@experiment_app.command("verb", context_settings=_PASSTHROUGH)
+def experiment_verb(ctx: typer.Context):
+    """verb [NAME [ARGS...]] — one of the experiment's own commands (its
+    definition's commands()), ARGS passed through untouched; no NAME lists
+    them."""
+    args = list(ctx.args)
+    raise SystemExit(rig.verb_cmd(args[0] if args else "", args[1:]) or 0)
 
 
 @rig_app.command("zombies")
@@ -553,10 +555,6 @@ def rig_zombies(reap: bool = typer.Option(False, "--reap",
 
 
 # --- tools: instruments, run standalone (debug/one-off) ----------------------
-
-_PASSTHROUGH = {"allow_extra_args": True, "ignore_unknown_options": True,
-                "help_option_names": []}
-
 
 def _instrument_dirs():
     """Where an instrument name resolves, in order: the engine's own, the

@@ -213,9 +213,9 @@ class TestRigCommands(unittest.TestCase):
         the namespace must carry all four, with its own defaults."""
         (ns,), _ = invoke("smoke", ["experiment", "smoke"], mod=cli.rig)
         self.assertEqual(vars(ns), dict(arms="", only="", rep=1, full_gate=False))
-        (ns,), _ = invoke("smoke", ["experiment", "smoke", "--only", "keda", "--rep", "2",
+        (ns,), _ = invoke("smoke", ["experiment", "smoke", "--only", "alpha", "--rep", "2",
                                     "--full-gate"], mod=cli.rig)
-        self.assertEqual(vars(ns), dict(arms="", only="keda", rep=2, full_gate=True))
+        self.assertEqual(vars(ns), dict(arms="", only="alpha", rep=2, full_gate=True))
 
     def test_prepare(self):
         (ns,), _ = invoke("prepare", ["experiment", "prepare", "--reps", "2", "--task", "T2"],
@@ -224,18 +224,25 @@ class TestRigCommands(unittest.TestCase):
         (ns,), _ = invoke("prepare", ["experiment", "prepare", "--model", "sonnet"], mod=cli.rig)
         self.assertEqual(ns.model, "sonnet")
 
-    def test_exp1_carries_report_only(self):
-        """fae/driver/exp1.py's exp1 reads args.report_only unconditionally; the
-        cli command once omitted it and every invocation would have died on
-        AttributeError. `experiment exp1` routes through rig.exp1_cmd like every
-        other rig verb — cli.py passes the raw --arms value through
-        unresolved, the same convention `experiment smoke` uses for its own
-        --arms default (resolved inside rig.py, not in cli.py)."""
-        (ns,), _ = invoke("exp1_cmd", ["experiment", "exp1", "--report-only"], mod=cli.rig)
-        self.assertEqual(ns.report_only, True)
-        self.assertEqual(ns.reps, 3)
-        self.assertIsNone(ns.arms)
+    def _verb(self, argv):
+        with mock.patch.object(cli.rig, "verb_cmd", return_value=0) as m:
+            result = runner.invoke(cli.app, argv)
+        self.assertEqual(result.exit_code, 0, result.output)
+        return m.call_args.args
 
+    def test_verb_passes_its_name_and_every_argument_through(self):
+        """An experiment's own command parses its own options: cli.py hands
+        it the name and the rest of argv untouched, --help included."""
+        self.assertEqual(self._verb(["experiment", "verb", "bench", "--reps", "2",
+                                     "--dry-run", "--help"]),
+                         ("bench", ["--reps", "2", "--dry-run", "--help"]))
+
+    def test_verb_with_no_name_lists(self):
+        self.assertEqual(self._verb(["experiment", "verb"]), ("", []))
+
+    def test_verb_exits_with_the_commands_code(self):
+        with mock.patch.object(cli.rig, "verb_cmd", return_value=3):
+            self.assertEqual(runner.invoke(cli.app, ["experiment", "verb", "x"]).exit_code, 3)
 
 if __name__ == "__main__":
     unittest.main()
