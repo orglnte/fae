@@ -420,6 +420,8 @@ writes, whatever its outcome; they are always copied up and archived. One
 that a verify which ran did not write (absent from its own directory, or
 left there by an earlier verify) is a rig defect, the same on every retry:
 `ALERT RIG-OUTPUT`, uncharged, the cell stood down for the operator.
+`results validate` taints a cell with an attempt never judged after such an
+alert, and warns on one judged again once the rig was mended.
 
 **The judged program never runs in the verify container.** A verifier that
 measures a running program starts it in the cell's secure runner,

@@ -44,6 +44,9 @@ def _validate_cell(ws):
     # paused for the operator, and nothing it recorded can stand unexamined.
     for m in re.finditer(r"\tALERT\t[^\t\n]*\t(?:attempt=\d+\t)?INTEGRITY ([^\n]*)", it_text):
         taints.append(f"a verify changed the cell's record: {m.group(1)[:100]}")
+    rt, rw = rig_output_findings(it_text)
+    taints += rt
+    warns += rw
     # rig aborts
     if "ERROR[rig]" in it_text:
         warns.append("a reverify aborted on a rig fault (green intact, "
@@ -95,12 +98,33 @@ def _validate_cell(ws):
            # rig<->framework junction rules 12-16 (the experiment's).
            # rule_set 7 adds the archive checks (runs not charged, and the
            # archive disagreeing with the ledger); rule_set 8 the integrity
-           # rule (a verify that changed the cell's record).
-           "rule_set": 8,
+           # rule (a verify that changed the cell's record); rule_set 9 the
+           # rig-output rule (a verify that left a required output unwritten).
+           "rule_set": 9,
            "at": f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}"}
     (ws / VALIDATION).write_text(json.dumps(doc, indent=1))
     record_taints_on_seal(ws, taints)
     return doc
+
+
+def rig_output_findings(it_text):
+    """([taints], [warns]) for the verifies that left a required output
+    unwritten (ALERT RIG-OUTPUT). An attempt judged after its alert was
+    re-verified on a mended rig: a warning. One never judged after it has
+    no complete evidence behind the cell's verdict: a taint."""
+    taints, warns = [], []
+    alerts = re.finditer(r"\tALERT\t[^\t\n]*\tattempt=(\d+)\tRIG-OUTPUT ([^\n]*)", it_text)
+    for m in alerts:
+        n, what = m.group(1), m.group(2)[:100]
+        judged = re.search(rf"\tITER\t[^\t\n]*\tattempt={n}\b", it_text[m.end():])
+        if judged:
+            warns.append(f"attempt {n} re-verified after a verify halted on a rig defect: {what}")
+        else:
+            taints.append(f"attempt {n} was never re-verified after a verify halted "
+                          f"on a rig defect: {what}")
+    return taints, warns
+
+
 NOT_CHARGED_WARN_AT = 3
 
 
