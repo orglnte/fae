@@ -126,7 +126,8 @@ class Variant:
         return []
     # The authorable surface: (exact relpaths, directory prefixes) the agent
     # may write; every other seeded file is fixed and healed before a verdict.
-    AUTHORABLE = ((), ("app/", "k8s/"))
+    # Required: a cell of a variant that leaves it None is refused.
+    AUTHORABLE = None
 
     def __init__(self, cell):
         self.cell = cell

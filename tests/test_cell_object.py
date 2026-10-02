@@ -799,6 +799,30 @@ class TestAnUndeclaredLivenessProbeHaltsAtPreflight(CellTestCase):
         self.assertFalse(liveness_declared(Variant))
 
 
+class TestAnUndeclaredSurfaceHaltsAtPreflight(CellTestCase):
+    """A variant that declares no AUTHORABLE has no surface to heal or check
+    against; the preflight refuses the cell before an attempt is spent."""
+
+    def test_substrate_ok_is_false_and_names_the_variant(self):
+        from unittest import mock
+        from fae.cell import experiment
+        from fae.cell.variants.base import Variant
+
+        class Surfaceless(Variant):
+            ARM = "beta"
+
+            def substrate_alive(self):
+                return True
+
+        c = self.cell()
+        c._treatment = Surfaceless(c)
+        with mock.patch.object(experiment.Definition, "variant",
+                               lambda self, arm: Surfaceless):
+            self.assertFalse(c.substrate_ok())
+        self.assertIn("HALT[definition]: Surfaceless (arm 'beta') declares no AUTHORABLE",
+                      (c.ws / "hooks.log").read_text())
+
+
 class TestReverifyIsInvisibleToTheModel(CellTestCase):
     """A re-verify is derived evidence on a terminal cell, not an attempt: it
     must not appear in transitions.log (AcquireSlot on a terminal cell has no

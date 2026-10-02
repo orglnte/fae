@@ -43,7 +43,7 @@ from . import variants as _treatments
 from . import arena as _arena_mod
 from .arena import Arena
 from .checkpoints import Checkpoints
-from .surface import Surface
+from .surface import Surface, authorable
 from .fsm import (ENABLED, PHASE_TO_LOOP, IllegalTransition, Loop, Phase,
                   Sealed, State, T, step)
 from .verify import (RUN_OUT, Ctx, Verdict, _mutex_module as _load_mutex, run_verifier,
@@ -1158,6 +1158,11 @@ class Cell:
             self.arm_variant.log(f"HALT[substrate]: {type(self.arm_variant).__name__} "
                                  "declares no substrate_alive probe; every "
                                  "arrangement would be void")
+            return False
+        try:
+            authorable(self.treatment)
+        except RuntimeError as e:
+            self.arm_variant.log(f"HALT[definition]: {e}")
             return False
         if not self.arm_variant.substrate_ok():
             return False
