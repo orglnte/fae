@@ -194,7 +194,8 @@ def prepare(cid, task, vid, rep, workspaces, root=ROOT, fresh=False, reference=F
 def main(argv=None):
     a = argv if argv is not None else sys.argv[1:]
     if len(a) < 2:
-        print("usage: prepare TASK VARIANT [REPEAT]", file=sys.stderr)
+        print("usage: prepare TASK VARIANT [REPEAT]   (REFERENCE=1: the variant's known answer)",
+              file=sys.stderr)
         return 1
     task, vid = a[0], a[1]
     rep = a[2] if len(a) > 2 else "1"
@@ -207,6 +208,7 @@ def main(argv=None):
     ws = prepare(cid, task, vid, rep,
                  workspaces=cfg.get("WORKSPACES_DIR"), root=root,
                  fresh=bool(os.environ.get("FRESH")),
+                 reference=os.environ.get("REFERENCE") == "1",
                  impl=os.environ.get("CELL_IMPL", "bash"),
                  # AGENT_MODEL is config, not exported env: the environment
                  # alone yields the lane name ("opus") rather than the pinned

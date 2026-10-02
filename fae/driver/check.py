@@ -178,7 +178,7 @@ def _variants(ctx):
                                f"declare [authoring] surface = {{ files = [...], prefixes = [...] }} "
                                f"in {where}: what the agent may write"))
         out.append(Finding(liveness_declared(cls), f"{vid}: an infra liveness probe",
-                           f"give {where} an [infra] class with infra_alive(), or a "
+                           f"give {where} an [infra] class with alive(), or a "
                            f"[verify.run] image: asked before every arrangement"))
         out.append(Finding("TODO.md" in cls.INPUTS, f"{vid}: TODO.md among its inputs",
                            f"add \"TODO.md\" = \"task/<T>.PROMPT.md\" to [authoring.inputs] in "
@@ -266,7 +266,7 @@ STEPS = (
          "this daemon.",
          "§1", _docker, docker=True),
     Step("infra", "This host can carry each variant",
-         "Each variant's own preflight (infra_ok) and the verify image,\n"
+         "Each variant's own preflight (its infra's ok()) and the verify image,\n"
          "built now if missing, so no cell pays for the build.",
          "§7", _infra, needs=("seeds", "docker"), docker=True),
     Step("pipeline", "The reference passes the gate",

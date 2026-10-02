@@ -1,4 +1,4 @@
-"""Variant.tool — a tool the host does not carry, run by the driver in a
+"""Infra.tool — a tool the host does not carry, run by the driver in a
 throwaway container of the variant's image."""
 import subprocess
 import tempfile
@@ -11,12 +11,11 @@ from _ctx import ROOT
 
 from fae import paths as _paths
 from fae.cell import image as _image
-from fae.cell.variants import base
+from fae.cell.infra import base
+from fae.cell.variants.base import Variant
 
 
-class Imaged(base.Variant):
-    ARM = "imaged"
-    TECH = "imaged"
+class Imaged(base.Infra):
 
     def image(self):
         return "fae-x-imaged:abc"
@@ -28,10 +27,10 @@ class TestTheToolContainer(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.ws = Path(self._tmp.name) / "cell-x"
         self.ws.mkdir()
-        cell = SimpleNamespace(cid="cell-x", variant="imaged_c", root=Path(ROOT),
+        cell = SimpleNamespace(cid="cell-x", variant="imaged", root=Path(ROOT),
                                ws=self.ws, conf=SimpleNamespace(get=lambda k, d=None: d,
                                                                 exported={"REPO_ROOT": str(ROOT)}))
-        self.v = Imaged(cell)
+        self.v = Imaged(Variant, cell)
 
     def run_tool(self, **kw):
         seen = {}
@@ -79,7 +78,7 @@ class TestTheToolContainer(unittest.TestCase):
         from fae.driver import zombies
         with mock.patch.object(zombies, "common") as c:
             c.AGENT_CONTAINER_PREFIX = "fae-agent-"
-            c.definition.return_value.verifier_class.return_value.INFRA_PREFIXES = {}
+            c.definition.return_value.verifier_class.return_value.PREFIXES = {}
             with mock.patch("fae.cell.variants.registry", return_value={}):
                 self.assertIn(("container", "fae-tool-"), zombies._prefixes())
 

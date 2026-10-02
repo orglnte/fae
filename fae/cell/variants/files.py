@@ -48,8 +48,8 @@ def _refuse_unknown(path, section, table):
 
 
 def _infra_class(path, spec):
-    """`module:Class` under the experiment package."""
-    from .base import Variant
+    """`module:Class` under the experiment package, an Infra subclass."""
+    from ..infra.base import Infra
     module, _, name = str(spec).partition(":")
     if not module or not name:
         raise VariantFileError(f"{path}: [infra] class must be 'module:Class', got {spec!r}")
@@ -57,8 +57,8 @@ def _infra_class(path, spec):
         cls = getattr(importlib.import_module(f"experiment.{module}"), name)
     except (ImportError, AttributeError) as e:
         raise VariantFileError(f"{path}: [infra] class {spec!r} cannot be imported: {e}") from e
-    if not (isinstance(cls, type) and issubclass(cls, Variant)):
-        raise VariantFileError(f"{path}: [infra] class {spec!r} is not a Variant subclass")
+    if not (isinstance(cls, type) and issubclass(cls, Infra)):
+        raise VariantFileError(f"{path}: [infra] class {spec!r} is not an Infra subclass")
     return cls
 
 
@@ -114,11 +114,9 @@ def read(path, exp_dir):
     }
     if not surface:
         attrs["AUTHORING_SURFACE"] = None
-    base = _infra_class(path, infra["class"]) if infra.get("class") else Variant
-    # the variant belongs to its infra class's module: what sits beside that
-    # module (a contract, its trees) is the variant's
-    attrs["__module__"] = base.__module__
-    return type(_camel(vid), (base,), attrs)
+    if infra.get("class"):
+        attrs["INFRA"] = _infra_class(path, infra["class"])
+    return type(_camel(vid), (Variant,), attrs)
 
 
 def load(exp_dir):

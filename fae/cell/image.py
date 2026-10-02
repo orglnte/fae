@@ -150,7 +150,7 @@ def for_variant(variant_cls, definition, conf, log=print):
     if not variant_cls.IMAGE_DIR:
         return base
     return ensure(dir_tag_name(definition, variant_cls.IMAGE_DIR), variant_cls.IMAGE_DIR,
-                  variant_cls.image_context(conf), base=base, log=log)
+                  variant_cls.INFRA.image_context(conf), base=base, log=log)
 
 
 # --- the agent image -------------------------------------------------------------
@@ -236,7 +236,7 @@ def for_agent(definition, conf, variant_cls, root, log=print):
     if not base:
         raise RuntimeError(f"{base_} is not present: build the base first "
                            f"(cli.py rig agent-image)")
-    context = variant_cls.agent_image_context(conf)
+    context = variant_cls.INFRA.agent_image_context(conf)
     want = content_hash(variant_cls.AGENT_IMAGE_DIR, context, base=base)
     if label(tag_, CONTENT_LABEL) != want:
         build(tag_, variant_cls.AGENT_IMAGE_DIR, context, base=base_, log=log,

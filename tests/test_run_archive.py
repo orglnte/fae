@@ -22,7 +22,7 @@ class TestRunArchive(unittest.TestCase):
         d = Path(self._tmp.name)
         (d / "ws" / "c" / "artifacts").mkdir(parents=True)
         self.c = cell.Cell("c", workspaces=d / "ws", root=ROOT)
-        self.c._infra = mock.Mock(infra_alive=lambda: True)
+        self.c._infra = mock.Mock(alive=lambda: True)
         self.c._attempt = 3
         self.ws = self.c.ws
 
@@ -252,7 +252,7 @@ class TestRequiredOutputs(unittest.TestCase):
         d = Path(self._tmp.name)
         (d / "ws" / "c" / "artifacts").mkdir(parents=True)
         self.c = cell.Cell("c", workspaces=d / "ws", root=ROOT)
-        self.c._infra = mock.Mock(infra_alive=lambda: True)
+        self.c._infra = mock.Mock(alive=lambda: True)
         self.c._attempt = 2
         self.ws = self.c.ws
         (self.ws / "iterations.log").write_text("")

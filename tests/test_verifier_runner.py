@@ -19,7 +19,8 @@ from fae.cell import experiment as _experiment  # noqa: E402
 from fae.cell import image as _image  # noqa: E402
 from fae.cell import verify  # noqa: E402
 from fae.cell.verify import Ctx, Verdict, run_verifier, verify_argv  # noqa: E402
-from fae.cell.variants.base import NoopVariant  # noqa: E402
+from fae.cell.infra.base import NoopInfra  # noqa: E402
+from fae.cell.variants.base import Variant  # noqa: E402
 
 
 def _definition(root, verifier_body):
@@ -35,7 +36,7 @@ def _definition(root, verifier_body):
 
 class _Shim:
     def __init__(self, cid, ws, root):
-        self.cid, self.ws, self.root, self.conf, self.treatment = cid, ws, root, None, "only"
+        self.cid, self.ws, self.root, self.conf, self.variant = cid, ws, root, None, "only"
 
 
 class RunnerCase(unittest.TestCase):
@@ -56,7 +57,7 @@ class RunnerCase(unittest.TestCase):
                    task="T1", variant="only", arrangement="A")
 
     def variant(self):
-        return NoopVariant(_Shim("cell-x", self.out, ROOT))
+        return NoopInfra(Variant, _Shim("cell-x", self.out, ROOT))
 
     def _popen(self, child):
         """A Popen whose wait() runs `child(argv)` -> rc, or raises."""
@@ -309,7 +310,7 @@ class TestTheRealRoundTrip(unittest.TestCase):
                   task="T1", variant="alpha", arrangement="G1")
         _image.network_up("real-x")
         self.addCleanup(_image.network_down, "real-x")
-        v = run_verifier(ctx, NoopVariant(_Shim("real-x", out, ROOT)), timeout_s=600)
+        v = run_verifier(ctx, NoopInfra(Variant, _Shim("real-x", out, ROOT)), timeout_s=600)
         self.assertTrue(v.ok, (v, (out / "verifier.log").read_text()))
         self.assertEqual(v.metrics, {"answer": "42"})
         self.assertIn("image=fae-fixture-verifier:", (out / "verifier.log").read_text())
@@ -402,6 +403,23 @@ class TestTheTeardownRunsInAFreshContainer(RunnerCase):
         self.assertTrue(ctx_file.is_file())
         self.assertIn("--teardown", seen[1][1])
         self.assertIn("teardown start image=fae-mini-verifier:abc", (self.out / "verifier.log").read_text())
+
+    def test_the_teardown_child_stops_the_runner_before_the_infras_teardown(self):
+        d = _experiment.current()
+        cls = d.variant("alpha_apidocs")
+        ctx = Ctx(root=str(ROOT), experiment_dir=str(d.path), workspace=str(self.out),
+                  artifacts=str(self.out / "artifacts"), out=str(self.out), cid="cell-x",
+                  task="T1", variant="alpha_apidocs", arrangement="A")
+        (self.out / "t.json").write_text(ctx.to_json())
+        order = []
+        from fae.cell.infra import secrunner
+        with mock.patch.object(secrunner, "stop_by_name",
+                               side_effect=lambda cid, w, log=None: order.append(("stop", cid, log.name))), \
+                mock.patch.object(cls.INFRA, "verify_teardown",
+                                  lambda self, c, env: order.append(("teardown", type(self).__name__))):
+            self.assertEqual(verify.main(["--teardown", "--ctx", str(self.out / "t.json")]), 0)
+        self.assertEqual(order, [("stop", "cell-x", d.verifier_class().RUN_LOG),
+                                 ("teardown", cls.INFRA.__name__)])
 
     def test_no_image_is_no_container_and_no_crash(self):
         exp = _definition(self.root, "")

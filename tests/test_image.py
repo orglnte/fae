@@ -123,10 +123,7 @@ class TestTheDeclarations(ImageCase):
 
         class Var:
             IMAGE_DIR = variant_dir
-
-            @classmethod
-            def image_context(cls, conf):
-                return []
+            INFRA = V
 
         d = mock.Mock()
         d.name = "fx"

@@ -127,6 +127,21 @@ class TestStartAndStop(unittest.TestCase):
                          "started\nGET /health 200\n")
         self.assertTrue((Path(self.tmp) / "scratch").is_dir())
 
+    def test_a_runner_is_stopped_by_its_name_alone_keeping_its_output(self):
+        calls = []
+
+        def run(argv, **kw):
+            calls.append(argv)
+            if argv[:2] == ["docker", "logs"]:
+                return mock.Mock(returncode=0, stdout="bye\n", stderr="")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+        log = Path(self.tmp) / "run.log"
+        with mock.patch.object(secrunner.subprocess, "run", run):
+            secrunner.stop_by_name("c1", self.tmp, log=log)
+        self.assertEqual(calls[0][:3], ["docker", "logs", "fae-secrun-c1"])
+        self.assertEqual(calls[-1], ["docker", "rm", "-f", "fae-secrun-c1"])
+        self.assertEqual(log.read_text(), "bye\n")
+
     def test_run_returns_the_exit_code_and_the_output_and_removes_it(self):
         calls = []
 
@@ -191,7 +206,7 @@ class TestForVariant(unittest.TestCase):
                 secrunner.for_variant(v, "c1", "/w")
 
     def test_a_program_in_its_own_image_has_a_liveness_probe(self):
-        from fae.cell.variants.base import liveness_declared
+        from fae.cell.infra.base import liveness_declared
         self.assertTrue(liveness_declared(self.variant(image="img:1", command=["x"])))
         self.assertFalse(liveness_declared(self.variant(command=["x"])))
 

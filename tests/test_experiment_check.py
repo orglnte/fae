@@ -86,7 +86,8 @@ class TestEachFailureNamesItsFix(CheckCase):
 
     def test_an_undeclared_liveness_probe(self):
         cls = self.variant("alpha_apidocs")
-        with mock.patch.object(cls.__bases__[0], "infra_alive", Variant.infra_alive):
+        from fae.cell.infra.base import Infra
+        with mock.patch.object(cls.INFRA, "alive", Infra.alive):
             self.assertEqual(self.run_check(), 1)
         self.assertIn("an infra liveness probe", self.text())
 

@@ -770,32 +770,33 @@ class TestTheIterNoteCarriesTheBashFields(CellTestCase):
 
 
 class TestAnUndeclaredLivenessProbeHaltsAtPreflight(CellTestCase):
-    """The base infra_alive answers "dead"; a variant that never
+    """The base alive() answers "dead"; an infra class that never
     overrides it would void every arrangement, refunded, forever. The
     preflight refuses it before an attempt is spent."""
 
-    def test_infra_ok_is_false_and_names_the_variant(self):
+    def test_infra_ok_is_false_and_names_the_infra_class(self):
+        from fae.cell.infra.base import Infra
         from fae.cell.variants.base import Variant
 
-        class Probeless(Variant):
-            ID = "beta_apidocs"
+        class Probeless(Infra):
+            pass
 
+        v = type("BetaApidocs", (Variant,), {"ID": "beta_apidocs", "INFRA": Probeless})
         c = self.cell()
-        c._infra = Probeless(c)
+        c._infra = Probeless(v, c)
         self.assertFalse(c.infra_ok())
-        self.assertIn("Probeless declares no infra_alive probe",
+        self.assertIn("Probeless declares no alive() probe",
                       (c.ws / "hooks.log").read_text())
 
     def test_a_declared_probe_passes_the_check(self):
-        from fae.cell.variants.base import Variant, liveness_declared
+        from fae.cell.infra.base import Infra, liveness_declared
+        from fae.cell.variants.base import Variant
 
-        class Probed(Variant):
-            ID = "beta_apidocs"
-
-            def infra_alive(self):
+        class Probed(Infra):
+            def alive(self):
                 return True
 
-        self.assertTrue(liveness_declared(Probed))
+        self.assertTrue(liveness_declared(type("V", (Variant,), {"INFRA": Probed})))
         self.assertFalse(liveness_declared(Variant))
 
 
@@ -808,14 +809,14 @@ class TestAnUndeclaredSurfaceHaltsAtPreflight(CellTestCase):
         from fae.cell import experiment
         from fae.cell.variants.base import Variant
 
+        from fae.cell.infra.base import NoopInfra
+
         class Surfaceless(Variant):
             ID = "beta_apidocs"
-
-            def infra_alive(self):
-                return True
+            INFRA = NoopInfra
 
         c = self.cell()
-        c._infra = Surfaceless(c)
+        c._infra = NoopInfra(Surfaceless, c)
         with mock.patch.object(experiment.Definition, "variant",
                                lambda self, vid: Surfaceless):
             self.assertFalse(c.infra_ok())

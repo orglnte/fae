@@ -1,7 +1,7 @@
-from fae.cell.variants.base import Variant
+from fae.cell.infra.base import Infra
 
 
-class Beta(Variant):
+class Beta(Infra):
 
-    def infra_alive(self):
+    def alive(self):
         return True
