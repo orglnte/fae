@@ -3,7 +3,7 @@ longer owns, and the reaper's owner-protection logic that must never touch a
 live cell.
 
 _VERIFY_HOLDER_ARGV / _is_driver_pid answer "is this pid entitled to hold the
-lock it has" for a verify running via `cli.py rig exp1|cell reverify|rig
+lock it has" for a verify running via `cli.py experiment exp1|cell reverify|experiment
 smoke` in the FOREGROUND process — the regex tracks the real invoked argv,
 so moving the code that implements a verb changes nothing about what it
 matches; only a change to the invocation shape itself does. Substrate names
@@ -181,15 +181,15 @@ def _fd_holders(path):
 # run a verify through the cell — `exp1` (the reference benchmark, in
 # smoke-workspaces), `reverify` (under <ws>/reverify/<ts>/), and `smoke`
 # (whose stub cells live in ws-test.nosync, invisible to loop_parents).
-# cli.py's noun-grouped invocation shape (`cli.py rig exp1`, `cli.py cell
-# reverify`, `cli.py rig smoke` — not a flat `cli\.py\s+(exp1|reverify|
+# cli.py's noun-grouped invocation shape (`cli.py experiment exp1`, `cli.py cell
+# reverify`, `cli.py experiment smoke` — not a flat `cli\.py\s+(exp1|reverify|
 # smoke)`, since the group token differs per verb). Used to also match
 # `runs.py exp1|reverify|smoke` as an OR while runs.py stayed invocable
 # (Milestone 5); dropped at Milestone 6 when runs.py was deleted — no
 # process can be invoked that way any more.
 
 
-_VERIFY_HOLDER_ARGV = r"cli\.py\s+(rig\s+exp1|cell\s+reverify|rig\s+smoke)\b"
+_VERIFY_HOLDER_ARGV = r"cli\.py\s+(experiment\s+exp1|cell\s+reverify|experiment\s+smoke)\b"
 
 
 def _verify_holders_alive():
@@ -202,7 +202,7 @@ def _leaked_lock_holders():
 
     Both locks are held IN-PROCESS, as a file object: the rig lock by
     Cell.exclusive_acquire, the verify lock by Cell.verify_lock_acquire —
-    inside a cell loop, or inside `cli.py rig exp1|cell reverify|rig smoke`. Either held
+    inside a cell loop, or inside `cli.py experiment exp1|cell reverify|experiment smoke`. Either held
     with no such process alive means something else inherited the fd and
     never let go, which blocks the next verify indefinitely — the holder
     cannot be identified while a legitimate one is running, so the absence is

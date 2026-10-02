@@ -205,7 +205,7 @@ def _conduct_preflight():
         return False
     # Every variant's own preflight — its daemon, its images (built here,
     # not under a cell), its tools — and a sweep of its stale substrate:
-    # what `cli.py rig substrate` shows, run once before admission.
+    # what `cli.py experiment substrate` shows, run once before admission.
     from fae.driver import rig as _rig
     print("conduct: substrate preflight", flush=True)
     bad = _rig._probe_arms()

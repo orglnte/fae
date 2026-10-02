@@ -1,4 +1,4 @@
-"""`cli.py rig init` writes fae.toml — every key the engine reads at its
+"""`cli.py experiment init` writes fae.toml — every key the engine reads at its
 default, the caps for the locks the experiment's variants declare, and the
 machine-local keys the experiment declares — and what it writes loads back
 to exactly the values a missing file would."""
@@ -79,7 +79,7 @@ class TestTheVerb(unittest.TestCase):
 
     def test_the_cli_has_the_verb(self):
         src = (Path(ROOT) / "fae" / "cli.py").read_text()
-        self.assertIn('@rig_app.command("init")', src)
+        self.assertIn('@experiment_app.command("init")', src)
 
 
 if __name__ == "__main__":

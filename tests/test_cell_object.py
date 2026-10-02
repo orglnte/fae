@@ -358,7 +358,7 @@ class TestTheGateIsSixArrangementsByDefault(CellTestCase):
         self.assertEqual(c.gate_shapes, (None,))
 
     def test_smoke_env_reaches_the_gate(self):
-        """`cli.py rig smoke` (no --full-gate) sets SHAPE_GATE=one in the child's
+        """`cli.py experiment smoke` (no --full-gate) sets SHAPE_GATE=one in the child's
         environment expecting the single-arrangement pipeline check — this is
         the actual mechanism that must carry it into conf.values, not a
         direct .values mutation like the tests above."""
@@ -1037,7 +1037,7 @@ class TestOnePausePerPause(CellTestCase):
 
 class TestPrepareIsNative(CellTestCase):
     """One prepare implementation, no shim hop: Cell.prepare calls
-    fae.cell.prepare directly (and so does `cli.py rig prepare`)."""
+    fae.cell.prepare directly (and so does `cli.py experiment prepare`)."""
 
     def test_the_py_driver_calls_the_module_not_the_shim(self):
         src = (Path(ROOT) / "fae" / "cell" / "cell.py").read_text()

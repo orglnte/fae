@@ -942,7 +942,7 @@ class Cell:
         """Seed the workspace through the one module that knows how, recording
         IMPL (this engine's) so the result is attributable without later
         archaeology.
-        `cli.py rig prepare` calls the same function over the matrix."""
+        `cli.py experiment prepare` calls the same function over the matrix."""
         from . import prepare as _prepare
         _prepare.prepare(self.cid, self.task, self.treatment, self.condition,
                          self.rep, workspaces=self.workspaces, root=self.root,

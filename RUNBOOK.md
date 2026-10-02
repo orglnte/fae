@@ -18,7 +18,7 @@ verdict rules: [`AGENTS.md`](AGENTS.md).
    of an image the experiment declares, and the judged program inside the
    variant's substrate; the agent runs in the engine's base image plus the
    layer the experiment declares. Whatever else an experiment needs on the
-   host is its definition's to declare and `rig substrate` to report.
+   host is its definition's to declare and `experiment substrate` to report.
    New experiment: [`HOWTO.md`](HOWTO.md).
 2. Agent CLIs you plan to run: `claude` (logged in), `agy`, and/or `opencode`.
    For opencode the operator writes the API key **themselves** to
@@ -27,7 +27,7 @@ verdict rules: [`AGENTS.md`](AGENTS.md).
    Never commit keys; `fae.toml` is
    gitignored — never put secrets in it either (the agent authenticates
    through `.agent-home`, not a config value).
-3. From the experiment root (the directory holding the experiment; `REPO_ROOT` in the environment overrides), `python3 cli.py rig init [--experiment DIR]` writes `fae.toml` (every key at its default, pointed at `DIR`); set the
+3. From the experiment root (the directory holding the experiment; `REPO_ROOT` in the environment overrides), `python3 cli.py experiment init [--experiment DIR]` writes `fae.toml` (every key at its default, pointed at `DIR`); set the
    machine-local rig paths under `[paths]`. The engine is the `fae` package
    at this root: `python3 cli.py …` runs it uninstalled, and `pip install -e .`
    gives the same verbs as `fae …`.
@@ -35,8 +35,8 @@ verdict rules: [`AGENTS.md`](AGENTS.md).
 Then let the preflight localize anything missing:
 
 ```sh
-python3 cli.py rig substrate  # [ok]/[MISS] per arm: its daemon, tools and images
-python3 cli.py rig smoke      # one reference cell per arm, one arrangement (--full-gate: the whole gate)
+python3 cli.py experiment substrate  # [ok]/[MISS] per arm: its daemon, tools and images
+python3 cli.py experiment smoke      # one reference cell per arm, one arrangement (--full-gate: the whole gate)
 ```
 
 ---

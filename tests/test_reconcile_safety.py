@@ -37,7 +37,7 @@ class TestNeverStarted(unittest.TestCase):
 
     def test_v2_prepared_only_workspace_is_never_started(self):
         """THE REGRESSION: prepare_cell.sh:107 writes PREPARED, ledger.parse
-        counts it, so events == 1. `cli.py rig prepare` seeds the whole matrix and
+        counts it, so events == 1. `cli.py experiment prepare` seeds the whole matrix and
         launches nothing — every one of those would have been respawned as a
         paid agent run."""
         self.assertTrue(runs.state.never_started(
@@ -1001,8 +1001,8 @@ class TestArmStuckMeasuresProgressNotLiveness(SweepCase):
 
 class TestLeakedLockHolders(unittest.TestCase):
     """A lock held while nothing entitled to hold it is running. Both locks
-    are held in-process — by a cell loop, or by `cli.py rig exp1|cell
-    reverify|rig smoke` verifying outside one; either held with no such process means an
+    are held in-process — by a cell loop, or by `cli.py experiment exp1|cell
+    reverify|experiment smoke` verifying outside one; either held with no such process means an
     inherited fd was never released, and the next verify blocks on it while
     holding the GLOBAL verify lock.
 
@@ -1051,16 +1051,16 @@ class TestLeakedLockHolders(unittest.TestCase):
                                  fd_pids=[4242]))
 
     def test_a_live_verifier_means_the_holder_is_legitimate(self):
-        # The whole safety argument: while `cli.py rig exp1` (or cell
-        # reverify, or rig smoke) runs, the fd holders include it and its
+        # The whole safety argument: while `cli.py experiment exp1` (or cell
+        # reverify, or experiment smoke) runs, the fd holders include it and its
         # children, and none may be killed.
         self.assertEqual(self._find(held=True, entitled_running=True,
                                     fd_pids=[4242]), [])
 
     def test_the_out_of_loop_verifiers_are_the_ones_named(self):
-        for argv in ("python3 cli.py rig exp1 --reps 3",
+        for argv in ("python3 cli.py experiment exp1 --reps 3",
                      "python3 cli.py cell reverify x --all",
-                     "python3 cli.py rig smoke --only keda"):
+                     "python3 cli.py experiment smoke --only keda"):
             self.assertRegex(argv, runs.zombies._VERIFY_HOLDER_ARGV)
             with mock.patch.object(runs.common, "sh", return_value=argv + "\n"):
                 self.assertTrue(runs.zombies._is_driver_pid(4242), argv)

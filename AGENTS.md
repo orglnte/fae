@@ -349,10 +349,10 @@ checked against. It answers:
 
 | Call | Called by | Purpose |
 |---|---|---|
-| `substrate_ok()` | `Cell.substrate_ok()` before every attempt; `cli.py rig substrate` | preflight, including whatever daemon the variant needs (the engine probes nothing itself); HALT, no attempt burned, if the environment is wrong |
+| `substrate_ok()` | `Cell.substrate_ok()` before every attempt; `cli.py experiment substrate` | preflight, including whatever daemon the variant needs (the engine probes nothing itself); HALT, no attempt burned, if the environment is wrong |
 | `substrate_alive()` | `Cell.verify` before every arrangement and after a charged fail | the substrate answers RIGHT NOW (a hard connect failure is "no", a slow daemon is alive). Dead before → the arrangement is void without a deploy; dead after a charged fail at one of the verifier's `MEASURED_STAGES` (None: any) → the same void, stage `substrate`, refunded. The base answer is False, and a variant that never overrides it is refused at preflight (`liveness_declared`): with the base answer every arrangement would be void forever |
-| `sweep()` | `cli.py rig substrate` | remove stale substrate left by dead cells |
-| `author_setup()` | `Cell.run` / `Cell.reverify` / `cli.py rig exp1`, from the driver on the host | what the agent needs while it authors, kept for every attempt, on the cell network; returns the agent's docker args |
+| `sweep()` | `cli.py experiment substrate` | remove stale substrate left by dead cells |
+| `author_setup()` | `Cell.run` / `Cell.reverify` / `cli.py experiment exp1`, from the driver on the host | what the agent needs while it authors, kept for every attempt, on the cell network; returns the agent's docker args |
 | `author_teardown()` | the same, on their unconditional path; `cell stop`, the kill fallback, the reaper | tear it down, idempotently |
 | `verify_setup(ctx, env)` | the experiment's Verifier, inside the verify container over the daemon's socket | what one arrangement of the judged artifacts runs on, fresh every time; raise on a rig fault (refunded), raise a rejection once the substrate is up and the artifacts fail on it (charged); return what later stages need |
 | `verify_teardown(ctx, env)` | the same, whether `verify_setup` finished or not; `run_teardown` after a kill | the world reset after the arrangement, derivable from the ctx alone |

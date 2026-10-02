@@ -343,7 +343,7 @@ def never_started(st):
     The `events == 0` test ALONE went dead when the prepare (fae/cell/prepare.py) began
     writing a v2 PREPARED birth event: ledger.parse counts it, so a freshly
     prepared workspace has events == 1 and this returned False for every one
-    of them. `cli.py rig prepare` seeds the whole matrix and launches nothing, so
+    of them. `cli.py experiment prepare` seeds the whole matrix and launches nothing, so
     reconcile would then classify each as CRASHED-with-no-loop and _respawn it
     — paid agent runs nobody ordered, which is exactly what the guard exists
     to prevent and a direct breach of the no-unordered-restart rule.
