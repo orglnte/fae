@@ -475,7 +475,7 @@ def smoke_variants():
     d = common.definition()
     for vid in d.active:
         cls = d.variant(vid)
-        key = (str(cls.REFERENCE), repr(sorted(cls.RUN.items())), cls.__bases__,
+        key = (str(cls.REFERENCE), repr(sorted(cls.RUN.items())), cls.INFRA,
                cls.ACCESS_INFRA, repr(sorted(cls.PARAMS.items())), str(cls.IMAGE_DIR),
                cls.LOCK)
         if key not in seen:
