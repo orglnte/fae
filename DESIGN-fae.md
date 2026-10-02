@@ -95,8 +95,8 @@ A cell yields:
 2. **Contrib blocks** (`fae/cell/contrib/`, `fae/cell/substrate/`) are
    mechanisms without policy that an experiment may use: a load-shape law
    for a resource scaled 0↔1 under load (judged relative to the store's own
-   saturation, with closed-loop blips), and Docker-in-Docker, kind-cluster
-   and sandbox substrates.
+   saturation, with closed-loop blips), Docker-in-Docker and kind-cluster
+   substrates, and the secure runner every judged program runs in.
 3. **Experiments** each live in a repository of their own beside the
    engine. An experiment's `cli.py` imports the engine from its checkout
    (`$FAE_DIR`, else `../fae`) and makes its own repository the root, so its

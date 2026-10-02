@@ -89,7 +89,7 @@ an image is `stage=verifier-image`, a void.
 Reusable verifier blocks are contrib — engine-owned mechanisms with no
 policy: `fae/cell/contrib/elastic_resource/` (the load-shape law for a
 resource scaled 0↔1: `load_shape`, `trace`, `k6`, `law`; §7) and the
-substrate blocks under `fae/cell/substrate/` (`dind`, `kind`, `sandbox`).
+substrate blocks under `fae/cell/substrate/` (`dind`, `kind`, `secrunner`).
 An experiment composes them with its own parameters. What a rig fault looks
 like in an experiment's evidence is its `taint_rules`, run by
 `fae/driver/validate.py` beside the engine's own rules.
@@ -425,17 +425,20 @@ left there by an earlier verify) is a rig defect, the same on every retry:
 `results validate` taints a cell with an attempt never judged after such an
 alert, and warns on one judged again once the rig was mended.
 
-**The judged program never runs in the verify container.** A verifier that
-measures a running program starts it in the cell's secure runner,
-`fae-secrun-<cid>` (`fae/cell/substrate/secrunner.py`), from the verify image
-(`FAE_VERIFY_IMAGE`): a fresh copy of the artifacts at `/workspace` and a
-scratch dir at `/scratch` are its only mounts; no Docker socket; the
-operator's uid with `HOME` and `USER` set, every capability dropped, no
-privilege escalation, CPU/memory/pid/open-file ceilings; the networks the
-verifier names, reached by its name. The verify container keeps the rig's
-reach (the mounts, the socket, the lock plane) and runs only rig code. A
-program run once and judged by its output (a CLI, a compiler) uses
-`substrate/sandbox.py`, the same shape without a network.
+**The judged program never runs in the verify container.** A verifier runs
+it in the cell's secure runner, `fae-secrun-<cid>`
+(`fae/cell/substrate/secrunner.py`), from the verify image
+(`FAE_VERIFY_IMAGE`) or the variant's runtime image: a fresh copy of the
+artifacts at `/workspace` and, when the program keeps state, a scratch dir
+at `/scratch` are its only mounts; no Docker socket; the operator's uid
+with `HOME` and `USER` set, every capability dropped, no privilege
+escalation, CPU/memory/pid ceilings; the networks the verifier names, or
+none. One lifecycle for every program: start, then wait for its end (a CLI,
+one test case with its input on stdin) or use it while it serves, then
+stop, which keeps its output and removes the container. The verify
+container keeps the rig's reach (the mounts, the socket, the lock plane)
+and runs only rig code. `SecRunnerVariant` is the variant whose program
+needs only a runtime image.
 
 ## 6. The seal: what the agent can actually reach
 
