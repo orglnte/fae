@@ -15,17 +15,17 @@ class TestCellId(unittest.TestCase):
 
     def test_default_effort_is_high(self):
         self.assertEqual(
-            runs.cell_id("sonnet", "beta", "apidocs", 1),
+            runs.cell_id("sonnet", "beta_apidocs", 1),
             "sonnet_high_beta_apidocs_T1_r1")
 
     def test_task_and_rep_are_positional_suffixes(self):
         self.assertEqual(
-            runs.cell_id("haiku", "alpha", "openbook", 12, task="T3"),
+            runs.cell_id("haiku", "alpha_openbook", 12, task="T3"),
             "haiku_high_alpha_openbook_T3_r12")
 
-    def test_smoke_inserts_marker_before_treatment(self):
+    def test_smoke_inserts_marker_before_the_variant(self):
         self.assertEqual(
-            runs.cell_id("gemini", "beta", "onlysrc", 2, smoke=True),
+            runs.cell_id("gemini", "beta_onlysrc", 2, smoke=True),
             "gemini_high_smoke_beta_onlysrc_T1_r2")
 
     def test_empty_effort_drops_the_suffix(self):
@@ -36,7 +36,7 @@ class TestCellId(unittest.TestCase):
         for the consequence.
         """
         self.assertEqual(
-            runs.cell_id("sonnet", "beta", "apidocs", 1, effort=""),
+            runs.cell_id("sonnet", "beta_apidocs", 1, effort=""),
             "sonnet_beta_apidocs_T1_r1")
 
 
@@ -45,39 +45,36 @@ class TestParseCellId(unittest.TestCase):
     def test_parses_the_live_id_shape(self):
         self.assertEqual(
             runs.parse_cell_id("sonnet_high_beta_apidocs_T1_r1"),
-            ("sonnet", "beta", "apidocs", "T1", "1"))
+            ("sonnet", "beta_apidocs", "T1", "1"))
 
-    def test_round_trips_every_matrix_combination(self):
-        for treatment, variants in runs.common.definition().matrix.items():
-            for variant in variants:
-                for model in ("sonnet", "haiku", "gemini", "opus", "dsv4f", "kimi"):
-                    cid = runs.cell_id(model, treatment, variant, 3)
-                    with self.subTest(cid=cid):
-                        self.assertEqual(
-                            runs.parse_cell_id(cid),
-                            (model, treatment, variant, "T1", "3"))
+    def test_round_trips_every_variant(self):
+        for variant in runs.common.definition().ids:
+            for model in ("sonnet", "haiku", "gemini", "opus", "dsv4f", "kimi"):
+                cid = runs.cell_id(model, variant, 3)
+                with self.subTest(cid=cid):
+                    self.assertEqual(runs.parse_cell_id(cid), (model, variant, "T1", "3"))
 
     def test_non_high_effort_still_parses(self):
         """Regression: a `_high_` hardcode once made every non-high cell
         invisible to status/pause/kill while its loop kept running."""
-        cid = runs.cell_id("sonnet", "beta", "howto", 1, effort="medium")
-        self.assertEqual(cid, "sonnet_high_beta_howto_T1_r1".replace(
+        cid = runs.cell_id("sonnet", "alpha_howto", 1, effort="medium")
+        self.assertEqual(cid, "sonnet_high_alpha_howto_T1_r1".replace(
             "_high_", "_medium_"))
         self.assertEqual(runs.parse_cell_id(cid),
-                         ("sonnet", "beta", "howto", "T1", "1"))
+                         ("sonnet", "alpha_howto", "T1", "1"))
 
     def test_multi_digit_rep_and_task(self):
         self.assertEqual(
             runs.parse_cell_id("haiku_high_alpha_openbook_T3_r12"),
-            ("haiku", "alpha", "openbook", "T3", "12"))
+            ("haiku", "alpha_openbook", "T3", "12"))
 
     def test_hyphenated_model_name(self):
         self.assertEqual(
             runs.parse_cell_id("claude-opus-5_high_beta_onlysrc_T1_r1"),
-            ("claude-opus-5", "beta", "onlysrc", "T1", "1"))
+            ("claude-opus-5", "beta_onlysrc", "T1", "1"))
 
-    def test_rejects_retired_arm_tokens(self):
-        """An id whose arm the loaded experiment does not declare is not a cell
+    def test_rejects_an_unknown_variant(self):
+        """An id whose variant the loaded experiment does not declare is not a cell
         of this experiment — another experiment's, or an archived vocabulary —
         and matching it would pull foreign cells into status and reconcile."""
         for cid in ("gemini_high_gamma_handed_T1_r1",
@@ -105,7 +102,7 @@ class TestParseCellId(unittest.TestCase):
 
         cell_id(effort="") yields `sonnet_beta_apidocs_T1_r1`, but the
         parse regex requires a mandatory `_(?:\\w+?)_` effort segment between
-        model and treatment, so it returns None. Such a cell would run and then
+        model and variant, so it returns None. Such a cell would run and then
         be invisible to status, pause, kill and reconcile.
 
         Not fixed by changing the derivation: that would touch every cid
@@ -116,7 +113,7 @@ class TestParseCellId(unittest.TestCase):
         the asymmetry so it stays a
         known, guarded property rather than a surprise.
         """
-        cid = runs.cell_id("sonnet", "beta", "apidocs", 1, effort="")
+        cid = runs.cell_id("sonnet", "beta_apidocs", 1, effort="")
         self.assertIsNone(runs.parse_cell_id(cid))
 
     def test_selftest_refuses_a_non_high_effort(self):
@@ -151,16 +148,16 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestTheArmIsTheExperiments(unittest.TestCase):
-    """The grammar is positional (the arm is whatever lies between the effort
-    and the last three tokens); the arm itself must be one the loaded
-    experiment declares."""
+class TestTheVariantIsTheExperiments(unittest.TestCase):
+    """The grammar is positional (the variant is whatever lies between the
+    effort and the last two tokens); the variant itself must be one the
+    loaded experiment declares."""
 
-    def test_an_undeclared_arm_is_not_a_cell(self):
+    def test_an_undeclared_variant_is_not_a_cell(self):
         self.assertIsNone(runs.parse_cell_id("sonnet_high_gpu_sealed_apidocs_T1_r1"))
         self.assertIsNone(runs.parse_cell_id("sonnet_high_apidocs_T1_r1"))
 
-    def test_the_arms_come_from_the_definition_not_a_regex(self):
+    def test_the_variants_come_from_the_definition_not_a_regex(self):
         from fae.cell import experiment as _experiment
-        for arm in _experiment.current().arms:
-            self.assertEqual(runs.parse_cell_id(f"m_high_{arm}_v_T1_r1")[1], arm)
+        for vid in _experiment.current().ids:
+            self.assertEqual(runs.parse_cell_id(f"m_high_{vid}_T1_r1")[1], vid)

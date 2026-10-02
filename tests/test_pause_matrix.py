@@ -45,12 +45,11 @@ class PauseMatrixCase(unittest.TestCase):
         self._held = []
         self.addCleanup(lambda: [f.close() for f in self._held])
 
-    def cell(self, cid=None, treatment="beta"):
+    def cell(self, cid=None, variant="beta_apidocs"):
         cid = cid or self.CID
         ws = self.wsdir / cid
         (ws / "artifacts").mkdir(parents=True, exist_ok=True)
-        (ws / "cell.env").write_text(f"TASK=T1\nTREATMENT={treatment}\n"
-                                     "CONDITION=apidocs\nREPEAT=1\n")
+        (ws / "cell.env").write_text(f"TASK=T1\nVARIANT={variant}\nREPEAT=1\n")
         c = cell.Cell(cid, workspaces=self.wsdir, root=self.root)
         c.prepare = lambda fresh=False: c.ws      # workspace is pre-seeded
         return c
@@ -97,7 +96,7 @@ class TestRow12PauseInTheArmLockQueue(PauseMatrixCase):
         orch = self.root / "workspaces.nosync" / ".orch"
         # work slots free; the ONE keda arm slot held by the test
         self.hold(orch / "arm-alpha.slots" / "slot-1")
-        c = self.cell(treatment="alpha")
+        c = self.cell(variant="alpha_apidocs")
         (c.ws / ".paused").write_text("row 12\n")
         # stage_agent needs creds; the arm queue is reached before any agent,
         # and a stub run skips staging exactly like the rig-debug path.

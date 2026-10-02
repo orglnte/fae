@@ -154,18 +154,16 @@ class TestStartAndStop(unittest.TestCase):
 
 
 
-class TestTheVariant(unittest.TestCase):
-    """SecRunnerVariant: an experiment declares the runtime and the commands;
-    the engine runs them in the runner with no network and the tight caps."""
+class TestForVariant(unittest.TestCase):
+    """for_variant: the runner of a variant's program, from its [verify.run]."""
 
-    class Prog(secrunner.SecRunnerVariant):
-        ARM = TECH = "prog"
-        IMAGE = "img:1"
-        RUN = ("python3", "p.py")
+    def variant(self, **run):
+        from fae.cell.variants.base import Variant
+        return type("Prog", (Variant,), {"ID": "prog", "RUN": run})
 
-    def test_the_runner_has_no_network_and_the_tight_caps(self):
-        r = self.Prog.runner("c1", "/w", self.Prog.RUN)
-        a = r.create_argv()
+    def test_a_program_that_ends_has_no_network_and_the_tight_caps(self):
+        v = self.variant(image="img:1", command=["python3", "p.py"])
+        a = secrunner.for_variant(v, "c1", "/w").create_argv()
         self.assertEqual(a[a.index("--network") + 1], "none")
         self.assertEqual(a[a.index("--memory") + 1], secrunner.RUN_MEMORY)
         self.assertEqual(a[a.index("--pids-limit") + 1], str(secrunner.RUN_PIDS))
@@ -173,21 +171,30 @@ class TestTheVariant(unittest.TestCase):
         self.assertNotIn("--ulimit", a)
         self.assertEqual(a[-3:], ["img:1", "python3", "p.py"])
 
-    def test_run_answers_stdout_stderr_code_and_no_error(self):
-        with mock.patch.object(secrunner.SecRunner, "run", return_value=(0, "42\n", "")) as m:
-            self.assertEqual(self.Prog.run("c1", "/w", self.Prog.RUN, "6*7\n", 20),
-                             ("42\n", "", 0, None))
-        self.assertEqual(m.call_args.kwargs, {"stdin": "6*7\n", "split": True})
+    def test_another_argv_runs_in_the_same_image(self):
+        v = self.variant(image="img:1", command=["./calc"], build=["make"])
+        self.assertEqual(secrunner.for_variant(v, "c1", "/w", argv=v.RUN["build"]).argv,
+                         ("make",))
 
-    def test_a_run_that_did_not_end_is_an_error_not_an_exit_code(self):
-        with mock.patch.object(secrunner.SecRunner, "run",
-                               return_value=(None, "", "timed out after 20s")):
-            self.assertEqual(self.Prog.run("c1", "/w", self.Prog.RUN, "", 20),
-                             ("", "", None, "timed out after 20s"))
+    def test_a_program_that_serves_is_on_the_cell_network_with_room(self):
+        v = self.variant(command=["uvicorn", "app:app"], serves=8080)
+        with mock.patch.dict(os.environ, {"FAE_CELL_NET": "fae-net-c1",
+                                          "FAE_VERIFY_IMAGE": "verify:1"}):
+            r = secrunner.for_variant(v, "c1", "/w", networks=("kind",), scratch=Path("/s"))
+        self.assertEqual((r.image, r.networks, r.memory, r.scratch),
+                         ("verify:1", ("fae-net-c1", "kind"), secrunner.MEMORY, Path("/s")))
 
-    def test_it_declares_a_liveness_probe(self):
+    def test_serving_outside_a_verify_container_is_refused(self):
+        v = self.variant(command=["uvicorn"], serves=8080)
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "FAE_CELL_NET"):
+                secrunner.for_variant(v, "c1", "/w")
+
+    def test_a_program_in_its_own_image_has_a_liveness_probe(self):
         from fae.cell.variants.base import liveness_declared
-        self.assertTrue(liveness_declared(self.Prog))
+        self.assertTrue(liveness_declared(self.variant(image="img:1", command=["x"])))
+        self.assertFalse(liveness_declared(self.variant(command=["x"])))
+
 
 def _docker_answers():
     try:

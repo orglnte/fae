@@ -114,7 +114,7 @@ def queued_summary():
                 tags.append(f"[{_kinds[_k]} {_k}]")
         # The tags are the reason a lane is not moving, so they line up in
         # their own column instead of trailing a variable-length spec name.
-        nxt_txt = f"{nxt['treatment']}·{nxt['condition']} r{nxt['rep']}"
+        nxt_txt = f"{nxt['variant']} r{nxt['rep']}"
         rows.append(f"  {model:8} {len(paths):3} pending  next: "
                     f"{nxt_txt:<28}{'  '.join(tags)}")
     if not rows:
@@ -156,11 +156,10 @@ def render(flat=False, running_only=False):
         out.append(fmt_table(rows, ("CELL", "MODEL VERSION", "STATE", "LIVE", "GATE", "LAST REP", "LAST ERR / BLOCK")))
     else:
         # Two tables (operator request 2026-07-25): everything WORKING in one
-        # table up top; everything else in one table ordered tech > model.
-        # Derived from the definition, not a copy of its mapping; the
-        # access/sealed half is the arm's suffix when it has one.
+        # table up top; everything else in one table ordered label > model.
+        # Derived from the definition, not a copy of its mapping.
         variants = common.definition().variants
-        tech_of = {arm: cls.LABEL or cls.TECH for arm, cls in variants.items()}
+        label_of = {vid: cls.LABEL for vid, cls in variants.items()}
 
         def vshort(model, version):
             # version only — the model name is its own column/id already
@@ -169,7 +168,6 @@ def render(flat=False, running_only=False):
                 if v.startswith(pfx):
                     v = v[len(pfx):]
             return v[:18]
-        arm_short = {t: t.split("_", 1)[-1] for t in variants}     # an arm may carry no tech prefix
         running_raw, other, attention = [], [], []
         for s in states:
             # (a `live = loop_parents()` sat here, inside the per-cell loop, and
@@ -188,14 +186,13 @@ def render(flat=False, running_only=False):
                                     f"{s['att']}/{s['budget']}", s["shape"],
                                     _tail_hist(s["hist"], 40), s["detail"]))
             else:
-                tech = tech_of.get(s["treatment"], s["treatment"])
+                label = label_of.get(s["variant"], s["variant"])
                 st_txt = (display_state(s) + (" ⚠" if s.get("taint") else ""))
                 att_txt = (f"@{s['green_at']}" if s["green_at"]
                            else str(s["att"]) if s["state"] == "DONE"
                            else f"{s['att']}/{s['budget']}")
-                other.append((tech, s["model"], vshort(s["model"], s["model_version"]),
-                              f"{arm_short.get(s['treatment'], '?')}·{s['condition']} "
-                              f"{s['task']} r{s['rep']}",
+                other.append((label, s["model"], vshort(s["model"], s["model_version"]),
+                              f"{s['variant']} {s['task']} r{s['rep']}",
                               st_txt, att_txt, s["live"], s["shape"],
                               _tail_hist(s["hist"], 34), s["detail"][:44]))
             if s["state"] == "CRASHED" and not requeued(s):
@@ -239,10 +236,10 @@ def render(flat=False, running_only=False):
         other.sort(key=lambda r: (r[0], r[1], r[2]))
         greens.sort(key=lambda r: (r[0], r[1], r[2]))
         # bottom-up visibility order: what scrolls away first matters least
-        hdr9 = ("TECH", "MODEL", "VER", "ARM·VAR·TASK·REP", "STATE",
+        hdr9 = ("LABEL", "MODEL", "VER", "VARIANT·TASK·REP", "STATE",
                 "ATTEMPT", "LIVE", "GATE", "LAST REP", "DETAIL")
         if not running_only:
-            out.append(f"— OTHER ({len(other)}) — by tech · model " + "—" * 34)
+            out.append(f"— OTHER ({len(other)}) — by label · model " + "—" * 34)
             out.append(fmt_table(other, hdr9) if other else "  (none)")
             out.append(f"\n— GREEN ({len(greens)}) " + "—" * 48)
             out.append(fmt_table(greens, hdr9) if greens else "  (none)")

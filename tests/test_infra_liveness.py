@@ -64,7 +64,7 @@ class TestTheTwoGates(unittest.TestCase):
         (d / "ws" / "c" / "artifacts").mkdir(parents=True)
         self.c = cell.Cell("c", workspaces=d / "ws", root=ROOT)
         self.alive = [True]
-        self.c._treatment = mock.Mock(infra_alive=lambda: self.alive[0])
+        self.c._infra = mock.Mock(infra_alive=lambda: self.alive[0])
 
     def verify_with(self, verdict, alive_after, measured=None):
         calls = []

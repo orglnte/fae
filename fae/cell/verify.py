@@ -561,7 +561,7 @@ def main(argv=None):
         if vcls is None:
             return 2
         cell = _ShimCell(ctx.cid, ctx.workspace, ctx.root)
-        cell.treatment = ctx.variant
+        cell.variant = ctx.variant
         vcls(cell).verify_teardown(ctx, dict(os.environ))
         return 0
     cls = definition.verifier_class()

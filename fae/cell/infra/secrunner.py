@@ -21,9 +21,8 @@ One lifecycle for every program: `start`, then either `wait` for it to end
 `alive` (a service), then `stop`, which keeps what it printed and removes
 the container. `run` is start-wait-stop in one call.
 
-`SecRunnerVariant` is the variant of an experiment whose program needs
-nothing but a runtime image: it declares the image and the commands, and
-the engine supplies the infra checks and the runner.
+`for_variant` builds the runner of a variant's program from its file's
+[verify.run].
 """
 from __future__ import annotations
 
@@ -207,72 +206,64 @@ class SecRunner:
             pass
 
 
-# --- the variant whose program needs only a runtime image -----------------
+# --- a variant's program, as its file declares it ([verify.run]) ---------------
 
-from ..variants.base import Variant, daemon_answers  # noqa: E402
-
-RUN_MEMORY = "256m"
+RUN_MEMORY = "256m"     # a program that runs once per case
 RUN_PIDS = 128
 
 
-class SecRunnerVariant(Variant):
-    """A program the verifier builds and runs in a container of the variant's
-    runtime image, with no network and one directory: the verifier's copy of
-    the artifacts. The runtime is a pinned registry tag (IMAGE, pulled by the
-    operator) or a Dockerfile directory the engine builds and tags by content
-    (RUNTIME_DIR). A subclass declares ARM, TECH, CONDITIONS,
-    AUTHORING_SURFACE, the runtime, RUN and optionally BUILD."""
+def run_image_name(variant_cls):
+    """The tag name of an image built from the variant's [verify.run] image_dir."""
+    from .. import experiment as _experiment
+    from .. import image as _image
+    return _image.dir_tag_name(_experiment.current(), variant_cls.RUN["image_dir"])
 
-    IMAGE = ""          # a pinned registry tag the program runs in, or
-    RUNTIME_DIR = None  # the Dockerfile directory the engine builds it from
-    BUILD = None        # argv inside the container, or None
-    RUN = ()            # argv inside the container
 
-    @classmethod
-    def runtime_name(cls):
-        from .. import experiment as _experiment
-        return f"{_experiment.current().name}-{cls.TECH}-runtime"
+def run_image(variant_cls):
+    """The image the variant's program runs in: [verify.run] image (a pinned
+    tag), the image built from its image_dir (tagged by content, so it
+    resolves without a daemon), or the verify image this code runs in."""
+    from .. import image as _image
+    run = variant_cls.RUN
+    if run.get("image_dir"):
+        return _image.tag(run_image_name(variant_cls), run["image_dir"])
+    if run.get("image"):
+        return run["image"]
+    image = os.environ.get("FAE_VERIFY_IMAGE")
+    if not image:
+        raise RuntimeError(f"{variant_cls.ID} runs in the verify image, and this is "
+                           f"not a verify container (FAE_VERIFY_IMAGE unset)")
+    return image
 
-    @classmethod
-    def runtime_image(cls):
-        """The tag the program runs in. A built runtime's tag is its content
-        hash, so it resolves without a daemon."""
-        from .. import image as _image
-        if cls.RUNTIME_DIR:
-            return _image.tag(cls.runtime_name(), cls.RUNTIME_DIR)
-        return cls.IMAGE
 
-    @classmethod
-    def runner(cls, cid, workdir, argv):
-        return SecRunner(image=cls.runtime_image(), cid=cid, workdir=Path(workdir),
-                         argv=tuple(argv), memory=RUN_MEMORY, pids=RUN_PIDS, cpus=1,
-                         nofile=None)
+def ensure_run_image(variant_cls, log=print):
+    """The variant's own run image present: built when it is a Dockerfile
+    directory, required when it is a pinned tag."""
+    from .. import image as _image
+    run = variant_cls.RUN
+    if run.get("image_dir"):
+        return _image.ensure(run_image_name(variant_cls), run["image_dir"], log=log)
+    if run.get("image") and not _image.present(run["image"]):
+        raise RuntimeError(f"image {run['image']} not present (docker pull {run['image']})")
+    return run.get("image")
 
-    @classmethod
-    def run(cls, cid, workdir, argv, stdin, timeout_s):
-        """(stdout, stderr, exit code, error) of `argv` in the runtime; `error`
-        names what kept it from running to its end (it never started, or
-        it timed out), and the exit code is then None."""
-        rc, out, err = cls.runner(cid, workdir, argv).run(timeout_s, stdin=stdin, split=True)
-        return (out, err, rc, None) if rc is not None else ("", "", None, err)
 
-    def infra_alive(self):
-        return daemon_answers(["docker", "version"])
-
-    def infra_ok(self):
-        from .. import image as _image
-        if subprocess.run(["docker", "info"], capture_output=True).returncode:
-            self.log("HALT[infra]: docker unreachable")
-            return False
-        if self.RUNTIME_DIR:
-            try:
-                _image.ensure(self.runtime_name(), self.RUNTIME_DIR, log=self.log)
-            except RuntimeError as e:
-                self.log(f"HALT[infra]: {e}")
-                return False
-        elif subprocess.run(["docker", "image", "inspect", self.IMAGE],
-                            capture_output=True).returncode:
-            self.log(f"HALT[infra]: image {self.IMAGE} not present "
-                     f"(docker pull {self.IMAGE})")
-            return False
-        return True
+def for_variant(variant_cls, cid, workdir, argv=None, env=None, networks=(),
+                scratch=None, log=None, cpus=None, cpuset=None):
+    """The runner of a variant's program, from its [verify.run]: `command`
+    (or `argv`, e.g. its `build`) over `workdir`. A program that `serves`
+    is kept running on the cell's network (and `networks`) with room for a
+    service; any other runs once with no network and the tight caps."""
+    run = variant_cls.RUN
+    argv = tuple(argv if argv is not None else run.get("command") or ())
+    if run.get("serves"):
+        cell_net = os.environ.get("FAE_CELL_NET")
+        if not cell_net:
+            raise RuntimeError(f"{variant_cls.ID} serves on the cell network, and this is "
+                               f"not a verify container (FAE_CELL_NET unset)")
+        return SecRunner(image=run_image(variant_cls), cid=cid, workdir=Path(workdir),
+                         argv=argv, scratch=scratch, networks=(cell_net, *networks),
+                         env=dict(env or {}), log=log, cpus=cpus, cpuset=cpuset)
+    return SecRunner(image=run_image(variant_cls), cid=cid, workdir=Path(workdir), argv=argv,
+                     env=dict(env or {}), log=log, memory=RUN_MEMORY, pids=RUN_PIDS,
+                     cpus=1 if cpus is None else cpus, nofile=None, cpuset=cpuset)

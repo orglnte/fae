@@ -40,10 +40,9 @@ def invoke(fn_name, argv, mod):
 
 class TestCellCommands(unittest.TestCase):
     def test_spawn(self):
-        (ns,), _ = invoke("spawn", ["cell", "spawn", "sonnet", "beta",
-                                    "apidocs", "-r", "2", "--fresh"], mod=cli.ops)
-        self.assertEqual(vars(ns), dict(model="sonnet", treatment="beta",
-                                        condition="apidocs", rep="2", task="T1",
+        (ns,), _ = invoke("spawn", ["cell", "spawn", "sonnet", "beta_apidocs",
+                                    "-r", "2", "--fresh"], mod=cli.ops)
+        self.assertEqual(vars(ns), dict(model="sonnet", variant="beta_apidocs", rep="2", task="T1",
                                         fresh=True))
 
     def test_pause_takes_several_selectors(self):
@@ -119,21 +118,9 @@ class TestConductCommands(unittest.TestCase):
     def test_queue_add_to_rep(self):
         (ns,), _ = invoke("top_up", ["conduct", "queue-add", "opus",
                                      "--to-rep", "10",
-                                     "--combo", "beta·apidocs", "--dry-run"], mod=cli.ops)
-        self.assertEqual(vars(ns), dict(model="opus", to_rep=10,
-                                        combos=["beta·apidocs"],
-                                        conditions=[], all_conditions=False,
+                                     "--variant", "beta_apidocs", "--dry-run"], mod=cli.ops)
+        self.assertEqual(vars(ns), dict(model="opus", to_rep=10, variants=["beta_apidocs"],
                                         task="T1", dry_run=True))
-
-    def test_queue_add_to_rep_with_extra_variants(self):
-        (ns,), _ = invoke("top_up", ["conduct", "queue-add", "opus",
-                                     "--to-rep", "5", "--condition", "howto",
-                                     "--condition", "openbook"], mod=cli.ops)
-        self.assertEqual(ns.conditions, ["howto", "openbook"])
-        self.assertFalse(ns.all_conditions)
-        (ns,), _ = invoke("top_up", ["conduct", "queue-add", "opus",
-                                     "--to-rep", "5", "--all-conditions"], mod=cli.ops)
-        self.assertTrue(ns.all_conditions)
 
     def test_pause_full(self):
         (ns,), _ = invoke("conduct_pause", ["conduct", "pause", "all",
@@ -163,15 +150,15 @@ class TestConductCommands(unittest.TestCase):
 
 class TestResultsScore(unittest.TestCase):
     def test_variant_filter_plumbs(self):
-        (ns,), _ = invoke("score", ["results", "score", "--condition", "apidocs"],
+        (ns,), _ = invoke("score", ["results", "score", "--variant", "beta_apidocs"],
                           mod=cli.score)
-        self.assertEqual(ns.condition, "apidocs")
+        self.assertEqual(ns.variant, "beta_apidocs")
         self.assertIsNone(ns.selector)
 
-    def test_impl_filter_plumbs(self):
-        (ns,), _ = invoke("score", ["results", "score", "--condition", "apidocs",
-                                    "--impl", "py"], mod=cli.score)
-        self.assertEqual(ns.condition, "apidocs")
+    def test_factor_and_impl_filters_plumb(self):
+        (ns,), _ = invoke("score", ["results", "score", "--where", "docs=apidocs",
+                                    "--where", "tech=beta", "--impl", "py"], mod=cli.score)
+        self.assertEqual(ns.where, ["docs=apidocs", "tech=beta"])
         self.assertEqual(ns.impl, "py")
 
 
@@ -204,18 +191,18 @@ class TestRigCommands(unittest.TestCase):
 
     def test_infra_takes_no_arguments(self):
         """fae/driver/rig.py's infra ignores its namespace entirely; an
-        earlier cli signature accepted an `arm` argument it silently discarded."""
+        earlier cli signature accepted an argument it silently discarded."""
         (ns,), _ = invoke("infra", ["experiment", "infra"], mod=cli.rig)
         self.assertEqual(vars(ns), {})
 
     def test_smoke_carries_every_field_runs_smoke_reads(self):
-        """fae/driver/rig.py's smoke reads arms/only/rep/full_gate unconditionally;
+        """fae/driver/rig.py's smoke reads variants/only/rep/full_gate unconditionally;
         the namespace must carry all four, with its own defaults."""
         (ns,), _ = invoke("smoke", ["experiment", "smoke"], mod=cli.rig)
-        self.assertEqual(vars(ns), dict(arms="", only="", rep=1, full_gate=False))
+        self.assertEqual(vars(ns), dict(variants="", only="", rep=1, full_gate=False))
         (ns,), _ = invoke("smoke", ["experiment", "smoke", "--only", "alpha", "--rep", "2",
                                     "--full-gate"], mod=cli.rig)
-        self.assertEqual(vars(ns), dict(arms="", only="alpha", rep=2, full_gate=True))
+        self.assertEqual(vars(ns), dict(variants="", only="alpha", rep=2, full_gate=True))
 
     def test_prepare(self):
         (ns,), _ = invoke("prepare", ["experiment", "prepare", "--reps", "2", "--task", "T2"],

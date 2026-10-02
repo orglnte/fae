@@ -54,8 +54,8 @@ class VoidMatrixCase(unittest.TestCase):
         (ws / "artifacts" / "app").mkdir(parents=True, exist_ok=True)
         # every prepared cell carries one; an absent manifest is only noise
         (ws / ".skeleton_manifest").touch()
-        (ws / "cell.env").write_text("TASK=T1\nTREATMENT=beta\n"
-                                     "CONDITION=apidocs\nREPEAT=1\n")
+        (ws / "cell.env").write_text("TASK=T1\nVARIANT=beta_apidocs\n"
+                                     "REPEAT=1\n")
         c = cell.Cell(self.CID, workspaces=self.wsdir, root=self.root)
         c.prepare = lambda fresh=False: c.ws
         c.infra_ok = lambda: True        # no docker probe in a unit run
@@ -194,7 +194,8 @@ class TestRow20HealRevertsOutOfSurfaceEdits(VoidMatrixCase):
         (art / "config.py").write_text("FIXED = False  # agent overreach\n")
         gate = lambda: [cell.VerifyResult(green=True, shape=s)
                         for s in SHAPES]
-        self.assertEqual(c.run(stub_overlay=self.overlay, verify=gate), "green")
+        with mock.patch.object(c.variant_cls, "TEMPLATE", (skel,)):
+            self.assertEqual(c.run(stub_overlay=self.overlay, verify=gate), "green")
         self.assertEqual((art / "config.py").read_text(), "FIXED = True\n")
         events = self.ledger_events(c)
         self.assertIn("HEAL", events)

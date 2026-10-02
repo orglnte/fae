@@ -11,10 +11,10 @@ makes `aggregate` refuse rather than publish a stale table.
 
 | field | type | meaning |
 |-------|------|---------|
-| `cell_id` | str | `<model>_<effort>[_smoke]_<arm>_<condition>_<task>_r<rep>` |
-| `model` / `task` / `treatment` / `condition` / `repeat` | str/int | the cell's coordinates, from `cell.env` (`treatment` is the arm, as recorded) |
-| `impl` | str | which cell driver ran it: `py`, or `bash` for cells that predate the Python driver |
-| `doc_lines` | int/null | lines of the doc pack the prompt carried — the matched-doc check |
+| `cell_id` | str | `<model>_<effort>[_smoke]_<variant>_<task>_r<rep>` |
+| `model` / `task` / `variant` / `repeat` | str/int | the cell's coordinates, from `cell.env` |
+| `factors` | obj | the factors the variant is a level of, from its file (`{}` when it declares none) |
+| `impl` | str | which cell driver ran it |
 | `attempt_budget` | int/null | the attempt budget the cell ran under (10, everywhere) |
 | `consistency_defect_count` | int/null | **primary metric**: count of `CAD*` defects the judge assigned (`defects.json`) |
 | `codes` | list | the judge's codes, each `{attempt, code, artifacts, description}` |
@@ -30,7 +30,7 @@ makes `aggregate` refuse rather than publish a stale table.
 ## `results.csv`
 
 One row per cell, the columns of `CSV_COLUMNS` in `aggregate.py`:
-`cell_id, model, task, treatment, condition, impl, repeat, doc_lines,
+`cell_id, model, task, variant, factors (k=v;k=v), impl, repeat,
 consistency_defect_count, first_pass_correct, correctness_tier, deploy_ok,
 e2e_pass, e2e_total, e2e_green, load_errors, load_total, k6_available,
 verify_stage_failed, iterations_to_green, green, revoked, budget_exhausted,
@@ -45,7 +45,7 @@ grader_model`.
 - `grading_provenance` → `grader_models` (model → cells it graded),
   `cells_graded`, `cells_ungraded`, `single_grader`. A corpus graded by two
   models is otherwise indistinguishable from one graded by one.
-- `by_model_treatment_condition["<model>/<treatment>/<condition>"]` → the
+- `by_model_variant["<model> / <variant>"]` → the
   per-group metrics of `cell_metrics`: `n_cells`, `n_green`,
   `mean_consistency_defects` (green, graded cells only) with
   `n_green_graded`, `first_pass_correct_rate`, `e2e_green_rate`,
@@ -55,12 +55,11 @@ grader_model`.
   cells) with `n_green_surface`, and the LoC spread. Model ids the
   definition pools (`POOLED_MODELS`) share one row.
 - `baseline` → when the table is cut to one `--impl`, the other driver's
-  cells on the same condition as `delta_by_model_treatment_condition`; else
-  null.
+  cells under the same cuts as `delta_by_model_variant`; else null.
 - **whatever the experiment's definition adds** (`report_summary`, given
   every cell, the engine's per-group metric function, its None-safe delta and
   the metric names): the experiment's own keys — differences between its
-  arms, say — and its `notes` on how to read the table.
+  variants, say — and its `notes` on how to read the table.
 
 ## How to read it
 
@@ -68,5 +67,5 @@ Lead with the primary metric per row and its `n_green_graded`; `green_rate`
 and `mean_iterations_to_green` with `budget_censored_rate` carry the
 attempts-to-green story; `load_error_rate_on_green` is a parity check
 measured on green builds only. Always report `n_cells` and
-`cells_missing_grading`. Which gaps between arms matter is the experiment's
+`cells_missing_grading`. Which gaps between variants matter is the experiment's
 to say, in its notes.

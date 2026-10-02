@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Score ONE experiment cell into workspaces.nosync/<cell_id>/score.json.
 
-Auto-computes author-surface + iterations-to-green + doc_lines from the cell;
+Auto-computes author-surface + iterations-to-green from the cell;
 merges the human-graded fields from the cell's grading.json (fill it from
 fae/scoring/grading-template.json). Stdlib only — no install needed.
 
@@ -70,6 +70,22 @@ def _sloc(path: Path, lang: str) -> int:
     return n
 
 
+def _factors(vid) -> dict:
+    """The factors the variant is a level of, from its file; {} when the
+    variant is not (or no longer) one of the experiment's."""
+    if not vid:
+        return {}
+    try:
+        for p in (str(_paths.ROOT), str(_paths.ENGINE.parent)):
+            if p not in sys.path:
+                sys.path.insert(0, p)
+        from fae.cell import experiment as _experiment
+        cls = _experiment.current().variant(vid)
+    except (OSError, RuntimeError, ValueError, ImportError):
+        return {}
+    return dict(cls.FACTORS) if cls is not None else {}
+
+
 def read_env(path: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     if not path.is_file():
@@ -100,8 +116,6 @@ def read_skeleton_manifest(artifacts_dir: Path) -> dict[str, str]:
     """path -> sha256 for every FIXED skeleton file seeded at prepare time.
     Lets us separate the agent-authored surface from the fixed skeleton."""
     manifest = artifacts_dir.parent / ".skeleton_manifest"
-    if not manifest.is_file():
-        manifest = artifacts_dir / ".skeleton_manifest"      # a cell seeded with it inside artifacts/
     out: dict[str, str] = {}
     if manifest.is_file():
         for line in manifest.read_text().splitlines():
@@ -379,13 +393,12 @@ def score_one(cell_id: str) -> int:
         "cell_id": cell_id,
         "model": env.get("MODEL_VERSION"),
         "task": env.get("TASK"),
-        "treatment": env.get("TREATMENT"),
-        "condition": env.get("CONDITION"),
+        "variant": env.get("VARIANT"),
+        "factors": _factors(env.get("VARIANT")),
         # Which cell driver ran it: "py" from the rig cutover on, "bash"
         # before (those cell.env files carry IMPL=bash or no IMPL at all).
         "impl": env.get("IMPL") or "bash",
         "repeat": int(env.get("REPEAT", "1")) if env.get("REPEAT", "1").isdigit() else env.get("REPEAT"),
-        "doc_lines": int(env["DOC_LINES"]) if env.get("DOC_LINES", "").isdigit() else None,
         "attempt_budget": int(env["ATTEMPT_BUDGET"]) if env.get("ATTEMPT_BUDGET", "").isdigit() else None,
         
         # metric 1: LLM Judge (defects.json)

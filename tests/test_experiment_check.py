@@ -38,15 +38,15 @@ class CheckCase(unittest.TestCase):
 class TestTheFixtureIsReady(CheckCase):
     def test_every_static_step_passes_and_the_docker_ones_are_skipped(self):
         self.assertEqual(self.run_check(), 0)
-        for title in ("This machine", "The config and the definition", "What the definition declares",
-                      "Each variant", "Seeding every cell of the matrix"):
+        for title in ("This machine", "The config and the definition", "What the experiment declares",
+                      "Each variant", "Seeding every variant"):
             self.assertIn(f"  ok      {title}", self.lines)
         self.assertIn("  skip    The docker daemon", self.lines)
         self.assertIn("No failure; the skipped steps are not checked.", self.text())
 
     def test_a_ready_run_with_docker_prints_the_next_commands(self):
         with mock.patch.object(check, "_docker", return_value=[check.Finding(True, "docker")]), \
-                mock.patch.object(check, "_infra", return_value=[check.Finding(True, "arms")]):
+                mock.patch.object(check, "_infra", return_value=[check.Finding(True, "variants")]):
             self.assertEqual(self.run_check(check.Ctx(root=self.root)), 0)
         self.assertIn("READY. Next:", self.text())
         self.assertIn("python3 cli.py experiment smoke --full-gate", self.text())
@@ -66,51 +66,50 @@ class TestEachFailureNamesItsFix(CheckCase):
         with mock.patch.object(check.common, "definition", side_effect=NameError("name 'GAET' is not defined")):
             self.assertEqual(self.run_check(), 1)
         self.assertIn("raised NameError: name 'GAET' is not defined", self.text())
-        self.assertIn("  skip    What the definition declares", self.lines)
+        self.assertIn("  skip    What the experiment declares", self.lines)
 
-    def test_a_matrix_arm_without_a_variant(self):
-        d = _experiment.current()
-        with mock.patch.object(type(d), "matrix", new_callable=mock.PropertyMock,
-                               return_value={**d.matrix, "gamma": ["apidocs"]}):
+    def test_an_unreadable_variant_file(self):
+        from fae.cell.variants import files
+        with mock.patch.object(files, "load", side_effect=files.VariantFileError(
+                "variants/x.toml: unknown key(s) in [verify]: rn")):
+            d = _experiment.current()
+            d._subjects = None
+            self.addCleanup(setattr, d, "_subjects", None)
             self.assertEqual(self.run_check(), 1)
-        self.assertIn("FAIL matrix arm 'gamma' has a variant", self.text())
+        self.assertIn("unknown key(s) in [verify]: rn", self.text())
 
     def test_an_undeclared_authoring_surface(self):
-        with mock.patch.object(self.variant("beta"), "AUTHORING_SURFACE", None):
+        with mock.patch.object(self.variant("beta_apidocs"), "AUTHORING_SURFACE", None):
             self.assertEqual(self.run_check(), 1)
-        name = self.variant("beta").__name__
-        self.assertIn(f"fix: declare {name}.AUTHORING_SURFACE", self.text())
-        self.assertIn("FAIL beta: not seeded, it has no authoring surface", self.text())
+        self.assertIn("fix: declare [authoring] surface", self.text())
+        self.assertIn("FAIL beta_apidocs: not seeded, it has no authoring surface", self.text())
 
     def test_an_undeclared_liveness_probe(self):
-        with mock.patch.object(self.variant("alpha"), "infra_alive", Variant.infra_alive):
+        cls = self.variant("alpha_apidocs")
+        with mock.patch.object(cls.__bases__[0], "infra_alive", Variant.infra_alive):
             self.assertEqual(self.run_check(), 1)
-        self.assertIn("infra_alive probe", self.text())
+        self.assertIn("an infra liveness probe", self.text())
 
-    def test_a_missing_api_doc_is_found_by_seeding(self):
-        cls = self.variant("alpha")
-        seed = self.root / "seed"
-        shutil.copytree(cls.seed_root(), seed)
-        (seed / "any.alpha.howto.api.md").unlink()
-        with mock.patch.object(cls, "SEED", str(seed)):
+    def test_a_missing_input_is_found_by_seeding(self):
+        cls = self.variant("alpha_howto")
+        inputs = {**cls.INPUTS, "docs/alpha.md": self.root / "gone.md"}
+        with mock.patch.object(cls, "INPUTS", inputs):
             self.assertEqual(self.run_check(), 1)
-        self.assertIn("FAIL alpha/howto:", self.text())
+        self.assertIn("FAIL alpha_howto: alpha_howto: input docs/alpha.md", self.text())
 
     def test_a_missing_reference_is_found_by_seeding(self):
-        cls = self.variant("alpha")
-        seed = self.root / "seed"
-        shutil.copytree(cls.seed_root(), seed)
-        shutil.rmtree(seed / "reference")
-        with mock.patch.object(cls, "SEED", str(seed)):
+        cls = self.variant("alpha_apidocs")
+        with mock.patch.object(cls, "REFERENCE", self.root / "no-reference"):
             self.assertEqual(self.run_check(), 1)
-        self.assertIn("FAIL alpha/reference: no reference impl", self.text())
+        self.assertIn("FAIL alpha_apidocs", self.text())
+        self.assertIn("reference", self.text())
 
-    def test_an_unpinned_condition_doc(self):
-        d = _experiment.current()
-        pins = {k: v for k, v in d.seed_docs.items() if k != ("alpha", "howto")}
-        with mock.patch.object(type(d), "seed_docs", new_callable=mock.PropertyMock, return_value=pins):
+    def test_no_todo_among_the_inputs(self):
+        cls = self.variant("beta_onlysrc")
+        inputs = {k: v for k, v in cls.INPUTS.items() if k != "TODO.md"}
+        with mock.patch.object(cls, "INPUTS", inputs):
             self.assertEqual(self.run_check(), 1)
-        self.assertIn("FAIL alpha/howto: alpha/howto is not a defined matrix combination", self.text())
+        self.assertIn("FAIL beta_onlysrc: TODO.md among its inputs", self.text())
 
     def test_a_crashing_check_is_a_failure_not_the_end(self):
         with mock.patch.object(check, "_definition", side_effect=KeyError("boom")):
@@ -172,7 +171,7 @@ class TestTheWalk(CheckCase):
         self.assertEqual(calls["a"], 0)
 
     def test_walk_without_a_terminal_is_refused(self):
-        args = check.SimpleNamespace(walk=True, static=True, smoke=False, arms="", task="T1")
+        args = check.SimpleNamespace(walk=True, static=True, smoke=False, variants="", task="T1")
         with mock.patch.object(check.sys, "stdin", io.StringIO("")):
             with self.assertRaisesRegex(SystemExit, "needs a terminal"):
                 check.main(args)

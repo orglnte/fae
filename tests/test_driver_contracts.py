@@ -48,9 +48,9 @@ class DriverCase(unittest.TestCase):
     def cell(self):
         ws = self.wsdir / self.CID
         (ws / "artifacts").mkdir(parents=True, exist_ok=True)
-        (ws / "artifacts" / ".skeleton_manifest").touch()
-        (ws / "cell.env").write_text("TASK=T1\nTREATMENT=beta\n"
-                                     "CONDITION=apidocs\nREPEAT=1\n")
+        (ws / ".skeleton_manifest").touch()
+        (ws / "cell.env").write_text("TASK=T1\nVARIANT=beta_apidocs\n"
+                                     "REPEAT=1\n")
         c = cell.Cell(self.CID, workspaces=self.wsdir, root=self.root)
         c.prepare = lambda fresh=False: c.ws
         c.infra_ok = lambda: True
@@ -359,7 +359,7 @@ class TestTheDriverKeepsTheHostAwake(DriverCase):
             spawned.append(argv)
             return Held()
 
-        with mock.patch.dict(os.environ, {cellmod._treatments.NOOP_ENV: "0"}), \
+        with mock.patch.dict(os.environ, {cellmod._variants.NOOP_ENV: "0"}), \
              mock.patch.object(cellmod.sys, "platform", "darwin"), \
              mock.patch.object(cellmod.shutil, "which", lambda n: f"/usr/bin/{n}"), \
              mock.patch.object(cellmod.subprocess, "Popen", popen):
@@ -372,14 +372,14 @@ class TestTheDriverKeepsTheHostAwake(DriverCase):
     def test_no_caffeinate_binary_means_no_assertion(self):
         import fae.cell.cell as cellmod
         from unittest import mock
-        with mock.patch.dict(os.environ, {cellmod._treatments.NOOP_ENV: "0"}), \
+        with mock.patch.dict(os.environ, {cellmod._variants.NOOP_ENV: "0"}), \
              mock.patch.object(cellmod.sys, "platform", "darwin"), \
              mock.patch.object(cellmod.shutil, "which", lambda n: None):
             self.assertIsNone(cellmod.hold_awake(4242))
 
     def test_a_test_root_skips_the_assertion(self):
         import fae.cell.cell as cellmod
-        self.assertEqual(os.environ.get(cellmod._treatments.NOOP_ENV), "1")
+        self.assertEqual(os.environ.get(cellmod._variants.NOOP_ENV), "1")
         self.assertIsNone(cellmod.hold_awake(4242))
 
     def test_the_run_holds_and_releases_it_for_exactly_its_own_lifetime(self):

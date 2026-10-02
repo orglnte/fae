@@ -186,8 +186,10 @@ def aggregate(args):
     argv = [sys.executable, "-m", "fae.scoring.aggregate"]
     if getattr(args, "allow_stale", False):
         argv.append("--allow-stale")
-    if getattr(args, "condition", None):
-        argv += ["--condition", args.condition]
+    if getattr(args, "variant", None):
+        argv += ["--variant", args.variant]
+    for w in getattr(args, "where", None) or []:
+        argv += ["--where", w]
     if getattr(args, "impl", None):
         argv += ["--impl", args.impl]
     if getattr(args, "include_tainted", False):
@@ -346,9 +348,9 @@ def _grade_cell(ws, out, opts, err):
     """Extract, then grade the passes this cell still owes. Returns
     scanned | skipped | failed | wall."""
     cell = ws.name
-    treatment = [l[len("TREATMENT="):] for l in _read_text(ws / "cell.env").splitlines()
-                 if l.startswith("TREATMENT=")]
-    ref = common.definition().reference_workspace(treatment[0] if treatment else "")
+    variant = [l[len("VARIANT="):] for l in _read_text(ws / "cell.env").splitlines()
+               if l.startswith("VARIANT=")]
+    ref = common.definition().reference_workspace(variant[0] if variant else "")
     ref_ws = [str(common.WS / ref)] if ref else []
     print(f"scanning {cell} ...", file=err)
     with tempfile.TemporaryDirectory() as td:

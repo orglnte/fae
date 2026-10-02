@@ -1,0 +1,16 @@
+factors = { tech = "beta", docs = "apidocs" }
+
+[authoring]
+template = ["task/skeleton", "variants/beta/seed/overlay"]
+surface = { files = ["declaration.toml"], prefixes = ["app/"] }
+
+[authoring.inputs]
+"TODO.md" = "task/T1.PROMPT.md"
+"docs/project.md" = "variants/beta/seed/T1.beta.project_layout.md"
+"docs/beta.md" = "variants/beta/seed/any.beta.apidocs.api.md"
+
+[verify]
+reference = "variants/beta/seed/reference/overlay"
+
+[infra]
+class = "variants.beta:Beta"

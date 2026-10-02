@@ -66,9 +66,9 @@ class TestTheDriverRefundsIt(unittest.TestCase):
     def test_host_sleep_refunds_the_attempt(self):
         ws = self.wsdir / self.CID
         (ws / "artifacts").mkdir(parents=True)
-        (ws / "artifacts" / ".skeleton_manifest").touch()
-        (ws / "cell.env").write_text("TASK=T1\nTREATMENT=beta\n"
-                                     "CONDITION=apidocs\nREPEAT=1\n")
+        (ws / ".skeleton_manifest").touch()
+        (ws / "cell.env").write_text("TASK=T1\nVARIANT=beta_apidocs\n"
+                                     "REPEAT=1\n")
         c = cell.Cell(self.CID, workspaces=self.wsdir, root=self.root)
         c.prepare = lambda fresh=False: c.ws
         c.infra_ok = lambda: True

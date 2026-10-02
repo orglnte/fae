@@ -122,7 +122,6 @@ class TestTheDeclarations(ImageCase):
                 return []
 
         class Var:
-            TECH = "alpha"
             IMAGE_DIR = variant_dir
 
             @classmethod
@@ -131,6 +130,7 @@ class TestTheDeclarations(ImageCase):
 
         d = mock.Mock()
         d.name = "fx"
+        d.path = self.root
         d.verifier_class.return_value = V
         return d, Var
 

@@ -54,23 +54,17 @@ def _cluster_map():
         _CLMAP["key"] = cids
         m = {}
         for c in cids:
-            tech = common.definition().tech_of(parse_cell_id(c)[1])
-            for kind, ident in _infra_of(tech, c):
+            for kind, ident in _infra_of(parse_cell_id(c)[1], c):
                 if kind == "cluster":
                     m[c] = ident
         _CLMAP["map"] = m
     return _CLMAP["map"]
-def _infra_of(tech, cid):
-    """[(kind, ident)] a cell of this tech provisions, named by its variants.
-    Unnamed infra is found by scanning instead (`_strays`)."""
+def _infra_of(variant, cid):
+    """[(kind, ident)] a cell of this variant provisions, named by its
+    variant. Unnamed infra is found by scanning instead (`_strays`)."""
     from fae.cell import variants as _tr
-    out = []
-    for cls in _tr.registry().values():
-        if cls.TECH == tech:
-            for pair in cls.infra_identities(cid):
-                if pair not in out:
-                    out.append(pair)
-    return out
+    cls = _tr.registry().get(variant)
+    return list(cls.infra_identities(cid)) if cls is not None else []
 
 
 def _verifier_infra(cid):
@@ -314,9 +308,9 @@ def find_zombies():
             continue
         if present is None:
             present = _containers_all() | set(common.sh(["kind", "get", "clusters"]).split())
-        arm = d.parent.name[len("arm-"):-len(".slots")]
-        named = [(k, i) for k, i in _infra_of(arm, owner) + _verifier_infra(owner)
-                 if i in present]
+        parsed = parse_cell_id(owner)
+        named = [(k, i) for k, i in _infra_of(parsed[1] if parsed else "", owner)
+                 + _verifier_infra(owner) if i in present]
         if not named:
             # The sidecar outlived everything it named: nothing left to reap,
             # and keeping the note would re-report the same phantom every tick.

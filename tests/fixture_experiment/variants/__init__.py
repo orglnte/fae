@@ -1,4 +1,1 @@
-from .alpha import Alpha
-from .beta import Beta
-
-VARIANTS = (Alpha, Beta)
+"""The fixture's infra classes; its variants are the *.toml files beside them."""

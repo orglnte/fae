@@ -67,8 +67,8 @@ def loop_parents():
     driver loop survived orphaned, cascade-stole the arm lock, provisioned 5
     orphan kind clusters, and carried a stale FP pin into a burned attempt.
 
-    The ps fallback matches `-m fae.cell` followed by its 4 positionals
-    (task treatment condition rep) — not merely anywhere in the line: children
+    The ps fallback matches `-m fae.cell` followed by its 3 positionals
+    (task variant rep) — not merely anywhere in the line: children
     (deploy, the agent) carry the driver's path in their env and would
     otherwise shadow the real loop pid. MODEL/EFFORT come from the exec-time
     env (spawn sets them); CELL_ID is set inside the driver and invisible to
@@ -84,12 +84,12 @@ def loop_parents():
             if hb:
                 out[ws.name] = hb["pid"]
     for line in common.sh(["ps", "-axww", "-E", "-o", "pid=,command="]).splitlines():
-        # The package run as `-m fae.cell` with its four positionals.
+        # The package run as `-m fae.cell` with its three positionals.
         m = re.match(r"\s*(\d+)\s+.*?-m fae\.cell"
-                     r"\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)", line)
+                     r"\s+(\S+)\s+(\S+)\s+(\d+)", line)
         if not m:
             continue
-        pid, task, treatment, condition, rep = m.groups()
+        pid, task, variant, rep = m.groups()
         model = re.search(r"\bMODEL=(\S+)", line)
         if not model:
             continue
@@ -97,7 +97,7 @@ def loop_parents():
         prefix = f"{model.group(1)}{'_' + eff.group(1) if eff else '_high'}"
         if re.search(r"\bSMOKE=1", line):
             prefix += "_smoke"
-        out.setdefault(f"{prefix}_{treatment}_{condition}_{task}_r{rep}", int(pid))
+        out.setdefault(f"{prefix}_{variant}_{task}_r{rep}", int(pid))
     return out
 
 
@@ -392,7 +392,7 @@ def _cell_state(ws, loops, boxes):
     parsed = parse_cell_id(ws.name)
     if not parsed or not (ws / "iterations.log").exists():
         return None
-    model, treatment, condition, task, rep = parsed
+    model, variant, task, rep = parsed
     L = ledger.parse(ws, gate_n=common.definition().gate.arity)
     budget, mver = "?", "-"
     envf = ws / "cell.env"
@@ -402,7 +402,7 @@ def _cell_state(ws, loops, boxes):
         budget = m.group(1) if m else "?"
         m = re.search(r"^MODEL_VERSION=(.+)$", _envtxt, re.M)
         mver = m.group(1).strip() if m else "-"
-    st = dict(cid=ws.name, model=model, treatment=treatment, condition=condition,
+    st = dict(cid=ws.name, model=model, variant=variant,
               task=task, rep=int(rep), att=L["att"], budget=budget,
               hist=ledger.hist(L), events=L["events"], model_version=mver,
               # `prepared` is read by never_started: with the v2 PREPARED birth
@@ -525,7 +525,7 @@ def _arm_slot_of(arm, cid):
 
 
 def arm_wait(ws):
-    """If this cell's loop is queued on its arm lock, the holder's cid.
+    """If this cell's loop is queued on its variant's lock, the holder's cid.
 
     Two questions, in order: the kernel says whether a slot is held, and only
     then does the sidecar name who. The sidecar alone would name whoever took

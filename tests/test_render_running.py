@@ -17,7 +17,7 @@ from _ctx import runs
 def _state(cid, phase, **over):
     s = dict(cid=cid, model=cid.split("_")[0], model_version="5", state="RUNNING",
              why="", att=2, budget=10, live="-", shape="1/6", hist="scaling gate=BSB",
-             detail="", treatment="alpha", condition="apidocs", task="T1", rep=1,
+             detail="", variant="alpha_apidocs", task="T1", rep=1,
              green_at=None, taint=False, alerts_open=0, alert_last="", noedit=0)
     s.update(over)
     return s, {"phase": phase, "phase_age": 60}

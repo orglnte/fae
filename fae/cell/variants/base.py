@@ -1,4 +1,4 @@
-"""The treatment interface, the process/cksum helpers every tech shares, and
+"""The variant interface, the process/cksum helpers every infra shares, and
 the fixture seam (NoopVariant)."""
 from __future__ import annotations
 
@@ -78,56 +78,47 @@ _CKSUM_TABLE = _make_cksum_table()
 
 
 class Variant:
-    """The interface every arm answers. `cell` is the Cell (cid, ws, root,
-    conf, condition); the class reads config through cell.conf.
+    """One variant of the experiment, for one cell. The data is the variant
+    file's (fae/cell/variants/files.py builds a subclass per file); the
+    methods are the variant's infra: what is provisioned around its program
+    for the cell's life and for each arrangement, and the probes that say
+    whether it is there. `cell` is the Cell (cid, ws, root, conf).
 
-    A variant's infra is where the agent's program runs — for the
-    verifier as much as for the agent: a judged program executes only
-    inside it (a container of the variant's image, a dind daemon, a kind
-    cluster), never on the host (fae/cell/verify.py)."""
+    A variant's program runs only inside its infra (a container of an
+    image, a dind daemon, a kind cluster), never on the host
+    (fae/cell/verify.py)."""
 
-    ARM = ""
-    TECH = ""
-    # The name the variant's api docs carry (`any.<DOCS>[.<condition>].api.md`),
-    # when arms of one tech are told different things; empty = TECH.
-    DOCS = ""
-    # The name a reader sees for the arm's family (status, reports); empty =
-    # TECH. Arms that share a TECH (infra, image, lock) are told apart by it.
-    LABEL = ""
-    # The variant's own trees, beside its module unless declared: seed/ (what
-    # the agent is handed — overlay/, its docs, reference/overlay/) and
-    # verify/ (its bring-up scripts and contract), see seed_root/verify_root.
-    SEED = None
-    VERIFY = None
-    # The exclusive lock a cell of this arm holds from setup to teardown
-    # (None: bounded by the work slots alone), and the default cap on its
-    # holders when the config names none (ARM_SLOTS_<LOCK>).
-    LOCK = None
-    LOCK_SLOTS = 1
-    # The doc variants this arm is run under (the matrix, when the
-    # definition declares no MATRIX of its own).
-    CONDITIONS = ()
+    ID = ""
+    SOURCE = None           # the variant file
+    LABEL = ""              # what reports show; the id when the file names none
+    RETIRED = False         # keeps its cells, never scheduled again
+    FACTORS = {}            # the experimental factors it is a level of
+    # [authoring]: what the agent gets
+    TEMPLATE = ()           # directories merged into the workspace, in order
+    INPUTS = {}             # workspace path -> source file the agent reads
+    # (exact relpaths, directory prefixes) the agent may write; every other
+    # seeded file is fixed and healed before a verdict. Required: a cell of
+    # a variant that leaves it None is refused.
+    AUTHORING_SURFACE = None
+    AGENT_IMAGE_DIR = None  # the agent's image layer (a Dockerfile `FROM $BASE`)
+    ACCESS_INFRA = False    # the agent's container is connected to the cell's infra
+    # [verify]: how the work is judged
+    IMAGE_DIR = None        # the verify container's layer, FROM the verifier's image
+    REFERENCE = None        # the known answer, laid over the template for smoke
+    RUN = {}                # how the verifier runs the artifacts (secrunner.for_variant)
+    # [infra]
+    LOCK = None             # the lock a cell holds setup to teardown; None: none
+    LOCK_SLOTS = 1          # its default cap when the config names none
+    PARAMS = {}             # the infra class's own settings
     # {kind: name prefix} — the infra a reaper may discover by scanning
     # (containers, clusters) for a cell that left no live loop.
     INFRA_PREFIXES = {}
-    # The directory holding this variant's Dockerfile: the tools its cells
-    # are verified with, layered FROM the verifier's image; None = the
-    # verifier's image as it is.
-    IMAGE_DIR = None
-    # The directory holding this arm's agent layer (a Dockerfile `FROM $BASE`,
-    # the agents' base image): the tools and SDK its agents author with, and
-    # only those; None = the base as it is. Arms of one TECH share it.
-    AGENT_IMAGE_DIR = None
 
     @classmethod
     def agent_image_context(cls, conf):
         """[(host path, name)] staged beside AGENT_IMAGE_DIR's Dockerfile at
         build time (an SDK's sources)."""
         return []
-    # The authorable surface: (exact relpaths, directory prefixes) the agent
-    # may write; every other seeded file is fixed and healed before a verdict.
-    # Required: a cell of a variant that leaves it None is refused.
-    AUTHORING_SURFACE = None
 
     def __init__(self, cell):
         self.cell = cell
@@ -161,7 +152,7 @@ class Variant:
     def author_setup(self):
         """What the agent needs while it authors, kept for every attempt.
         Called by the driver before the first attempt. Returns the
-        agent-container env (DOCKER_NET/KUBE_MOUNT), empty for a sealed arm."""
+        agent-container env (DOCKER_NET/KUBE_MOUNT), empty when the agent is not connected to the cell's infra."""
         return {}
 
     def author_teardown(self):
@@ -183,52 +174,54 @@ class Variant:
         one of the same image when the verify was killed, so everything it
         needs is derivable from `ctx` alone."""
 
+    @classmethod
+    def runs_own_image(cls):
+        """Whether its program runs in an image of its own ([verify.run]
+        image or image_dir) rather than the verify image."""
+        return bool(cls.RUN.get("image") or cls.RUN.get("image_dir"))
+
     def infra_ok(self):
-        """The host can carry this arm at all. False halts the cell without
-        spending an attempt."""
+        """The host can carry this variant at all. False halts the cell
+        without spending an attempt. A variant whose program runs in an image
+        of its own needs the daemon and that image, built here when it is a
+        Dockerfile directory."""
+        if not self.runs_own_image():
+            return True
+        if subprocess.run(["docker", "info"], capture_output=True).returncode:
+            self.log("HALT[infra]: docker unreachable")
+            return False
+        from ..infra import secrunner
+        try:
+            secrunner.ensure_run_image(type(self), log=self.log)
+        except RuntimeError as e:
+            self.log(f"HALT[infra]: {e}")
+            return False
         return True
 
-    @classmethod
-    def _own_dir(cls):
-        import inspect
-        return Path(inspect.getfile(cls)).resolve().parent
-
-    @classmethod
-    def seed_root(cls):
-        """The agent-visible tree: overlay/ (over the task's skeleton), the
-        docs (`T*.<tech|arm>.project_layout.md`, `any.<tech>[.<condition>].api.md`)
-        and reference/overlay/ (the stub answer)."""
-        return Path(cls.SEED) if cls.SEED else cls._own_dir() / "seed"
-
-    @classmethod
-    def verify_root(cls):
-        """The verify side: the contract, and whatever verify_setup reads."""
-        return Path(cls.VERIFY) if cls.VERIFY else cls._own_dir() / "verify"
-
     def infra_alive(self):
-        """The arm's provisioning infra answers RIGHT NOW: asked before
-        every arrangement and again after a charged fail, so an infra
-        that died under the measurement voids the arrangement instead of
-        scoring as a build verdict. Every variant declares its own: the
-        preflight (`liveness_declared`) halts a cell of one that does not,
-        before an attempt is spent."""
-        return False
+        """The variant's infra answers RIGHT NOW: asked before every
+        arrangement and again after a charged fail, so infra that died under
+        the measurement voids the arrangement instead of scoring as a build
+        verdict. A variant whose program runs in an image of its own needs
+        the daemon; any other declares its own probe, or the preflight
+        (`liveness_declared`) halts its cells before an attempt is spent."""
+        return self.runs_own_image() and daemon_answers(["docker", "version"])
 
     @classmethod
     def stray(cls, live, workspaces):
-        """Infra of this arm that only a scan can find (no name carries
+        """Infra of this variant that only a scan can find (no name carries
         the cid): [(kind, ident, owner cid)] whose owner is not in `live`,
         anchored at the workspace root so nothing outside the rig is ours."""
         return []
 
     @classmethod
     def sweep(cls):
-        """Operator preflight: remove this arm's stale infra left by dead
+        """Operator preflight: remove this variant's stale infra left by dead
         cells (`cli.py experiment infra`). Nothing by default."""
 
     @classmethod
     def infra_identities(cls, cid):
-        """[(kind, name)] of the cell-lifetime infra a cell of this arm
+        """[(kind, name)] of the cell-lifetime infra a cell of this variant
         provisions, named as this class names it — what a reaper may look
         for after the cell is gone. Unnamed infra (found by scanning)
         is not listed."""
@@ -292,17 +285,17 @@ class Variant:
 
 
 def liveness_declared(cls):
-    """Whether `cls` answers infra_alive itself. The base answer is
-    "dead", which would void every arrangement of the cell, refunded,
-    forever; a variant that never declared a probe is a definition error,
+    """Whether `cls` has a liveness probe: its own infra_alive, or the
+    engine's for a program in an image of its own. Without one every
+    arrangement would be void, refunded, forever; a definition error,
     caught before the first attempt."""
-    return cls.infra_alive is not Variant.infra_alive
+    return cls.infra_alive is not Variant.infra_alive or cls.runs_own_image()
 
 
 class NoopVariant(Variant):
     """The seam a fixture root uses: no provisioning, no infra demand,
     no network."""
-    ARM = "noop"
+    ID = "noop"
 
     def infra_alive(self):
         return True

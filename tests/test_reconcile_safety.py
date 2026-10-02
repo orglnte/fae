@@ -431,8 +431,7 @@ class TestDryRunWritesNothing(unittest.TestCase):
         self._tmp.cleanup()
 
     def st(self):
-        return dict(cid=self.cid, model="sonnet", treatment="beta",
-                    condition="apidocs", task="T1", rep=1, budget="10",
+        return dict(cid=self.cid, model="sonnet", variant="beta_apidocs", task="T1", rep=1, budget="10",
                     state="CRASHED", why="loop", events=3, att=1,
                     prepared=True, detail="")
 
@@ -620,7 +619,7 @@ class SweepCase(unittest.TestCase):
 
     def st(self, state="CRASHED", why="loop", **kw):
         d = dict(cid=self.cid, state=state, why=why, detail="", model="sonnet",
-                 treatment="beta", condition="apidocs", task="T1",
+                 variant="beta_apidocs", task="T1",
                  rep="1", budget=10, shape="3/6")
         d.update(kw)
         return d
@@ -954,7 +953,7 @@ class TestArmStuckMeasuresProgressNotLiveness(SweepCase):
 
     def _sweep_arm(self, *, slot_age, phase_age, phase="verify"):
         st = self.st(state="RUNNING", why="agent")
-        st["treatment"] = "alpha"
+        st["variant"] = "alpha_apidocs"
         with mock.patch.object(runs.state, "_arm_slot_of", return_value=slot_age), \
              mock.patch.object(runs.state, "heartbeat",
                                return_value={"phase_age": phase_age,
@@ -1114,7 +1113,7 @@ class TestTheGateColumnIsLiveDuringAVerify(unittest.TestCase):
             ws = Path(d) / "sonnet_high_beta_apidocs_T1_r1"
             ws.mkdir()
             (ws / "cell.env").write_text(
-                "TASK=T1\nTREATMENT=beta\nCONDITION=apidocs\n"
+                "TASK=T1\nVARIANT=beta_apidocs\n"
                 "REP=1\nATTEMPT_BUDGET=10\nMODEL_VERSION=5\n")
             (ws / "iterations.log").write_text("")
             with mock.patch.object(runs.ledger, "parse", return_value=led), \

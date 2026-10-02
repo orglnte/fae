@@ -7,25 +7,20 @@ relatively and the frozen bring-ups reach it as `-m experiment.variants`
 whatever directory it lives in. Loading a second definition into the same
 process is refused; tests that need one call `unload()` first.
 
-The definition's `__init__.py` declares, all optional except `variant_classes`:
+The experiment's variants are files, one per variant:
+`<experiment>/variants/<id>.toml` (fae/cell/variants/files.py). A variant
+is one complete set of what the agent is given and how its work is judged;
+the set of files is the set of variants.
+
+The definition's `__init__.py` declares, all optional:
 
     NAME                 a short name
-    variant_classes()    -> the Variant subclasses (a function: importing
-                            them pulls the infra modules in, and the
-                            config reads this file before any of that)
-    MATRIX               {arm: [variants]} — derived from the variants'
-                            CONDITIONS when absent
-    RETIRED              (arm, ...) registered for the cells they already
-                            have, never minted again: outside MATRIX, their
-                            SEED_DOCS pins kept so a resumed cell still seeds
-    SEED_DOCS            {(arm, condition): (doc file, min lines)}
     GATE                 a Gate (default: one arrangement)
     verifier_class()     -> the Verifier subclass (fae/cell/verify.py: one
                             verify(ctx) -> Verdict, EXCLUSIVE — the lock the
-                            engine holds around every run, "rig" for a
-                            singleton infra — and FILES; what it owes is
-                            on the base class; a function, like
-                            variant_classes: `verifier` is the package)
+                            engine holds around every run — and FILES; what it
+                            owes is on the base class; a function: `verifier`
+                            is the package)
     verbs()              -> {name: callable} hooks the engine's own verbs call
                             ("reference_cell" for smoke, "selftest")
     commands()           -> {name: callable(argv) -> exit code} the
@@ -39,12 +34,12 @@ The definition's `__init__.py` declares, all optional except `variant_classes`:
                             own rules beside it)
     report_text(ws)      -> the verifier's per-attempt reports, concatenated,
                             for the taint rules ("" by default)
-    reference_workspace(arm) -> the workspace name the grader compares a
+    reference_workspace(variant) -> the workspace name the grader compares a
                             green cell against, or None
     POOLED_MODELS        {model id: scoreboard row label} for the results table
     report_summary(cells, metrics_of, delta, metrics) -> {key: value} the
                             experiment adds to the aggregate's summary (its
-                            own gaps between arms, its reading notes); the
+                            own gaps between variants, its reading notes); the
                             engine hands it every scored cell, its per-group
                             metric function, its None-safe delta and the
                             metric names
@@ -56,8 +51,8 @@ The definition's `__init__.py` declares, all optional except `variant_classes`:
     fingerprint_trees(conf)  -> directories whose *.py are hashed into the
                             verify fingerprint beside the experiment tree
     (agents' images: the base is the experiment root's Dockerfile.agent-base,
-    else the engine's; each arm's layer over it is its variant's
-    AGENT_IMAGE_DIR — fae/cell/image.py)
+    else the engine's; each variant's layer over it is its [authoring] tools
+    directory — fae/cell/image.py)
 """
 from __future__ import annotations
 
@@ -97,49 +92,33 @@ class Definition:
 
     @property
     def variants(self):
-        """{arm: class}, built on first use."""
+        """{id: class}, read from the variant files on first use."""
         if self._subjects is None:
-            fn = getattr(self.module, "variant_classes", None)
-            classes = tuple(fn()) if fn else ()
-            self._subjects = {c.ARM: c for c in classes}
+            from .variants import files
+            self._subjects = files.load(self.path)
         return self._subjects
 
     @property
-    def arms(self):
+    def ids(self):
+        """Every variant, the retired included (their cells stay readable)."""
         return tuple(self.variants)
 
-    def variant(self, arm):
-        return self.variants.get(arm)
+    @property
+    def active(self):
+        """The variants cells are scheduled for: every one not retired."""
+        return tuple(i for i, c in self.variants.items() if not c.RETIRED)
 
-    def tech_of(self, arm):
-        """The variant's TECH; an unknown arm is its own tech (fixture arms)."""
-        s = self.variant(arm)
-        return s.TECH if s else arm
+    def variant(self, vid):
+        return self.variants.get(vid)
 
-    def docs_of(self, arm):
-        """The name the arm's api docs carry: the variant's DOCS, else its tech."""
-        s = self.variant(arm)
-        return (s.DOCS or s.TECH) if s else arm
+    def label_of(self, vid):
+        s = self.variant(vid)
+        return s.LABEL if s else vid
 
-    def lock_of(self, arm):
+    def lock_of(self, vid):
         """The exclusive lock a variant's cells hold for their lifetime, or None."""
-        s = self.variant(arm)
+        s = self.variant(vid)
         return s.LOCK if s else None
-
-    @property
-    def matrix(self):
-        m = getattr(self.module, "MATRIX", None)
-        if m is not None:
-            return m
-        return {arm: list(getattr(c, "CONDITIONS", ())) for arm, c in self.variants.items()}
-
-    @property
-    def retired(self):
-        return tuple(getattr(self.module, "RETIRED", ()))
-
-    @property
-    def seed_docs(self):
-        return getattr(self.module, "SEED_DOCS", {})
 
     @property
     def gate(self):
@@ -161,9 +140,9 @@ class Definition:
         fn = getattr(self.module, "report_text", None)
         return fn(ws) if fn else ""
 
-    def reference_workspace(self, arm):
+    def reference_workspace(self, vid):
         fn = getattr(self.module, "reference_workspace", None)
-        return fn(arm) if fn else None
+        return fn(vid) if fn else None
 
     @property
     def pooled_models(self):

@@ -42,8 +42,8 @@ class CellTestCase(unittest.TestCase):
         ws = self.wsdir / self.CID
         (ws / "iterations.log").write_text(ledger_lines)
         (ws / "cell.env").write_text(env or
-                                     "TASK=T1\nTREATMENT=beta\n"
-                                     "CONDITION=apidocs\nREPEAT=1\n"
+                                     "TASK=T1\nVARIANT=beta_apidocs\n"
+                                     "REPEAT=1\n"
                                      "ATTEMPT_BUDGET=10\n")
         if sealed:
             (ws / ".sealed").write_text(sealed)
@@ -778,10 +778,10 @@ class TestAnUndeclaredLivenessProbeHaltsAtPreflight(CellTestCase):
         from fae.cell.variants.base import Variant
 
         class Probeless(Variant):
-            ARM = "beta"
+            ID = "beta_apidocs"
 
         c = self.cell()
-        c._treatment = Probeless(c)
+        c._infra = Probeless(c)
         self.assertFalse(c.infra_ok())
         self.assertIn("Probeless declares no infra_alive probe",
                       (c.ws / "hooks.log").read_text())
@@ -790,7 +790,7 @@ class TestAnUndeclaredLivenessProbeHaltsAtPreflight(CellTestCase):
         from fae.cell.variants.base import Variant, liveness_declared
 
         class Probed(Variant):
-            ARM = "beta"
+            ID = "beta_apidocs"
 
             def infra_alive(self):
                 return True
@@ -809,17 +809,17 @@ class TestAnUndeclaredSurfaceHaltsAtPreflight(CellTestCase):
         from fae.cell.variants.base import Variant
 
         class Surfaceless(Variant):
-            ARM = "beta"
+            ID = "beta_apidocs"
 
             def infra_alive(self):
                 return True
 
         c = self.cell()
-        c._treatment = Surfaceless(c)
+        c._infra = Surfaceless(c)
         with mock.patch.object(experiment.Definition, "variant",
-                               lambda self, arm: Surfaceless):
+                               lambda self, vid: Surfaceless):
             self.assertFalse(c.infra_ok())
-        self.assertIn("HALT[definition]: Surfaceless (arm 'beta') declares no AUTHORING_SURFACE",
+        self.assertIn("HALT[definition]: variant 'beta_apidocs' declares no [authoring] surface",
                       (c.ws / "hooks.log").read_text())
 
 

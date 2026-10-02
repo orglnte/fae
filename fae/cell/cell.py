@@ -39,7 +39,7 @@ from pathlib import Path
 from . import config as _config
 from . import faults
 from . import rig as _rig
-from . import variants as _treatments
+from . import variants as _variants
 from . import arena as _arena_mod
 from .arena import Arena
 from .checkpoints import Checkpoints
@@ -120,7 +120,7 @@ class VerifyResult:
 def hold_awake(pid):
     """Idle sleep halts the monotonic clock every gate window is measured on;
     the assertion lives exactly as long as the driver."""
-    if (os.environ.get(_treatments.NOOP_ENV) == "1"
+    if (os.environ.get(_variants.NOOP_ENV) == "1"
             or sys.platform != "darwin" or not shutil.which("caffeinate")):
         return None
     try:
@@ -189,12 +189,13 @@ class Cell:
         return self._env.get("TASK", "T1")
 
     @property
-    def treatment(self):
-        return self._env.get("TREATMENT", "")
+    def variant(self):
+        return self._env.get("VARIANT", "")
 
     @property
-    def condition(self):
-        return self._env.get("CONDITION", "")
+    def reference(self):
+        """A smoke cell: the variant's known answer was seeded."""
+        return self._env.get("REFERENCE") == "1"
 
     @property
     def rep(self):
@@ -374,7 +375,7 @@ class Cell:
     def surface(self):
         """The authorable surface of this cell's artifacts (fae/cell/surface.py)."""
         if self._surface is None:
-            self._surface = Surface(self.artifacts, self.treatment)
+            self._surface = Surface(self.artifacts, self.variant)
         return self._surface
 
     # --- checkpoints (delegated, guarded) ---------------------------------
@@ -586,14 +587,14 @@ class Cell:
         run_out.mkdir(parents=True, exist_ok=True)
         ctx = Ctx(root=str(self.root), experiment_dir=str(self.conf.get("EXPERIMENT_DIR")),
                   workspace=str(self.ws), artifacts=str(self.artifacts), out=str(run_out),
-                  cid=self.cid, task=self.task, variant=self.treatment,
+                  cid=self.cid, task=self.task, variant=self.variant,
                   arrangement=shape, expected_fp=self.expected_fp)
         definition = _experiment.current()
         self._archive_interrupted(out)
         self._mark_inflight(out, shape)
         # an infra already dead voids fast, before a deploy and a load
         # are spent on a corpse
-        if not self.arm_variant.infra_alive():
+        if not self.infra.infra_alive():
             v = Verdict(ok=False, stage="infra", charge=False,
                         why="the arm's infra was dead before the arrangement",
                         arrangement=shape)
@@ -611,7 +612,7 @@ class Cell:
         before = self._record_snapshot()
         started = time.time()
         try:
-            v = run_verifier(ctx, self.arm_variant,
+            v = run_verifier(ctx, self.infra,
                              timeout_s=int(self.conf.get("VERIFIER_TIMEOUT_S") or 7200),
                              log_dir=out)
         finally:
@@ -639,7 +640,7 @@ class Cell:
                         arrangement=v.arrangement, seconds=v.seconds, files=v.files)
         measured = definition.verifier_class().MEASURED_STAGES
         if (not v.ok and v.charge and (measured is None or v.stage in measured)
-                and not self.arm_variant.infra_alive()):
+                and not self.infra.infra_alive()):
             # died under the measurement: what it measured is not the build's
             v = Verdict(ok=False, stage="infra", charge=False,
                         why=f"the arm's infra died during the arrangement (was: {v.stage})",
@@ -777,7 +778,7 @@ class Cell:
         run's evidence under arrangements/NN-a<attempt>-<label>-<end state>/,
         before the next arrangement reuses the names."""
         doc = {"cell_id": self.cid, "task": self.task or None,
-               "treatment": self.treatment or None, **v.metrics}
+               "variant": self.variant or None, **v.metrics}
         (out / "metrics.json").write_text(json.dumps(doc, indent=2) + "\n")
         try:
             m = json.loads((out / self.INFLIGHT).read_text())
@@ -911,7 +912,7 @@ class Cell:
         try:
             rc, _ = self.setup(arena)
             if rc != 0:
-                raise RuntimeError(f"{self.treatment} cell_setup failed (rc={rc}) "
+                raise RuntimeError(f"{self.variant} cell_setup failed (rc={rc}) "
                                    f"— cannot re-verify without its infra")
             for s in self.gate_shapes:
                 results.append(self.verify(shape=s, out_dir=out))
@@ -944,41 +945,36 @@ class Cell:
         archaeology.
         `cli.py experiment prepare` calls the same function over the matrix."""
         from . import prepare as _prepare
-        _prepare.prepare(self.cid, self.task, self.treatment, self.condition,
+        _prepare.prepare(self.cid, self.task, self.variant,
                          self.rep, workspaces=self.workspaces, root=self.root,
-                         fresh=fresh, impl=self.IMPL,
+                         fresh=fresh, reference=self.reference, impl=self.IMPL,
                          model_version=self.conf.values.get("AGENT_MODEL")
                          or os.environ.get("MODEL", "?"), cfg=self.conf)
         self._env = self._read_env()
         return self.ws
 
     @property
-    def variant(self):
+    def variant_cls(self):
         """This cell's variant class (the experiment's declaration), or None
-        for an arm the experiment does not declare."""
-        return _treatments.registry().get(self.treatment)
+        for a variant the experiment does not declare."""
+        return _variants.registry().get(self.variant)
 
     def agent_image(self):
         """The image this cell's agents run in: its arm's layer over the base."""
         from . import experiment as _experiment
         from . import image as _image
-        return _image.agent_tag(_experiment.current(), self.root, self.variant)
-
-    @property
-    def tech(self):
-        s = self.variant
-        return s.TECH if s else self.treatment
+        return _image.agent_tag(_experiment.current(), self.root, self.variant_cls)
 
     @property
     def arm(self):
         """The exclusive lock this cell holds for its lifetime (the variant's
         LOCK), or None: bounded by the work slot alone."""
-        s = self.variant
+        s = self.variant_cls
         return s.LOCK if s else None
 
     def arena(self, work_slots=None):
         arm = self.arm
-        s = self.variant
+        s = self.variant_cls
         return Arena(self.root / "workspaces.nosync" / ".orch",
                      work_slots=int(work_slots
                                     or self.conf.get("WORK_SLOTS", 7)),
@@ -1080,34 +1076,34 @@ class Cell:
         return True
 
     @property
-    def arm_variant(self):
-        """The arm's provisioning, native (fae/cell/variants.py)."""
-        if getattr(self, "_treatment", None) is None:
-            self._treatment = _treatments.for_cell(self)
-        return self._treatment
+    def infra(self):
+        """The variant's infra for this cell (fae/cell/variants)."""
+        if getattr(self, "_infra", None) is None:
+            self._infra = _variants.for_cell(self)
+        return self._infra
 
     def setup(self, arena=None):
         """The cell's network, then the arm's provisioning on it. Returns
         (rc, env): 0 and the agent-container env on success; 1 and the
         failure already logged on a rig fault."""
         try:
-            self.arm_variant.network_up()
+            self.infra.network_up()
         except RuntimeError as e:
-            self.arm_variant.log(f"HALT[infra]: {e}")
+            self.infra.log(f"HALT[infra]: {e}")
             return 1, {}
         try:
-            return 0, self.arm_variant.author_setup()
-        except _treatments.HookFailure:
+            return 0, self.infra.author_setup()
+        except _variants.HookFailure:
             return 1, {}
 
     def teardown(self):
         """The arm's, then the cell network it lived on."""
         try:
-            self.arm_variant.author_teardown()
+            self.infra.author_teardown()
         except Exception as e:           # best-effort by contract
             self._append("ALERT", "teardown", f"{type(e).__name__}: {e}")
         try:
-            self.arm_variant.network_down()
+            self.infra.network_down()
         except Exception as e:
             self._append("ALERT", "teardown", f"network: {type(e).__name__}: {e}")
 
@@ -1154,22 +1150,22 @@ class Cell:
         what its infra needs (a docker daemon, an image, nothing); the
         image its cells are verified in is built here, before an attempt,
         never under the verify lock."""
-        if not _treatments.liveness_declared(type(self.arm_variant)):
-            self.arm_variant.log(f"HALT[infra]: {type(self.arm_variant).__name__} "
+        if not _variants.liveness_declared(type(self.infra)):
+            self.infra.log(f"HALT[infra]: {type(self.infra).__name__} "
                                  "declares no infra_alive probe; every "
                                  "arrangement would be void")
             return False
         try:
-            authorable(self.treatment)
+            authorable(self.variant)
         except RuntimeError as e:
-            self.arm_variant.log(f"HALT[definition]: {e}")
+            self.infra.log(f"HALT[definition]: {e}")
             return False
-        if not self.arm_variant.infra_ok():
+        if not self.infra.infra_ok():
             return False
         try:
-            self.arm_variant.image()
+            self.infra.image()
         except RuntimeError as e:
-            self.arm_variant.log(f"HALT[infra]: verify image: {str(e).splitlines()[0]}")
+            self.infra.log(f"HALT[infra]: verify image: {str(e).splitlines()[0]}")
             return False
         return True
 
@@ -1486,7 +1482,7 @@ class Cell:
         # The scripted testagent reads TESTAGENT_PLAN from the environment; the
         # container's `-e TESTAGENT_PLAN` passthrough inherits it, so it must
         # never be forced empty here.
-        base = {"CELL_ID": self.cid, "TECH": self.tech,
+        base = {"CELL_ID": self.cid, "VARIANT": self.variant,
                 "SERVICE_PORT": self.conf.get("SERVICE_PORT", "8080")}
         override = agent_cmd or os.environ.get("AGENT_CMD")
         with log.open("w") as f:
@@ -1532,10 +1528,10 @@ class Cell:
         outside the authorable surface never takes effect, no attempt is
         burned policing the boundary, and the build is judged on what it was
         allowed to change. Returns the restored relpaths joined by newlines."""
-        from . import prepare as _prepare
-        common = _prepare.task_dir(self.root, self.conf) / "skeleton"
-        overlay = self.variant.seed_root() / "overlay" if self.variant else common / "-"
-        return "\n".join(self.surface.heal(common, overlay))
+        from .variants import files
+        cls = self.variant_cls
+        sources = {**files.template_files(cls), **cls.INPUTS} if cls else {}
+        return "\n".join(self.surface.heal(sources))
 
     def _evict_strays(self, attempt):
         """Move files that are neither seeded nor authorable out of artifacts/
@@ -1612,9 +1608,9 @@ class Cell:
             rc, setup_env = self.setup(arena)
             if rc != 0:
                 self._append("ALERT", f"SETUP-FAILED rc={rc}",
-                             f"{self.treatment} cell_setup; investigate")
+                             f"{self.variant} cell_setup; investigate")
                 self.apply(T.CRASH, "setup-failed")
-                raise Halt(f"HALT[infra]: {self.treatment} cell_setup "
+                raise Halt(f"HALT[infra]: {self.variant} cell_setup "
                            f"failed for {self.cid} (rc={rc})", self.INFRA_EXIT)
 
             for attempt in range(prior + 1, budget + 1):

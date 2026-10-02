@@ -20,13 +20,12 @@ SEQ = queue.SEQ_START
 MODEL = "aaa"
 
 
-def spec(treatment="beta", condition="apidocs", rep=1, task="T1"):
-    return dict(task=task, treatment=treatment, condition=condition, rep=rep)
+def spec(variant="beta_apidocs", rep=1, task="T1"):
+    return dict(task=task, variant=variant, rep=rep)
 
 
-def cid_of(model=MODEL, rep=1, task="T1", treatment="beta",
-           condition="apidocs"):
-    return runs.cell_id(model, treatment, condition, rep, task)
+def cid_of(model=MODEL, rep=1, task="T1", variant="beta_apidocs"):
+    return runs.cell_id(model, variant, rep, task)
 
 
 def seq_of(p):
@@ -239,7 +238,7 @@ class TestEnqueueNamesTheCell(QueueCase):
         self.assertEqual(queue.spec_cid(p), f"{MODEL}_high_beta_apidocs_T2_r7")
 
     def test_task_defaults_to_t1_and_rep_to_1_when_the_spec_omits_them(self):
-        p = queue.enqueue(MODEL, dict(treatment="beta", condition="apidocs"))
+        p = queue.enqueue(MODEL, dict(variant="beta_apidocs"))
         self.assertEqual(queue.spec_cid(p), f"{MODEL}_high_beta_apidocs_T1_r1")
 
     def test_a_cid_already_pending_or_claimed_is_not_queued_twice(self):

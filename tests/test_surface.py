@@ -31,7 +31,16 @@ class SurfaceCase(unittest.TestCase):
         _w(self.skel / "common" / "Dockerfile", "FROM x\n")
         _w(self.skel / "common" / "app" / "main.py", "app\n")
         _w(self.skel / "beta" / "declaration.toml", "[service]\n")
-        self.s = Surface(self.art, "beta")
+        self.s = Surface(self.art, "beta_apidocs")
+
+    def sources(self):
+        """workspace path -> seed file: the common skeleton, then beta's overlay."""
+        out = {}
+        for d in (self.skel / "common", self.skel / "beta"):
+            for p in d.rglob("*"):
+                if p.is_file():
+                    out[p.relative_to(d).as_posix()] = p
+        return out
 
 
 class TestRecordAndSeal(SurfaceCase):
@@ -40,13 +49,6 @@ class TestRecordAndSeal(SurfaceCase):
         self.assertEqual([r for r, _, _ in rows],
                          ["Dockerfile", "app/main.py", "app/provisioning_impl.py", "declaration.toml"])
         self.assertEqual(self.s.rows(), rows)
-        self.assertTrue((self.art.parent / MANIFEST).is_file())
-        self.assertFalse((self.art / MANIFEST).exists())
-
-    def test_a_manifest_left_inside_artifacts_is_adopted(self):
-        rows = self.s.record()
-        (self.art.parent / MANIFEST).rename(self.art / MANIFEST)
-        self.assertEqual(Surface(self.art, "beta").rows(), rows)
         self.assertTrue((self.art.parent / MANIFEST).is_file())
         self.assertFalse((self.art / MANIFEST).exists())
 
@@ -65,24 +67,24 @@ class TestHeal(SurfaceCase):
         (self.art / "Dockerfile").chmod(0o644)
         (self.art / "Dockerfile").write_text("FROM y\n")
         _w(self.skel / "common" / "Dockerfile", "FROM x2\n")      # the skeleton evolved
-        self.assertEqual(self.s.heal(self.skel / "common", self.skel / "beta"), ["Dockerfile"])
+        self.assertEqual(self.s.heal(self.sources()), ["Dockerfile"])
         self.assertEqual((self.art / "Dockerfile").read_text(), "FROM x2\n")
         self.assertFalse(os.stat(self.art / "Dockerfile").st_mode & stat.S_IWUSR)
         self.assertEqual(self.s.check(), [])                        # row re-baselined
 
-    def test_the_overlay_wins_over_common(self):
-        _w(self.skel / "common" / "declaration.toml", "common\n")
-        self.s = Surface(self.art, "alpha")                  # declaration is fixed for alpha
+    def test_a_fixed_file_is_restored_from_the_source_the_seed_names(self):
+        self.s = Surface(self.art, "alpha_apidocs")                  # declaration is fixed for alpha
         self.s.record()
         (self.art / "declaration.toml").write_text("edited\n")
-        _w(self.skel / "keda" / "declaration.toml", "overlay\n")
-        self.assertEqual(self.s.heal(self.skel / "common", self.skel / "keda"), ["declaration.toml"])
-        self.assertEqual((self.art / "declaration.toml").read_text(), "overlay\n")
+        _w(self.skel / "alpha" / "declaration.toml", "the seed\n")
+        self.assertEqual(self.s.heal({"declaration.toml": self.skel / "alpha" / "declaration.toml"}),
+                         ["declaration.toml"])
+        self.assertEqual((self.art / "declaration.toml").read_text(), "the seed\n")
 
     def test_an_authorable_edit_is_left_alone(self):
         self.s.record()
         (self.art / "app" / "provisioning_impl.py").write_text("done\n")
-        self.assertEqual(self.s.heal(self.skel / "common", self.skel / "beta"), [])
+        self.assertEqual(self.s.heal(self.sources()), [])
         self.assertEqual((self.art / "app" / "provisioning_impl.py").read_text(), "done\n")
 
 
@@ -94,7 +96,7 @@ class TestTheManifestIsNotTheAgents(SurfaceCase):
         forged = "".join(l.replace(l.split("\t")[2], "0" * 64) + "\n"
                          for l in (self.art.parent / MANIFEST).read_text().splitlines())
         (self.art / MANIFEST).write_text(forged)
-        self.assertEqual(self.s.heal(self.skel / "common", self.skel / "beta"), ["Dockerfile"])
+        self.assertEqual(self.s.heal(self.sources()), ["Dockerfile"])
         self.assertEqual((self.art / "Dockerfile").read_text(), "FROM x\n")
 
 
@@ -165,7 +167,7 @@ class TestTheSurfaceMustBeDeclared(unittest.TestCase):
     def _with_variant(self, cls):
         from unittest import mock
         from fae.cell import experiment
-        return mock.patch.object(experiment.Definition, "variant", lambda self, arm: cls)
+        return mock.patch.object(experiment.Definition, "variant", lambda self, vid: cls)
 
     def test_the_base_variant_declares_none(self):
         from fae.cell.variants.base import Variant
@@ -175,16 +177,16 @@ class TestTheSurfaceMustBeDeclared(unittest.TestCase):
         from fae.cell.variants.base import Variant
 
         class Undeclared(Variant):
-            ARM = "beta"
+            ID = "beta_apidocs"
 
         with self._with_variant(Undeclared):
-            with self.assertRaisesRegex(RuntimeError, "Undeclared .*declares no AUTHORING_SURFACE"):
-                authorable("beta")
+            with self.assertRaisesRegex(RuntimeError, "'beta_apidocs' declares no \\[authoring\\] surface"):
+                authorable("beta_apidocs")
 
-    def test_an_arm_with_no_variant_is_refused(self):
+    def test_an_unknown_variant_is_refused(self):
         with self._with_variant(None):
-            with self.assertRaisesRegex(RuntimeError, "no variant for arm 'gamma'"):
+            with self.assertRaisesRegex(RuntimeError, "no variant 'gamma'"):
                 authorable("gamma")
 
     def test_a_declared_surface_is_returned_as_tuples(self):
-        self.assertEqual(authorable("beta"), (("declaration.toml",), ("app/",)))
+        self.assertEqual(authorable("beta_apidocs"), (("declaration.toml",), ("app/",)))

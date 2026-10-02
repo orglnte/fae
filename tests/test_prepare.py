@@ -1,8 +1,8 @@
 """Seeding a cell workspace.
 
-What a cell is measured on is decided here: which doc it receives, which files
-it may author, and what the manifest says the seed was. These pin the parts a
-port can get wrong silently.
+What a cell is measured on is decided here: which files its variant hands the
+agent, which it may author, and what the manifest says the seed was. These pin
+the parts a port can get wrong silently.
 """
 import os
 import subprocess
@@ -35,9 +35,9 @@ class PrepareTestCase(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
-    def seed(self, treatment="beta", condition="apidocs", task="T1",
+    def seed(self, variant="beta_apidocs", task="T1",
              cid=None, **kw):
-        return prepare.prepare(cid or self.CID, task, treatment, condition, "1",
+        return prepare.prepare(cid or self.CID, task, variant, "1",
                                workspaces=self.ws_root, root=ROOT,
                                cfg=self.cfg, **kw)
 
@@ -52,17 +52,22 @@ class TestTheSeededSurface(PrepareTestCase):
         self.assertTrue((a / "docs" / "beta.md").is_file())
         self.assertTrue((ws / "PROMPT.md").is_file())
 
-    def test_the_overlay_wins_over_common(self):
-        common = Path(self.cfg.get("TASK_DIR")) / "skeleton"
-        overlay = runs.common.definition().variant("beta").seed_root() / "overlay"
+    def test_a_later_template_directory_wins(self):
+        common, overlay = runs.common.definition().variant("beta_apidocs").TEMPLATE
         both = {p.relative_to(common) for p in common.rglob("*") if p.is_file()} & \
                {p.relative_to(overlay) for p in overlay.rglob("*") if p.is_file()}
         if not both:
-            self.skipTest("no file exists in both common and the overlay")
+            self.skipTest("no file exists in both template directories")
         ws = self.seed()
         for rel in both:
             self.assertEqual((ws / "artifacts" / rel).read_bytes(),
                              (overlay / rel).read_bytes(), rel)
+
+    def test_each_input_lands_at_its_workspace_path(self):
+        cls = runs.common.definition().variant("beta_apidocs")
+        ws = self.seed()
+        for rel, src in cls.INPUTS.items():
+            self.assertEqual((ws / "artifacts" / rel).read_bytes(), src.read_bytes(), rel)
 
     def test_the_manifest_covers_every_seeded_file(self):
         ws = self.seed()
@@ -95,7 +100,7 @@ class TestTheSeededSurface(PrepareTestCase):
         first = (self.seed() / ".skeleton_manifest").read_text()
         second_root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: None)
-        ws2 = prepare.prepare(self.CID, "T1", "beta", "apidocs", "1",
+        ws2 = prepare.prepare(self.CID, "T1", "beta_apidocs", "1",
                               workspaces=second_root, root=ROOT, cfg=self.cfg)
         self.assertEqual((ws2 / ".skeleton_manifest").read_text(),
                          first)
@@ -132,85 +137,68 @@ class TestFixedFilesAreSeededReadOnly(PrepareTestCase):
     def test_a_file_the_variant_lets_the_agent_author_stays_writable(self):
         # the seal keys on the variant's AUTHORING_SURFACE: the declared file stays
         # writable while the rest of the skeleton is read-only
-        for arm in ("beta",):
-            ws = self.seed(treatment=arm)
-            m = ws / "artifacts" / "declaration.toml"
-            if not m.is_file():
-                self.skipTest("this skeleton has no declaration.toml")
-            self.assertTrue(m.stat().st_mode & 0o200, arm)
-            self.assertEqual((ws / "artifacts" / "TODO.md").stat().st_mode & 0o777, 0o444, arm)
+        ws = self.seed()
+        m = ws / "artifacts" / "declaration.toml"
+        self.assertTrue(m.stat().st_mode & 0o200)
+        self.assertEqual((ws / "artifacts" / "TODO.md").stat().st_mode & 0o777, 0o444)
 
 
     def test_a_resume_lifts_an_old_seal_off_the_authorable_file(self):
         # A workspace sealed by an earlier prepare that read declaration.toml as
         # fixed keeps that mode until something opens it; preparing the same
         # cell again (a resume) must, and must keep the fixed files sealed.
-        ws = self.seed(treatment="beta")
+        ws = self.seed()
         m = ws / "artifacts" / "declaration.toml"
-        if not m.is_file():
-            self.skipTest("this skeleton has no declaration.toml")
         m.chmod(0o444)
         (ws / "artifacts" / "TODO.md").chmod(0o644)
-        again = self.seed(treatment="beta")
+        again = self.seed()
         self.assertEqual(again, ws)
         self.assertTrue(os.access(m, os.W_OK))
         self.assertEqual((ws / "artifacts" / "TODO.md").stat().st_mode & 0o777, 0o444)
 
-class TestTheSeedDocGuard(PrepareTestCase):
-    """A silent fallback to the arm's base doc would change the study's
-    independent variable with nothing reporting it."""
+class TestWhatTheVariantHands(PrepareTestCase):
+    """The variant file is the whole of what the agent is given: what it does
+    not name is not seeded, and what it names must exist."""
 
-    def test_an_undefined_combination_is_refused(self):
-        with self.assertRaises(RuntimeError) as e:
-            self.seed(treatment="beta", condition="howto",
-                      cid="testpy_high_beta_howto_T1_r1")
-        self.assertIn("not a defined matrix combination", str(e.exception))
+    def test_each_variant_gets_its_own_doc(self):
+        ws = self.seed(variant="alpha_howto", cid="testpy_high_alpha_howto_T1_r1")
+        cls = runs.common.definition().variant("alpha_howto")
+        self.assertEqual((ws / "artifacts" / "docs" / "alpha.md").read_bytes(),
+                         cls.INPUTS["docs/alpha.md"].read_bytes())
 
-    def test_a_defined_combination_is_seeded(self):
-        ws = self.seed(treatment="alpha", condition="howto",
-                       cid="testpy_high_alpha_howto_T1_r1")
-        self.assertTrue((ws / "artifacts" / "docs" / "alpha.md").is_file())
+    def test_an_unknown_variant_is_refused(self):
+        with self.assertRaises(FileNotFoundError):
+            self.seed(variant="beta_howto", cid="testpy_high_beta_howto_T1_r1")
 
-    def test_the_condition_reaches_cell_env(self):
-        ws = self.seed()
-        env = (ws / "cell.env").read_text()
-        self.assertIn("CONDITION=apidocs", env)
-        self.assertIn("ATTEMPT_BUDGET=10", env)
-        self.assertIn("TREATMENT=beta", env)
-
-
-
-class TestTheDocsName(PrepareTestCase):
-    """Arms of one tech told different things: the api doc follows the
-    variant's DOCS, the rest of the seed follows its tech."""
-
-    def _renamed_seed(self, cls):
-        import shutil
-        seed = Path(self._tmp.name) / "seed"
-        shutil.copytree(cls.seed_root(), seed)
-        (seed / "any.beta.apidocs.api.md").rename(seed / "any.renamed.apidocs.api.md")
-        return seed
-
-    def test_the_api_doc_follows_docs(self):
-        cls = runs.common.definition().variant("beta")
-        seed = self._renamed_seed(cls)
-        with mock.patch.object(cls, "DOCS", "renamed"), \
-             mock.patch.object(cls, "seed_root", classmethod(lambda c: seed)), \
-             mock.patch.object(prepare, "expected_seed_doc",
-                               return_value="any.renamed.apidocs.api.md"):
-            ws = self.seed()
-        self.assertEqual((ws / "artifacts" / "docs" / "beta.md").read_bytes(),
-                         (seed / "any.renamed.apidocs.api.md").read_bytes())
-
-    def test_a_missing_docs_name_is_refused_not_defaulted(self):
-        cls = runs.common.definition().variant("beta")
-        with mock.patch.object(cls, "DOCS", "nosuchdocs"):
-            with self.assertRaises((RuntimeError, FileNotFoundError)):
+    def test_a_missing_input_is_refused_not_skipped(self):
+        cls = runs.common.definition().variant("beta_apidocs")
+        inputs = {**cls.INPUTS, "docs/beta.md": Path(self._tmp.name) / "gone.md"}
+        with mock.patch.object(cls, "INPUTS", inputs):
+            with self.assertRaisesRegex(FileNotFoundError, "docs/beta.md"):
                 self.seed()
 
-    def test_empty_docs_is_the_tech(self):
-        self.assertEqual(runs.common.definition().docs_of("beta"),
-                         runs.common.definition().tech_of("beta"))
+    def test_an_input_the_template_also_provides_is_refused(self):
+        cls = runs.common.definition().variant("beta_apidocs")
+        inputs = {**cls.INPUTS, "declaration.toml": cls.INPUTS["TODO.md"]}
+        with mock.patch.object(cls, "INPUTS", inputs):
+            with self.assertRaisesRegex(FileNotFoundError, "template also provides"):
+                self.seed()
+
+    def test_the_variant_reaches_cell_env(self):
+        env = (self.seed() / "cell.env").read_text()
+        self.assertIn("VARIANT=beta_apidocs\n", env)
+        self.assertIn("ATTEMPT_BUDGET=10", env)
+        self.assertNotIn("REFERENCE=", env)
+
+    def test_a_reference_cell_gets_the_known_answer(self):
+        cls = runs.common.definition().variant("beta_apidocs")
+        ws = self.seed(reference=True, cid="testpy_high_beta_apidocs_T1_r2")
+        for p in cls.REFERENCE.rglob("*"):
+            if p.is_file():
+                rel = p.relative_to(cls.REFERENCE)
+                self.assertEqual((ws / "artifacts" / rel).read_bytes(), p.read_bytes(), rel)
+        self.assertIn("REFERENCE=1\n", (ws / "cell.env").read_text())
+
 
 class TestTheImplementationIsRecorded(PrepareTestCase):
 
@@ -280,8 +268,8 @@ class TestIdempotence(PrepareTestCase):
 
 class TestOneImplementation(unittest.TestCase):
     """prepare() is the one seeding; the driver calls it directly and
-    `cli.py experiment prepare` (fae/driver/rig.py) calls the same function over the
-    matrix."""
+    `cli.py experiment prepare` (fae/driver/rig.py) calls the same function over
+    the variants."""
 
     def test_the_driver_calls_the_module(self):
         src = (ROOT / "fae" / "cell" / "cell.py").read_text()

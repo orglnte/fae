@@ -28,7 +28,7 @@ class TestTheToolContainer(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.ws = Path(self._tmp.name) / "cell-x"
         self.ws.mkdir()
-        cell = SimpleNamespace(cid="cell-x", treatment="imaged", condition="c", root=Path(ROOT),
+        cell = SimpleNamespace(cid="cell-x", variant="imaged_c", root=Path(ROOT),
                                ws=self.ws, conf=SimpleNamespace(get=lambda k, d=None: d,
                                                                 exported={"REPO_ROOT": str(ROOT)}))
         self.v = Imaged(cell)

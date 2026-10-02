@@ -1,0 +1,18 @@
+factors = { tech = "alpha", docs = "openbook" }
+
+[authoring]
+template = ["task/skeleton", "variants/alpha/seed/overlay"]
+surface = { files = ["answer.txt"], prefixes = ["app/", "k8s/"] }
+
+[authoring.inputs]
+"TODO.md" = "task/T1.PROMPT.md"
+"docs/project.md" = "variants/alpha/seed/T1.alpha.project_layout.md"
+"docs/alpha.md" = "variants/alpha/seed/any.alpha.api.md"
+
+[verify]
+reference = "variants/alpha/seed/reference/overlay"
+
+[infra]
+class = "variants.alpha:Alpha"
+lock = "alpha"
+lock_slots = 2
