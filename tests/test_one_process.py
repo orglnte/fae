@@ -324,15 +324,15 @@ class TestTheRunLoopTakesItsLocksAndProvisionsItsArm(unittest.TestCase):
         self.assertIn("self.setup(arena)", b)
         self.assertIn("self.teardown()", b)
 
-    def test_only_access_arms_take_an_arm_lock(self):
+    def test_only_a_variant_that_declares_a_lock_takes_one(self):
         from fae.cell.cell import Cell
         import tempfile
         with tempfile.TemporaryDirectory() as d:
-            for treatment, arm in (("alpha", "alpha"),
-                                   ("beta", None)):
+            for variant, lock in (("alpha_apidocs", "alpha"),
+                                  ("beta_apidocs", None)):
                 c = Cell("x", workspaces=Path(d), root=Path(d))
-                c._env["TREATMENT"] = treatment
-                self.assertEqual(c.arm, arm, treatment)
+                c._env["VARIANT"] = variant
+                self.assertEqual(c.arm, lock, variant)
 
 
 class TestBothImplementationsAreSpawnable(unittest.TestCase):

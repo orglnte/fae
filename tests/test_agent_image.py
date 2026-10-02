@@ -145,12 +145,12 @@ class TheLayer(unittest.TestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
         if layer:
             (d / "Dockerfile").write_text("ARG BASE\nFROM $BASE\n")
-        return type("V", (Variant,), {"TECH": "alpha", "ARM": "alpha_sealed",
+        return type("V", (Variant,), {"ID": "alpha_sealed",
                                       "AGENT_IMAGE_DIR": d if layer else None})
 
     def _def(self):
         from types import SimpleNamespace
-        return SimpleNamespace(name="mini")
+        return SimpleNamespace(name="mini", path=Path("/mini"))
 
     def test_a_current_layer_is_left_alone_and_a_new_base_rebuilds_it(self):
         from fae.cell import image as cimage
@@ -183,7 +183,7 @@ class TheLayer(unittest.TestCase):
                 mock.patch.object(image, "image_name", return_value="fae-agent:latest"), \
                 mock.patch.object(image, "rebuild", side_effect=lambda w, i: order.append("base") or 0), \
                 mock.patch.object(image, "ensure_current", side_effect=lambda i, log: order.append("clients") or True), \
-                mock.patch.object(image, "arm_layers", return_value=layers), \
+                mock.patch.object(image, "variant_layers", return_value=layers), \
                 mock.patch("fae.cell.image.for_agent", side_effect=lambda d, c, cls, r, log: order.append("layer")), \
                 mock.patch.object(image.common, "definition"), \
                 mock.patch("fae.cell.config.load"):

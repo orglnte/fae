@@ -1,4 +1,4 @@
-"""What the CURRENT run produced: completed cells grouped by treatment (green
+"""What the CURRENT run produced: completed cells grouped by variant (green
 rate + mean iterations-to-green) and the cells still working.
 
 The run boundary is `conduct.pid`'s mtime — the moment the live scheduler
@@ -35,7 +35,7 @@ def _parse_since(since: str | None) -> float | None:
 
 
 def collect(since: float | None) -> tuple[dict, list]:
-    """(completed_by_treatment, in_progress). A cell is completed-this-run if it
+    """(completed_by_variant, in_progress). A cell is completed-this-run if it
     is sealed and its seal landed at/after `since`; in-progress if a live loop
     marker is present and it is not yet sealed."""
     gate_n = common.definition().gate.arity
@@ -47,12 +47,12 @@ def collect(since: float | None) -> tuple[dict, list]:
         p = common.parse_cell_id(d.name)
         if not p:
             continue
-        model, treatment, _condition, _task, rep = p
+        model, variant, _task, rep = p
         sealed, loop = d / ".sealed", d / ".loop"
         if loop.exists() and not sealed.exists():
             L = ledger.parse(d, gate_n=gate_n)
             hb = state.heartbeat(d)
-            live.append((model, treatment, int(rep), L["att"],
+            live.append((model, variant, int(rep), L["att"],
                          (hb.get("phase") if hb else "") or "?"))
             continue
         if not sealed.exists():
@@ -60,7 +60,7 @@ def collect(since: float | None) -> tuple[dict, list]:
         if since is not None and sealed.stat().st_mtime < since:
             continue
         L = ledger.parse(d, gate_n=gate_n)
-        b = done[treatment]
+        b = done[variant]
         b["done"] += 1
         if L["verdict"] == "green":
             b["green"] += 1
@@ -90,13 +90,13 @@ def report(since: str | None = None) -> str:
         itg = f"{sum(b['itg']) / len(b['itg']):.1f}" if b["itg"] else "-"
         rows.append((trt, b["done"], b["green"], b["budget"], itg))
         tot_d += b["done"]; tot_g += b["green"]; tot_b += b["budget"]
-    out.append(_fmt(rows, ("TREATMENT", "DONE", "GREEN", "BUDGET", "MEAN-ITG"))
+    out.append(_fmt(rows, ("VARIANT", "DONE", "GREEN", "BUDGET", "MEAN-ITG"))
                if rows else "  (none)")
     out.append(f"  total: {tot_d} done ({tot_g} green, {tot_b} budget)")
     out.append(f"\n— IN PROGRESS ({len(live)}) —")
     lrows = [(m, t, f"r{r}", f"{a}/{common.ATTEMPT_BUDGET}", ph)
              for m, t, r, a, ph in sorted(live)]
-    out.append(_fmt(lrows, ("MODEL", "TREATMENT", "REP", "ATTEMPT", "PHASE"))
+    out.append(_fmt(lrows, ("MODEL", "VARIANT", "REP", "ATTEMPT", "PHASE"))
                if lrows else "  (none)")
     return "\n".join(out)
 

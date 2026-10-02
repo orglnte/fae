@@ -52,7 +52,7 @@ class Step:
 @dataclass
 class Ctx:
     root: Path
-    arms: tuple = ()
+    variants: tuple = ()
     task: str = "T1"
     static: bool = False
     _definition: object = field(default=None, repr=False)
@@ -70,7 +70,7 @@ class Ctx:
 
     def selected(self):
         d = self.definition()
-        return [a for a in d.matrix if not self.arms or a in self.arms]
+        return [v for v in d.active if not self.variants or v in self.variants]
 
 
 def _last_line(e):
@@ -130,21 +130,19 @@ def _config(ctx):
 
 def _definition(ctx):
     from fae.cell.verify import Verifier
+    from fae.cell.variants.files import DIR
     d = ctx.definition()
     out = []
     try:
-        arms = d.arms
-    except Exception as e:
-        return [Finding(False, f"variant_classes() raised {type(e).__name__}: {_last_line(e)}",
-                        "variant_classes() returns the Variant subclasses (HOWTO §3)")]
-    out.append(Finding(bool(arms), f"{len(arms)} variant(s): {', '.join(arms) or 'none'}",
-                       "variant_classes() must return at least one Variant subclass"))
-    for arm, conditions in d.matrix.items():
-        out.append(Finding(arm in arms, f"matrix arm {arm!r} has a variant",
-                           f"add {arm!r}'s class to variant_classes(), or drop it from MATRIX"))
-        out.append(Finding(bool(conditions), f"matrix arm {arm!r}: conditions {list(conditions)}",
-                           f"give {arm!r} at least one condition (MATRIX, or the "
-                           f"variant's CONDITIONS)"))
+        ids = d.ids
+    except Exception as e:      # a variant file that cannot be read is the finding
+        return [Finding(False, f"reading the variant files raised {type(e).__name__}: "
+                               f"{_last_line(e)}",
+                        f"fix the file it names ({DIR}/<id>.toml, HOWTO §5)")]
+    out.append(Finding(bool(d.active), f"{len(d.active)} active variant(s): "
+                                       f"{', '.join(d.active) or 'none'}"
+                       + (f"; {len(ids) - len(d.active)} retired" if len(ids) > len(d.active) else ""),
+                       f"write {d.path / DIR}/<id>.toml, one file per variant (HOWTO §5)"))
     try:
         v = d.verifier_class()
         dockerfile = Path(v.IMAGE_DIR or "") / "Dockerfile"
@@ -166,28 +164,25 @@ def _variants(ctx):
     from fae.cell.variants import liveness_declared
     d = ctx.definition()
     out = []
-    for arm in ctx.selected():
-        cls = d.variant(arm)
+    for vid in ctx.selected():
+        cls = d.variant(vid)
         if cls is None:
             continue
-        name = cls.__name__
-        out.append(Finding(bool(cls.TECH), f"{name}: TECH {cls.TECH!r}",
-                           f"set {name}.TECH: it names the seed docs"))
+        where = cls.SOURCE.name if cls.SOURCE else vid
         try:
-            exact, prefixes = authorable(arm)
-            out.append(Finding(True, f"{name}: authoring surface "
+            exact, prefixes = authorable(vid)
+            out.append(Finding(True, f"{vid}: authoring surface "
                                      f"{list(exact) + list(prefixes)}"))
         except RuntimeError as e:
             out.append(Finding(False, str(e),
-                               f"declare {name}.AUTHORING_SURFACE = ((files), (dir prefixes)): "
-                               f"what the agent may write"))
-        out.append(Finding(liveness_declared(cls), f"{name}: infra_alive probe",
-                           f"implement {name}.infra_alive(): asked before every "
-                           f"arrangement; the base answers dead"))
-        seed = cls.seed_root()
-        out.append(Finding(seed.is_dir(), f"{name}: seed tree {seed}",
-                           f"create {seed}/ with overlay/, the docs and reference/overlay/ "
-                           f"(HOWTO §5)"))
+                               f"declare [authoring] surface = {{ files = [...], prefixes = [...] }} "
+                               f"in {where}: what the agent may write"))
+        out.append(Finding(liveness_declared(cls), f"{vid}: an infra liveness probe",
+                           f"give {where} an [infra] class with infra_alive(), or a "
+                           f"[verify.run] image: asked before every arrangement"))
+        out.append(Finding("TODO.md" in cls.INPUTS, f"{vid}: TODO.md among its inputs",
+                           f"add \"TODO.md\" = \"task/<T>.PROMPT.md\" to [authoring.inputs] in "
+                           f"{where}: the engine's prompt tells the agent to read it"))
     return out
 
 
@@ -199,45 +194,50 @@ def _seeds(ctx):
     cfg = _cfg.load(ctx.root)
     out = []
     with tempfile.TemporaryDirectory(prefix="fae-check-") as tmp:
-        for arm in ctx.selected():
+        for vid in ctx.selected():
             try:
-                authorable(arm)
+                authorable(vid)
             except RuntimeError:
-                out.append(Finding(False, f"{arm}: not seeded, it has no authoring surface",
-                                   "declare it (the variants step names the class)"))
+                out.append(Finding(False, f"{vid}: not seeded, it has no authoring surface",
+                                   "declare it (the variants step names the file)"))
                 continue
-            for condition in [*d.matrix[arm], "reference"]:
-                cid = common.cell_id("check", arm, condition, 1, ctx.task)
+            cls = d.variant(vid)
+            for reference in (False, True):
+                if reference and cls.REFERENCE is None:
+                    continue
+                what = f"{vid}{' (reference)' if reference else ''}"
+                cid = common.cell_id("check", vid, 2 if reference else 1, ctx.task)
                 try:
-                    _prepare.prepare(cid, ctx.task, arm, condition, 1, workspaces=tmp,
-                                     root=ctx.root, cfg=cfg)
-                    out.append(Finding(True, f"{arm}/{condition} seeds"))
+                    _prepare.prepare(cid, ctx.task, vid, 1, workspaces=tmp, root=ctx.root,
+                                     reference=reference, cfg=cfg)
+                    out.append(Finding(True, f"{what} seeds"))
                 except (OSError, RuntimeError) as e:
-                    out.append(Finding(False, f"{arm}/{condition}: {_last_line(e)}",
-                                       "write the file it names (HOWTO §4 task, §5 seed); "
-                                       "a condition's api doc is also pinned in SEED_DOCS"))
+                    out.append(Finding(False, f"{what}: {_last_line(e)}",
+                                       "write the file or directory it names, or fix the "
+                                       "path in the variant file (HOWTO §4, §5)"))
     return out
 
 
 def _infra(ctx):
     from fae.driver import rig
-    bad = rig._probe_arms(ctx.selected())
-    return [Finding(not bad, "every arm's infra and verify image" if not bad
-                    else f"{bad} arm(s) refused this host (the lines above name why)",
-                    "fix what the refused arm's line names; then "
+    bad = rig._probe_variants(ctx.selected())
+    return [Finding(not bad, "every variant's infra and verify image" if not bad
+                    else f"{bad} variant(s) refused this host (the lines above name why)",
+                    "fix what the refused variant's line names; then "
                     "python3 cli.py experiment infra")]
 
 
 def _pipeline(ctx):
     from fae.driver import rig
     try:
-        rig.smoke(SimpleNamespace(arms=",".join(ctx.selected()), only="", rep=1,
-                                  full_gate=False))
+        rig.smoke(SimpleNamespace(variants=",".join(v for v in rig.smoke_variants()
+                                                    if v in ctx.selected()),
+                                  only="", rep=1, full_gate=False))
         rc = 0
     except SystemExit as e:
         rc = e.code if isinstance(e.code, int) else 1
-    return [Finding(rc == 0, "every arm's reference is green through the gate",
-                    "read the VERDICT line of the failing arm and the log it names")]
+    return [Finding(rc == 0, "every variant's reference is green through the gate",
+                    "read the VERDICT line of the failing variant and the log it names")]
 
 
 STEPS = (
@@ -249,37 +249,37 @@ STEPS = (
          "fae.toml is machine-local and says where the experiment is; the engine\n"
          "loads that directory's __init__.py as the experiment's definition.",
          "§3, §7", _config, needs=("host",)),
-    Step("definition", "What the definition declares",
-         "The arms (variant classes), the matrix of arms × conditions, the\n"
-         "verifier and the image it runs in, and the gate every attempt must pass.",
+    Step("definition", "What the experiment declares",
+         "Its variants (one file each under variants/), the verifier and the\n"
+         "image it runs in, and the gate every attempt must pass.",
          "§3, §6", _definition, needs=("config",)),
     Step("variants", "Each variant",
-         "What the agent may write (AUTHORING_SURFACE), how the engine tells the\n"
-         "infra is alive, and the seed tree the agent starts from.",
+         "What the agent may write ([authoring] surface), how the engine tells\n"
+         "its infra is alive, and that the agent is handed TODO.md.",
          "§5", _variants, needs=("definition",)),
-    Step("seeds", "Seeding every cell of the matrix",
-         "Prepares each arm × condition, and each arm's reference, into a\n"
-         "throwaway workspace root: the same prepare() a real cell runs.",
+    Step("seeds", "Seeding every variant",
+         "Prepares each variant, and its reference, into a throwaway\n"
+         "workspace root: the same prepare() a real cell runs.",
          "§4, §5", _seeds, needs=("definition",)),
     Step("docker", "The docker daemon",
          "Every agent, verifier and program under test runs in a container of\n"
          "this daemon.",
          "§1", _docker, docker=True),
-    Step("infra", "This host can carry each arm",
+    Step("infra", "This host can carry each variant",
          "Each variant's own preflight (infra_ok) and the verify image,\n"
          "built now if missing, so no cell pays for the build.",
          "§7", _infra, needs=("seeds", "docker"), docker=True),
     Step("pipeline", "The reference passes the gate",
-         "One reference cell per arm, no agent, one arrangement: proves the\n"
-         "verifier judges the known answer green before any agent runs.",
+         "One reference cell per way of judging, no agent, one arrangement:\n"
+         "proves the verifier judges the known answer green before any agent runs.",
          "§8", _pipeline, needs=("infra",), docker=True, opt_in="--smoke"),
 )
 
 NEXT = (
     ("the reference, every arrangement", "python3 cli.py experiment smoke --full-gate"),
     ("a scripted agent (fail, then green)",
-     "TESTAGENT_PLAN=fail,green python3 cli.py cell spawn testagent <arm> <condition> --rep 1"),
-    ("one real agent", "python3 cli.py cell spawn <model> <arm> <condition> --rep 1"),
+     "TESTAGENT_PLAN=fail,green python3 cli.py cell spawn testagent <variant> --rep 1"),
+    ("one real agent", "python3 cli.py cell spawn <model> <variant> --rep 1"),
     ("the fleet", "python3 cli.py conduct queue-add <model> --matrix --reps 3 && "
                   "python3 cli.py conduct run -n 2 --per-model 1"),
 )
@@ -367,6 +367,6 @@ def main(args):
     if args.walk and not sys.stdin.isatty():
         sys.exit("check: --walk asks before each step and needs a terminal; "
                  "run without --walk for the checklist")
-    ctx = Ctx(root=common.ROOT, arms=tuple(a for a in (args.arms or "").split(",") if a),
+    ctx = Ctx(root=common.ROOT, variants=tuple(v for v in (args.variants or "").split(",") if v),
               task=args.task, static=args.static)
     sys.exit(run(ctx, walk=args.walk, smoke=args.smoke))

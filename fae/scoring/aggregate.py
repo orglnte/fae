@@ -4,9 +4,8 @@
 Reads workspaces.nosync/*/score.json (produced by score_cell.py) and writes:
     workspaces.nosync/results.csv   — one row per cell (flat; open in any tool)
     workspaces.nosync/results.json  — the same rows + a summary block with the
-                            cold->warm delta per treatment per metric, the
-                            treatment gap per condition, and the failure-class
-                            distribution.
+                            metrics per model and variant, the failure-class
+                            distribution, and what the experiment adds.
 
 Stdlib only. Usage:  python3 fae/scoring/aggregate.py
 """
@@ -30,11 +29,11 @@ OUT_JSON = WORKSPACES / "results.json"
 
 # Width of the LoC mean sub-field, so the -min/+max offsets that follow it start
 # at the same character on every row. 4 = the largest mean the corpus produces
-# (~1700 lines); widen it if an arm ever exceeds 9999.
+# (~1700 lines); widen it if a variant ever exceeds 9999.
 LOC_MEAN_W = 4
 
 CSV_COLUMNS = [
-    "cell_id", "model", "task", "treatment", "condition", "impl", "repeat", "doc_lines",
+    "cell_id", "model", "task", "variant", "factors", "impl", "repeat",
     "consistency_defect_count", "first_pass_correct", "correctness_tier",
     "deploy_ok", "e2e_pass", "e2e_total", "e2e_green",
     "load_errors", "load_total", "k6_available", "verify_stage_failed",
@@ -162,20 +161,27 @@ def impl_of(ws: Path) -> str:
     return "bash"
 
 
-def filter_cells(cells: list[dict], condition: str | None = None,
-                 impl: str | None = None) -> tuple[list[dict], list[str]]:
+def filter_cells(cells: list[dict], variant: str | None = None,
+                 impl: str | None = None, where: dict | None = None) -> tuple[list[dict], list[str]]:
     """The scoreboard's cuts, each announced: a filtered table must never be
-    mistaken for the full corpus."""
+    mistaken for the full corpus. `where` is {factor: level}."""
     banners = []
-    for field, want in (("condition", condition), ("impl", impl)):
+    cuts = [("variant", variant, lambda c, w: c.get("variant") == w),
+            ("impl", impl, lambda c, w: c.get("impl") == w)]
+    cuts += [(f"factor {k}", v, lambda c, w, k=k: (c.get("factors") or {}).get(k) == w)
+             for k, v in sorted((where or {}).items())]
+    for label, want, keep in cuts:
         if want is None:
             continue
         total = len(cells)
-        cells = [c for c in cells if c.get(field) == want]
-        label = "condition" if field == "condition" else "impl"
+        cells = [c for c in cells if keep(c, want)]
         banners.append(f"FILTERED: {label} '{want}' only — showing "
                        f"{len(cells)} of {total} scored cell(s)")
     return cells, banners
+
+
+def factors_text(factors) -> str:
+    return ";".join(f"{k}={v}" for k, v in sorted((factors or {}).items()))
 
 
 def flat_row(c: dict) -> dict:
@@ -184,11 +190,10 @@ def flat_row(c: dict) -> dict:
         "cell_id": c.get("cell_id"),
         "model": c.get("model"),
         "task": c.get("task"),
-        "treatment": c.get("treatment"),
-        "condition": c.get("condition"),
+        "variant": c.get("variant"),
+        "factors": factors_text(c.get("factors")),
         "impl": c.get("impl"),
         "repeat": c.get("repeat"),
-        "doc_lines": c.get("doc_lines"),
         "consistency_defect_count": c.get("consistency_defect_count"),
         "first_pass_correct": c.get("first_pass_correct"),
         "correctness_tier": c.get("correctness_tier"),
@@ -425,14 +430,14 @@ def significance_grade(p: float | None) -> str:
     return "not sig"
 
 
-def baseline_compare(by_mtc: dict, base_mtc: dict) -> dict:
+def baseline_compare(by_mv: dict, base_mv: dict) -> dict:
     """Per row of the cut table, the same row in the baseline population:
     its n, green rate and mean ITG, the cut minus the baseline, and a
     Fisher's exact p-value on the green/non-green 2x2 table. A row with no
     baseline compares to nothing."""
     out = {}
-    for key, m in by_mtc.items():
-        b = base_mtc.get(key)
+    for key, m in by_mv.items():
+        b = base_mv.get(key)
         if not b:
             out[key] = None
             continue
@@ -474,7 +479,7 @@ def format_compare(b: dict | None) -> tuple[str, str, str]:
     return (grn, itgf, sig)
 
 
-def order_rows(by_mtc: dict, compare: dict | None, sort_discrepancy: bool = False,
+def order_rows(by_mv: dict, compare: dict | None, sort_discrepancy: bool = False,
                sort_significant: bool = False) -> list[tuple[str, dict]]:
     """The rows to print, in print order. Default is group_and_rank's own
     order (best green first, within each model).
@@ -492,7 +497,7 @@ def order_rows(by_mtc: dict, compare: dict | None, sort_discrepancy: bool = Fals
 
     A row with no baseline sorts last under every mode; extracted so the
     ranking rules can be tested without a live corpus."""
-    rows = list(by_mtc.items())
+    rows = list(by_mv.items())
     if compare is None or not (sort_discrepancy or sort_significant):
         return rows
 
@@ -548,11 +553,10 @@ def format_agent_time(m: dict) -> tuple[str, str]:
     return total, "-" if per is None else f"{per / 60:.1f}"
 
 
-def table_columns(cond_col: bool, vs: str | None) -> list[tuple[str, int]]:
+def table_columns(vs: str | None) -> list[tuple[str, int]]:
     """(header, width) per column, in print order. The LoC column must fit
     format_loc's widest value or the columns after it walk left."""
-    return ([("MODEL", 16), ("TREATMENT", 16)]
-            + ([("COND", 8)] if cond_col else [])
+    return ([("MODEL", 16), ("VARIANT", 24)]
             + [("REPS", 4), ("E2E", 5), ("GREEN", 5), ("ITG mn/avg/mx", 14),
                ("MIN mn/avg/mx", 17), ("MIN/ATT", 7),
                ("SLoC avg -mn/+mx", LOC_MEAN_W + len("   -9999/+9999"))]
@@ -577,20 +581,9 @@ def _pooled_models():
 
 def experiment_summary(cells, metrics):
     """The summary entries the experiment's definition adds (`report_summary`:
-    its gaps between arms, its notes), computed with this module's per-group
+    its gaps between variants, its notes), computed with this module's per-group
     metrics and None-safe delta so its numbers are the table's."""
     return _definition().report_summary(cells, cell_metrics, delta, list(metrics))
-
-
-def arm_label(arm):
-    """The name a reader sees for an arm: its family's LABEL, plus which of a
-    pair it is (`x_sealed`, `x_access`); the arm id when it declares none.
-    Display only: records and results.csv keep the id."""
-    cls = _definition().variant(arm) if arm else None
-    label = getattr(cls, "LABEL", "") if cls else ""
-    if not label:
-        return arm
-    return f"{label} {arm.rsplit('_', 1)[1]}" if "_" in arm else label
 
 
 POOLED_MODELS = _pooled_models()
@@ -602,44 +595,34 @@ def pooled_model(model_id):
 
 
 def group_and_rank(cells: list[dict]) -> dict:
-    """cells -> {"<model> / <treatment>/<condition>": metrics}, ranked.
+    """cells -> {"<model> / <variant>": metrics}, ranked.
 
     Grouped by MODEL, then BEST FIRST within that model: green rate
-    descending, then mean iterations-to-green ascending. The previous order
-    was alphabetical by treatment, which says nothing — a reader comparing two
-    arms of one model had to do it by eye. Ranked, the contrast the experiment
-    is about is the first row under each model.
-
-    Arms with NO green cell have mean_itg None and sort LAST within their
-    model. Treating None as zero would rank them best, which is backwards.
-
-    Extracted from main() so the ordering can be tested: it is a presentation
-    rule that changes what a reader concludes first, which makes it worth
-    pinning rather than leaving inline.
+    descending, then mean iterations-to-green ascending, so the contrast the
+    experiment is about is the first row under each model. A variant with NO
+    green cell has mean_itg None and sorts LAST within its model; treating
+    None as zero would rank it best, which is backwards.
     """
-    groups: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
+    groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for c in cells:
-        groups[(pooled_model(c.get("model", "unknown")), c.get("treatment"),
-                c.get("condition"))].append(c)
+        groups[(pooled_model(c.get("model", "unknown")), c.get("variant"))].append(c)
 
     scored = {}
     for key, cs in groups.items():
         m = cell_metrics(cs)
         m["failure_class_counts"] = failure_class_counts(cs)
-        m["mean_doc_lines"] = mean([c.get("doc_lines") for c in cs])
         scored[key] = m
 
     def rank(kv):
-        (mod, trt, cond), m = kv
+        (mod, var), m = kv
         gr = m.get("green_rate")
         itg = m.get("mean_iterations_to_green")
         return (str(mod),
                 -(gr if gr is not None else 0.0),          # best green first
                 itg if itg is not None else float("inf"),  # then fastest
-                str(trt), str(cond))                       # stable tie-break
+                str(var))                                  # stable tie-break
 
-    return {f"{mod} / {trt}/{cond}": m
-            for (mod, trt, cond), m in sorted(scored.items(), key=rank)}
+    return {f"{mod} / {var}": m for (mod, var), m in sorted(scored.items(), key=rank)}
 
 
 def taint_report(excluded, kept, details):
@@ -686,24 +669,30 @@ def main() -> int:
         print(line)
     if not excluded and include_tainted:
         print("NOTE: --include-tainted given; no tainted cell was found")
-    # --condition NAME restricts the whole scoreboard (table + CSV) to one
-    # information condition; --impl fae|py|bash to one cell driver.
-    condition = impl = None
-    if "--condition" in sys.argv:
-        condition = sys.argv[sys.argv.index("--condition") + 1]
+    # --variant ID restricts the whole scoreboard (table + CSV) to one
+    # variant, --where FACTOR=LEVEL (repeatable) to the variants that are that
+    # level of a factor, --impl to one cell driver.
+    variant = impl = None
+    where = {}
+    if "--variant" in sys.argv:
+        variant = sys.argv[sys.argv.index("--variant") + 1]
     if "--impl" in sys.argv:
         impl = sys.argv[sys.argv.index("--impl") + 1]
+    for i, a in enumerate(sys.argv):
+        if a == "--where" and i + 1 < len(sys.argv) and "=" in sys.argv[i + 1]:
+            k, v = sys.argv[i + 1].split("=", 1)
+            where[k] = v
     all_cells = cells
-    cells, banners = filter_cells(cells, condition, impl)
+    cells, banners = filter_cells(cells, variant, impl, where)
     for b in banners:
         print(b)
     rows = [flat_row(c) for c in cells]
-    # --impl cuts to one driver; its predecessor's cells on the same condition
-    # are the baseline every row is compared against: fae vs py, py vs bash.
+    # --impl cuts to one driver; its predecessor's cells under the same cuts
+    # are the baseline every row is compared against.
     compare, other = None, None
     if impl:
         other = PREVIOUS_IMPL.get(impl, "py")
-        base, _ = filter_cells(all_cells, condition, other)
+        base, _ = filter_cells(all_cells, variant, other, where)
         compare = baseline_compare(group_and_rank(cells), group_and_rank(base))
 
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
@@ -712,8 +701,7 @@ def main() -> int:
         w.writeheader()
         w.writerows(rows)
 
-    # group by (model, treatment, condition)
-    by_mtc = group_and_rank(cells)
+    by_mv = group_and_rank(cells)
 
     metrics = ["mean_consistency_defects", "first_pass_correct_rate",
                "e2e_green_rate", "green_rate", "revoked_rate",
@@ -743,10 +731,10 @@ def main() -> int:
             "single_grader": len(graders) <= 1,
         },
         "cells_missing_grading": sum(1 for c in cells if c.get("grading_missing")),
-        "by_model_treatment_condition": by_mtc,
-        "baseline": ({"impl": other, "delta_by_model_treatment_condition": compare}
+        "by_model_variant": by_mv,
+        "baseline": ({"impl": other, "delta_by_model_variant": compare}
                      if compare is not None else None),
-        # the gaps between arms and the reading notes are the experiment's
+        # the gaps between variants and the reading notes are the experiment's
         **experiment_summary(cells, metrics),
         "cells_missing_defects": sum(1 for c in cells if c.get("consistency_defect_count") is None)
     }
@@ -760,9 +748,7 @@ def main() -> int:
     if missing_defects:
         print(f"[WARN] {missing_defects} cell(s) missing defects.json. LLM-graded metrics are excluded from averages; auto-metrics (Green, ITG, LoC) are included.")
     
-    # One condition on a filtered table is a constant; drop the column.
-    cond_col = condition is None
-    cols = table_columns(cond_col, other if compare is not None else None)
+    cols = table_columns(other if compare is not None else None)
     width = sum(w for _, w in cols) + 3 * (len(cols) - 1)
     if compare is not None:
         print(f"\nVS baseline: impl={other}")
@@ -772,11 +758,11 @@ def main() -> int:
         flag = "--sort-discrepancy" if sort_discrepancy else "--sort-significant"
         print(f"NOTE: {flag} has no effect without --impl "
               "(there is no baseline to diverge from)")
-    rows_to_print = order_rows(by_mtc, compare, sort_discrepancy, sort_significant)
+    rows_to_print = order_rows(by_mv, compare, sort_discrepancy, sort_significant)
     print("\n" + "=" * width)
     print(" | ".join(f"{h:<{w}}" for h, w in cols))
     print("-" * width)
-    for mtc, m in rows_to_print:
+    for key, m in rows_to_print:
         n = m.get("n_cells", 0)
         e2e = f"{m.get('mean_e2e_pass_rate', 0):.0%}" if m.get('mean_e2e_pass_rate') is not None else "-"
         grn = f"{m.get('green_rate', 0):.0%}" if m.get('green_rate') is not None else "-"
@@ -797,13 +783,10 @@ def main() -> int:
         lines = format_loc(m.get('mean_sloc'), m.get('min_sloc'), m.get('max_sloc'))
         agent_min, per_att = format_agent_time(m)
         
-        # Split the key back into its parts
-        mod, rest = mtc.split(" / ", 1)
-        trt, cond = rest.split("/", 1)
-        
-        vals = [short_model(mod), arm_label(trt)] + ([cond] if cond_col else []) \
+        mod, var = key.split(" / ", 1)
+        vals = [short_model(mod), var] \
             + [str(n), e2e, grn, itg, agent_min, per_att, lines] \
-            + (list(format_compare(compare.get(mtc))) if compare is not None else [])
+            + (list(format_compare(compare.get(key))) if compare is not None else [])
         print(" | ".join(f"{v:<{w}}" for v, (_, w) in zip(vals, cols)))
 
     print("=" * width)

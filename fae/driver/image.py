@@ -152,13 +152,14 @@ def ensure_current(img=None, log=print):
     return True
 
 
-def arm_layers():
-    """{tag: variant class}: one agent layer per arm family in the matrix."""
+def variant_layers():
+    """{tag: variant class}: one agent layer per tools directory the active
+    variants name."""
     from fae.cell import image as _image
     d = common.definition()
     out = {}
-    for arm in d.matrix:
-        cls = d.variant(arm)
+    for vid in d.active:
+        cls = d.variant(vid)
         if cls is not None and cls.AGENT_IMAGE_DIR:
             out.setdefault(_image.agent_tag(d, common.ROOT, cls), cls)
     return out
@@ -182,7 +183,7 @@ def ensure_agent(log=print):
     if not ensure_current(base, log):
         return False
     conf = _config.load(common.ROOT)
-    for tag, cls in arm_layers().items():
+    for tag, cls in variant_layers().items():
         try:
             _image.for_agent(common.definition(), conf, cls, common.ROOT, log=log)
         except RuntimeError as e:
@@ -192,9 +193,10 @@ def ensure_agent(log=print):
     return True
 
 
-def ensure_agent_for(arm, log=print):
-    """The image a cell of `arm` runs its agent in, ready: the base (built
-    when missing), then the arm's layer over it. False when a build failed."""
+def ensure_agent_for(variant, log=print):
+    """The image a cell of `variant` runs its agent in, ready: the base
+    (built when missing), then the variant's layer over it. False when a
+    build failed."""
     from fae.cell import config as _config
     from fae.cell import image as _image
     base = image_name()
@@ -203,14 +205,14 @@ def ensure_agent_for(arm, log=print):
         if rebuild({}, base) != 0:
             log(f"agent image build FAILED: {base}")
             return False
-    cls = common.definition().variant(arm)
+    cls = common.definition().variant(variant)
     if cls is None or not cls.AGENT_IMAGE_DIR:
         return True
     try:
         _image.for_agent(common.definition(), _config.load(common.ROOT), cls,
                          common.ROOT, log=log)
     except RuntimeError as e:
-        log(f"agent layer for {arm}: {e}")
+        log(f"agent layer for {variant}: {e}")
         return False
     return True
 
@@ -225,6 +227,6 @@ def report(img=None):
         mark = "BEHIND" if t in behind else ("ok" if have.get(t) else "?")
         print(f"  {t:9} installed {have.get(t, '-'):10} latest {want.get(t, '?'):10} {mark}")
     from fae.cell import image as _image
-    for layer in arm_layers():
+    for layer in variant_layers():
         print(f"  layer     {layer:32} {'present' if _image.present(layer) else 'MISSING'}")
     return stale(have, want)

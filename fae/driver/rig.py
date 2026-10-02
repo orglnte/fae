@@ -2,7 +2,7 @@
 
 selftest (cross-language invariants + TLA+ live-trace conformance), the
 zombie-reap CLI wrapper, trace-reset (transitions.log archive/reseed),
-infra (per-arm preflight), smoke (pipeline check through the driver,
+infra (per-variant preflight), smoke (pipeline check through the driver,
 no agent) and prepare (seed the matrix's workspaces, launch nothing) — the
 verbs the plan's Milestone 2 clusters left in runs.py because none of them
 are entangled with the scheduler/backlog/scoring clusters; each is a
@@ -38,17 +38,6 @@ def tla_verify_path():
     None when neither names a file."""
     p = os.environ.get("FAE_TLA_VERIFY") or shutil.which("tla_verify")
     return p if p and Path(p).is_file() else None
-
-
-def resolve_seed_doc(treatment, condition):
-    """The doc fae/cell/prepare.py would actually seed, by the same rule it uses."""
-    cls = common.definition().variant(treatment)
-    if cls is None:
-        return None
-    docs = common.definition().docs_of(treatment)
-    seed = cls.seed_root()
-    specific = seed / f"any.{docs}.{condition}.api.md"
-    return specific if specific.is_file() else seed / f"any.{docs}.api.md"
 
 
 from fae import paths as _paths  # noqa: E402
@@ -101,16 +90,12 @@ def selftest(args):
     for mod, names in ((_rig, ("fp", "free_port_from")),
                        (_verify, ("run_verifier", "call", "run_in_thread")),
                        (mutex, ("pause_requested", "open_lock", "try_fd", "wait_fds")),
-                       (_prep, ("prepare", "seed_skeleton", "safe_wipe")),
+                       (_prep, ("prepare", "seed", "safe_wipe")),
                        (_config, ("load", "opencode_key_file", "stage_agent"))):
         for name in names:
             if not callable(getattr(mod, name, None)):
                 print(f"FAIL critical harness function missing: "
                       f"{getattr(mod, '__name__', mod)}.{name}"); fails += 1
-    minted_or_retired = set(common.definition().matrix) | set(common.definition().retired)
-    if set(_tr.registry()) != minted_or_retired:
-        print(f"FAIL the variant registry knows {sorted(_tr.registry())}, the matrix "
-              f"and RETIRED have {sorted(minted_or_retired)}"); fails += 1
     # EFFORT/SMOKE: fae/driver/common.py's cell_id() defaults to effort="high",
     # smoke=False, and every internal caller (ops.spawn, queue.enqueue,
     # render.queued_summary) leaves those defaults alone, while the driver
@@ -134,31 +119,13 @@ def selftest(args):
     _selftest = common.definition().verbs.get("selftest")
     for f in (_selftest(common.WS) if _selftest else []):
         print(f"FAIL {f}"); fails += 1
-    # Seed docs ARE the independent variable. The prepare falls back to the
-    # arm's base doc without complaint when a condition doc is missing, so a
-    # deleted/renamed file silently changes a cell's information condition, and
-    # a truncated one changes it with no filename change at all.
-    for (treatment, condition), (want_name, min_lines) in sorted(common.definition().seed_docs.items()):
-        got = resolve_seed_doc(treatment, condition)
-        if got is None or not got.is_file():
-            print(f"FAIL seed doc missing for {treatment}/{condition}: "
-                  f"expected {want_name}"); fails += 1
-            continue
-        if got.name != want_name:
-            print(f"FAIL seed doc for {treatment}/{condition} resolved to "
-                  f"{got.name}, expected {want_name} — a missing condition doc "
-                  f"falls back to the base doc SILENTLY"); fails += 1
-            continue
-        n = len(got.read_text(errors="replace").splitlines())
-        if n < min_lines:
-            print(f"FAIL seed doc {got.name} for {treatment}/{condition} is "
-                  f"{n} lines, below the {min_lines} floor (truncated?)")
-            fails += 1
-    for treatment, conditions in common.definition().matrix.items():
-        for condition in conditions:
-            if (treatment, condition) not in common.definition().seed_docs:
-                print(f"FAIL matrix has {treatment}/{condition} but "
-                      f"SEED_DOCS does not pin its doc"); fails += 1
+    # What a variant hands the agent is the independent variable: a missing
+    # template directory or input file, or an input the template also
+    # provides, changes it.
+    from fae.cell.variants import files as _files
+    for vid, cls in sorted(_tr.registry().items()):
+        for problem in _files.problems(cls):
+            print(f"FAIL variant {vid}: {problem}"); fails += 1
     for ws in sorted(common.WS.iterdir()):
         if not ws.is_dir() or not parse_cell_id(ws.name):
             continue
@@ -399,45 +366,45 @@ def trace_reset(args):
             print(f"  {c['cid']} (loop={c['loop']})")
 
 
-def _authorable_error(arm):
+def _authorable_error(vid):
     from fae.cell.surface import authorable
     try:
-        authorable(arm)
+        authorable(vid)
     except RuntimeError as e:
         return str(e)
     return ""
 
 
 def infra(args):
-    """Can this host carry each arm? Every arm's infra preflight
-    (<Variant>.infra_ok — the check a cell makes before every attempt)
-    and its verify image (built when missing), then a sweep of stale
-    infra. Nothing per cell is created here. Exit 1 if any arm is
+    """Can this host carry each variant? Every active variant's infra
+    preflight (<Variant>.infra_ok — the check a cell makes before every
+    attempt) and its verify image (built when missing), then a sweep of
+    stale infra. Nothing per cell is created here. Exit 1 if any variant is
     refused."""
-    bad = _probe_arms()
+    bad = _probe_variants()
     sys.path.insert(0, str(ROOT))
     from fae.cell import variants as _tr
     for cls in _tr.registry().values():
         cls.sweep()
     if bad:
-        sys.exit(f"infra: {bad} arm(s) refused — see hooks.log lines above")
+        sys.exit(f"infra: {bad} variant(s) refused — see hooks.log lines above")
 
 
-def _probe_arms(arms=None):
-    """Every arm's own preflight (its infra_ok: the daemon, the tools)
+def _probe_variants(variants=None):
+    """Every variant's own preflight (its infra_ok: the daemon, the tools)
     and the image its cells are verified in, built here when missing —
     printed one per line; the count refused."""
     sys.path.insert(0, str(ROOT))
     from fae.cell import variants as _tr
     bad = 0
-    for arm in sorted(arms or _tr.registry()):
-        cell = _tr._ShimCell(f"infra-probe-{arm}", "/nonexistent", ROOT)
-        cell.treatment = arm
+    for vid in sorted(variants or common.definition().active):
+        cell = _tr._ShimCell(f"infra-probe-{vid}", "/nonexistent", ROOT)
+        cell.variant = vid
         variant = _tr.for_cell(cell)
         ok, note = True, ""
         if not _tr.liveness_declared(type(variant)):
             ok, note = False, f"{type(variant).__name__} declares no infra_alive probe"
-        elif (undeclared := _authorable_error(arm)):
+        elif (undeclared := _authorable_error(vid)):
             ok, note = False, undeclared
         elif not variant.infra_ok():
             ok = False
@@ -446,7 +413,7 @@ def _probe_arms(arms=None):
                 note = variant.image()
             except RuntimeError as e:
                 ok, note = False, f"verify image: {str(e).splitlines()[0]}"
-        print(f"  [{'ok' if ok else 'HALT'}] {arm}  {note}")
+        print(f"  [{'ok' if ok else 'HALT'}] {vid}  {note}")
         bad += not ok
     return bad
 
@@ -488,41 +455,61 @@ def _smoke_classify(ws):
     return False, where.get(stage, f"NOT GREEN (stage={stage or '?'}). See {ws}/verify.log")
 
 
-def _reference_cell(cid, arm, rep, workspaces):
-    """A Cell over a REFERENCE workspace (the arm's seed plus its reference
-    overlay, no agent), constructed only: prepare() seeds it."""
+def _reference_cell(cid, vid, rep, workspaces):
+    """A Cell over a REFERENCE workspace (the variant's template and inputs
+    with its known answer laid over, no agent), constructed only: prepare()
+    seeds it."""
     from fae.cell import Cell
     c = Cell(cid, workspaces=workspaces, root=ROOT)
-    for key, value in (("TASK", "T1"), ("TREATMENT", arm),
-                       ("CONDITION", "reference"), ("REPEAT", str(rep))):
+    for key, value in (("TASK", "T1"), ("VARIANT", vid), ("REFERENCE", "1"),
+                       ("REPEAT", str(rep))):
         c._env.setdefault(key, value)
     return c
 
 
+def smoke_variants():
+    """One active variant per distinct way of being judged: variants that
+    differ only in what the agent reads share a reference, a run, an infra
+    and a verify image, so one smoke covers them all."""
+    out, seen = [], set()
+    d = common.definition()
+    for vid in d.active:
+        cls = d.variant(vid)
+        key = (str(cls.REFERENCE), repr(sorted(cls.RUN.items())), cls.__bases__,
+               cls.ACCESS_INFRA, repr(sorted(cls.PARAMS.items())), str(cls.IMAGE_DIR),
+               cls.LOCK)
+        if key not in seen:
+            seen.add(key)
+            out.append(vid)
+    return out
+
+
 def smoke(args):
-    """Pipeline check, NOT a scored run: one REFERENCE cell per arm through
-    the driver's own entrypoint — prepare fresh (reference overlay seeded),
-    then `python3 -m fae.cell T1 <arm> reference <rep> --stub <empty>`:
-    no agent, one attempt, the gate. Exercises the bring-ups, the contract,
-    the probes and the sampler exactly as a scored cell would.
+    """Pipeline check, NOT a scored run: one REFERENCE cell per variant
+    through the driver's own entrypoint — prepare fresh (the reference laid
+    over the template), then `python3 -m fae.cell T1 <variant> <rep> --stub
+    <empty>`: no agent, one attempt, the gate. Exercises the bring-ups, the
+    contract, the probes and the sampler exactly as a scored cell would.
 
     Cells are tagged ref_high_smoke_* and live in ws-test.nosync, so nothing
-    under the scored tree is touched. One canonical arrangement per arm by
-    default (a pipeline check); --full-gate runs all six. Exit 0 iff every
-    arm is green; the per-arm verdict names the log to read.
+    under the scored tree is touched. Without --variants, one variant per
+    distinct way of being judged (smoke_variants). One canonical arrangement
+    per variant by default (a pipeline check); --full-gate runs the whole
+    gate. Exit 0 iff every variant is green; the per-variant verdict names
+    the log to read.
     """
-    arms = [a for a in (args.arms.split(",") if args.arms else common.definition().arms)
-            if not args.only or args.only in a]
-    if not arms:
-        sys.exit(f"smoke: no arm matches --only {args.only!r}")
+    variants = [v for v in (args.variants.split(",") if args.variants else smoke_variants())
+                if not args.only or args.only in v]
+    if not variants:
+        sys.exit(f"smoke: no variant matches --only {args.only!r}")
     print("=== SMOKE MODE: model=ref — pipeline check, NOT a scored run "
           f"(cells tagged ref_high_smoke_*, in {SMOKE_WORKSPACES.name}) ===")
-    # each arm's own preflight, so a missing daemon, tool or image is named
-    # before any infra is spent
-    if _probe_arms(arms):
-        sys.exit("SMOKE ABORTED: an arm refused this host — see hooks.log lines above")
+    # each variant's own preflight, so a missing daemon, tool or image is
+    # named before any infra is spent
+    if _probe_variants(variants):
+        sys.exit("SMOKE ABORTED: a variant refused this host — see hooks.log lines above")
     env = dict(os.environ, WORKSPACES_DIR=str(SMOKE_WORKSPACES), MODEL="ref",
-               SMOKE="1", CONDITION="reference",
+               SMOKE="1", REFERENCE="1",
                PYTHONPATH=str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH", ""))
     env.setdefault("EFFORT", "high")
     if not args.full_gate:
@@ -532,37 +519,36 @@ def smoke(args):
         env["SHAPE_GATE"] = "one"
     empty = Path(tempfile.mkdtemp(prefix="stub-empty-"))
     results = []
-    for arm in arms:
-        cid = cell_id("ref", arm, "reference", args.rep, "T1",
-                      effort=env["EFFORT"], smoke=True)
+    for vid in variants:
+        cid = cell_id("ref", vid, args.rep, "T1", effort=env["EFFORT"], smoke=True)
         print(f"\n=== CELL {cid} — prepare -> verify", flush=True)
         t0 = time.time()
         try:
             verbs = common.definition().verbs
-            c = (verbs["reference_cell"](cid, arm, args.rep, SMOKE_WORKSPACES)
+            c = (verbs["reference_cell"](cid, vid, args.rep, SMOKE_WORKSPACES)
                  if "reference_cell" in verbs else
-                 _reference_cell(cid, arm, args.rep, SMOKE_WORKSPACES))
+                 _reference_cell(cid, vid, args.rep, SMOKE_WORKSPACES))
             c.prepare(fresh=True)
         except (OSError, RuntimeError, FileNotFoundError) as e:
             print(f"    VERDICT: PREPARE FAILED — {e}")
-            results.append((arm, False, f"PREPARE FAILED — {e}"))
+            results.append((vid, False, f"PREPARE FAILED — {e}"))
             continue
         print(f"  prepared: {c.ws}", flush=True)
-        p = subprocess.run(ops._cell_argv("T1", arm, "reference", args.rep)
+        p = subprocess.run(ops._cell_argv("T1", vid, args.rep)
                            + ["--stub", str(empty)], cwd=str(ROOT), env=env)
         green, verdict = _smoke_classify(c.ws)
         green = green and p.returncode == 0
         if p.returncode != 0:
             verdict += f" [driver rc={p.returncode}]"
         print(f"    VERDICT: {verdict}  ({time.time() - t0:.0f}s)", flush=True)
-        results.append((arm, green, verdict))
+        results.append((vid, green, verdict))
     print("\n=== SMOKE SUMMARY ===")
-    for arm, green, verdict in results:
-        print(f"  {'ok  ' if green else 'FAIL'} {arm:14s} {verdict}")
+    for vid, green, verdict in results:
+        print(f"  {'ok  ' if green else 'FAIL'} {vid:24s} {verdict}")
     if all(g for _, g, _ in results):
-        print("  PIPELINE OK on every arm.")
+        print("  PIPELINE OK on every variant.")
         sys.exit(0)
-    print("  PIPELINE BROKE — see the per-arm VERDICT above; each names the "
+    print("  PIPELINE BROKE — see the per-variant VERDICT above; each names the "
           "log to read.", file=sys.stderr)
     sys.exit(1)
 
@@ -589,7 +575,7 @@ def init(args):
         return
     if input("Walk through the readiness check now? [Y/n] ").strip().lower() in ("", "y", "yes"):
         from fae.driver import check
-        check.main(SimpleNamespace(walk=True, static=False, smoke=False, arms="", task="T1"))
+        check.main(SimpleNamespace(walk=True, static=False, smoke=False, variants="", task="T1"))
 
 
 def prepare(args):
@@ -607,18 +593,17 @@ def prepare(args):
     cfg = _config.load(ROOT)
     n = 0
     for rep in range(1, args.reps + 1):
-        for treatment, conditions in common.definition().matrix.items():
-            for condition in conditions:
-                cid = cell_id(model, treatment, condition, rep, args.task)
-                ws = _prepare.prepare(cid, args.task, treatment, condition, rep,
-                                      workspaces=common.WS, root=ROOT,
-                                      fresh=bool(os.environ.get("FRESH")),
-                                      impl=_Cell.IMPL,
-                                      model_version=cfg.get("AGENT_MODEL") or model,
-                                      cfg=cfg)
-                print(f"  prepared {ws}")
-                n += 1
-    print(f"Prepared matrix: {n} workspace(s).")
+        for vid in common.definition().active:
+            cid = cell_id(model, vid, rep, args.task)
+            ws = _prepare.prepare(cid, args.task, vid, rep,
+                                  workspaces=common.WS, root=ROOT,
+                                  fresh=bool(os.environ.get("FRESH")),
+                                  impl=_Cell.IMPL,
+                                  model_version=cfg.get("AGENT_MODEL") or model,
+                                  cfg=cfg)
+            print(f"  prepared {ws}")
+            n += 1
+    print(f"Prepared every active variant: {n} workspace(s).")
 
 
 def verb_cmd(name, argv):

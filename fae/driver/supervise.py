@@ -375,7 +375,7 @@ def _supervise_pass(dry=False, only=""):
                         if not dry:
                             common.ledger.alert(ws, cid, f"VERIFY-WEDGED held the global verify-lock {int(_held)}s > {VERIFY_WEDGED_S}s — standing it down; this attempt is lost")
                             _VERIFY_WEDGED[cid] = _ts
-                            ops._teardown_cell(cid, st["treatment"],
+                            ops._teardown_cell(cid, st["variant"],
                                            reason="verify-wedged",
                                            unblock_agent=True)
                             _reclaim(st, dry)
@@ -405,7 +405,7 @@ def _supervise_pass(dry=False, only=""):
                                  f"{int(_pa)}s > {_kill_s}s -> stand down"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
-                            ops._teardown_cell(cid, st["treatment"],
+                            ops._teardown_cell(cid, st["variant"],
                                            reason=f"phase-stalled-{_ph}",
                                            unblock_agent=True)
                             _reclaim(st, dry)
@@ -414,7 +414,7 @@ def _supervise_pass(dry=False, only=""):
             # Ending the process is the only way a flock is released, so this
             # goes through the same teardown path as any other induced death.
             if not terminal and st["state"] in ("RUNNING", "WAITING"):
-                _arm = common.definition().lock_of(st["treatment"])
+                _arm = common.definition().lock_of(st["variant"])
                 _slot = state._arm_slot_of(_arm, cid) if _arm else None
                 if _slot is not None and cid not in common._ARM_ALERTED:
                     # Stalled means NOT PROGRESSING, which is phase_age. The
@@ -444,7 +444,7 @@ def _supervise_pass(dry=False, only=""):
                         if not dry:
                             common.ledger.alert(ws, cid, f"ARM-STUCK held the {_arm} arm {int(_slot)}s with no progress for {int(_silent)}s — standing it down")
                             common._ARM_ALERTED.add(cid)
-                            ops._teardown_cell(cid, st["treatment"],
+                            ops._teardown_cell(cid, st["variant"],
                                            reason="arm-stuck", unblock_agent=True)
                             _reclaim(st, dry)
                         continue
@@ -476,9 +476,9 @@ def _supervise_pass(dry=False, only=""):
                 if not dry:
                     os.kill(loop_pid, signal.SIGKILL)
                     subprocess.run(["docker", "rm", "-f", "-v", common.agent_container(cid),
-                                    *common.infra_containers(st["treatment"], cid)],
+                                    *common.infra_containers(st["variant"], cid)],
                                    capture_output=True)
-                    ops._variant_teardown(st["treatment"], cid)
+                    ops._variant_teardown(st["variant"], cid)
             elif st["state"] == "CRASHED" and not in_box and _conducts(cid):
                 continue    # claimed or queued: conduct restarts it, and
                             # says so when it does
@@ -546,7 +546,7 @@ def _supervise_pass(dry=False, only=""):
                         # is still up, and the next acquirer would provision
                         # against it.
                         _outcome = ops._teardown_cell(
-                            cid, st["treatment"], reason="limit-wall",
+                            cid, st["variant"], reason="limit-wall",
                             unblock_agent=True)
                         if _outcome in ("termed", "killed"):
                             common._emit_transition("Crash", cid, "limit-wall")
@@ -577,7 +577,7 @@ def _supervise_pass(dry=False, only=""):
                          + (" [dry-run]" if dry else ""))
                 if not dry:
                     _outcome = ops._teardown_cell(
-                        cid, st["treatment"], reason="silent-hang",
+                        cid, st["variant"], reason="silent-hang",
                         unblock_agent=True)
                     if _outcome in ("termed", "killed"):
                         common._emit_transition("Crash", cid, "silent-hang")

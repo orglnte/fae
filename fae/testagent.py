@@ -145,13 +145,13 @@ def record(entry):
 
 
 def solve(attempt):
-    """Write the committed answer for this cell's tech (TECH in the
-    environment, set by the driver from the variant)."""
-    tech = os.environ.get("TECH")
-    if not tech:
-        print("testagent: TECH not in the environment", file=sys.stderr)
+    """Write the committed answer for this cell's variant (VARIANT in the
+    environment, set by the driver)."""
+    variant = os.environ.get("VARIANT")
+    if not variant:
+        print("testagent: VARIANT not in the environment", file=sys.stderr)
         return 1
-    ref = REFERENCE / tech / "overlay"
+    ref = REFERENCE / variant
     if not ref.is_dir():
         print(f"testagent: no reference implementation at {ref}", file=sys.stderr)
         return 1

@@ -29,7 +29,7 @@ MERGES
   fleet-status     absorbs  status | watch | monitor   (--watch N, --walls)
   results score    absorbs  score | aggregate          (--no-aggregate)
   results grade    absorbs  grade
-  conduct queue-add absorbs spawn-matrix | top-up      (--matrix, --to-rep N; apidocs by default, --condition V, --all-conditions)
+  conduct queue-add absorbs spawn-matrix | top-up      (--matrix, --to-rep N; every active variant by default, --variant V)
   conduct pause    absorbs  drain | queue-pause        (--admission-only)
   conduct resume   absorbs  resume-all | queue-resume  (requeues, never spawns)
   conduct stop     absorbs  stop-all                   (scoped: all | MODEL...)
@@ -106,14 +106,14 @@ SEL += "does not match `r10`."
 
 @cell_app.command("spawn")
 def cell_spawn(
-    model: str, treatment: str, condition: str,
+    model: str, variant: str,
     rep: str = typer.Option("1", "-r", "--rep", help="int, or comma-separated ints"),
     task: str = typer.Option("T1", "--task", help="task id: T<n>, one the experiment's task/ carries"),
     fresh: bool = typer.Option(False, "--fresh",
                               help="WIPES the workspace (safe_wipe) and restarts at attempt 1"),
 ):
     """Start one cell now, in parallel with whatever else is running."""
-    ops.spawn(_ns(model=model, treatment=treatment, condition=condition, rep=rep,
+    ops.spawn(_ns(model=model, variant=variant, rep=rep,
                   task=task, fresh=fresh))
 
 
@@ -187,16 +187,12 @@ def cell_reverify(selectors: Optional[list[str]] = typer.Argument(None, help=SEL
 def conduct_queue_add(
     model: str,
     matrix: bool = typer.Option(False, "--matrix",
-                                help="enqueue every (treatment, condition) in the experiment's matrix"),
+                                help="enqueue every active variant"),
     to_rep: Optional[int] = typer.Option(None, "--to-rep",
-                                         help="fill missing reps up to N for the selected combos"),
-    combo: list[str] = typer.Option([], "--combo",
-                                    help="treatment·condition (repeatable; overrides the default selection)"),
-    condition: list[str] = typer.Option([], "--condition",
-                                      help="with --to-rep: also fill this condition on every treatment "
-                                           "that has it (repeatable; apidocs is always included)"),
-    all_conditions: bool = typer.Option(False, "--all-conditions",
-                                      help="with --to-rep: the whole matrix, every condition"),
+                                         help="fill missing reps up to N for the selected variants"),
+    variant: list[str] = typer.Option([], "--variant",
+                                      help="with --to-rep: this variant (repeatable; default: "
+                                           "every active one)"),
     reps: int = typer.Option(3, "--reps", help="with --matrix: how many reps"),
     task: str = typer.Option("T1", "--task", help="task id: T<n>, one the experiment's task/ carries"),
     fresh: bool = typer.Option(False, "--fresh",
@@ -206,15 +202,14 @@ def conduct_queue_add(
 ):
     """Hand work to the conductor (was queue add / spawn-matrix / top-up).
 
-    Enqueues rep-outer, so every combination advances together and a partial
-    run still yields comparable n across the matrix. Enqueue-only either way:
+    Enqueues rep-outer, so every variant advances together and a partial run
+    still yields comparable n across them. Enqueue-only either way:
     admission happens in `conduct run`.
     """
     if not matrix and to_rep is None:
         raise typer.BadParameter("choose --matrix or --to-rep N")
     if to_rep is not None:
-        ops.top_up(_ns(model=model, to_rep=to_rep, combos=list(combo),
-                       conditions=list(condition), all_conditions=all_conditions,
+        ops.top_up(_ns(model=model, to_rep=to_rep, variants=list(variant),
                        task=task, dry_run=dry_run))
         return
     ops.spawn_matrix(_ns(model=model, reps=reps, task=task, fresh=fresh))
@@ -354,10 +349,12 @@ def results_score(
     all_cells: bool = typer.Option(False, "--all-cells", help="per-cell rows"),
     allow_stale: bool = typer.Option(False, "--allow-stale",
                                      help="proceed even if a score.json is older than its inputs"),
-    condition: Optional[str] = typer.Option(None, "--condition",
-                                          help="restrict the scoreboard to one information "
-                                               "condition (e.g. apidocs); prints a FILTERED "
-                                               "banner with shown/total counts"),
+    variant: Optional[str] = typer.Option(None, "--variant",
+                                          help="restrict the scoreboard to one variant; "
+                                               "prints a FILTERED banner with shown/total counts"),
+    where: list[str] = typer.Option([], "--where",
+                                    help="FACTOR=LEVEL: only the variants at that level "
+                                         "(repeatable)"),
     impl: Optional[str] = typer.Option(None, "--impl",
                                        help="restrict to one cell driver (py|bash)"),
     sort_discrepancy: bool = typer.Option(False, "--sort-discrepancy",
@@ -374,7 +371,8 @@ def results_score(
     """Score cells and print the metrics table (was score + aggregate)."""
     score.score(_ns(selector=selector, all_cells=all_cells,
                     allow_stale=allow_stale, no_aggregate=no_aggregate,
-                    condition=condition, impl=impl, sort_discrepancy=sort_discrepancy,
+                    variant=variant, where=list(where), impl=impl,
+                    sort_discrepancy=sort_discrepancy,
                     sort_significant=sort_significant))
 
 
@@ -384,7 +382,7 @@ def results_run_report(
                                         help="ISO 8601 or epoch seconds; default = the "
                                              "current run's start (conduct.pid mtime)"),
 ):
-    """What THIS run produced: completed cells by treatment (green rate + mean
+    """What THIS run produced: completed cells by variant (green rate + mean
     iterations-to-green) and the cells still working."""
     from fae.scoring import run_report
     run_report.cli(since)
@@ -419,9 +417,11 @@ def results_validate(selector: Optional[str] = typer.Argument(None, help=SEL)):
 
 @results_app.command("aggregate")
 def results_aggregate(
-    condition: Optional[str] = typer.Option(None, "--condition",
-                                          help="restrict the scoreboard to one information "
-                                               "condition (e.g. apidocs)"),
+    variant: Optional[str] = typer.Option(None, "--variant",
+                                          help="restrict the scoreboard to one variant"),
+    where: list[str] = typer.Option([], "--where",
+                                    help="FACTOR=LEVEL: only the variants at that level "
+                                         "(repeatable)"),
     impl: Optional[str] = typer.Option(None, "--impl",
                                        help="restrict to one cell driver (py|bash)"),
     include_tainted: bool = typer.Option(False, "--include-tainted",
@@ -444,7 +444,8 @@ def results_aggregate(
     """Print the scoreboard from existing score.json files, without rescoring
     (was `runs.py aggregate`; `results score` also runs this as its last
     step)."""
-    score.aggregate(_ns(condition=condition, impl=impl, include_tainted=include_tainted,
+    score.aggregate(_ns(variant=variant, where=list(where), impl=impl,
+                        include_tainted=include_tainted,
                         tainted_cells_details=tainted_cells_details, allow_stale=allow_stale,
                         sort_discrepancy=sort_discrepancy, sort_significant=sort_significant))
 
@@ -469,15 +470,16 @@ def experiment_check(walk: bool = typer.Option(False, "--walk",
                                                  help="no docker: the definition, the variants "
                                                       "and the seeds only"),
                      smoke: bool = typer.Option(False, "--smoke",
-                                                help="also run each arm's reference through "
+                                                help="also run each variant's reference through "
                                                      "the gate (experiment smoke)"),
-                     arms: str = typer.Option("", "--arms", help="comma-separated (default: every arm)"),
+                     variants: str = typer.Option("", "--variants",
+                                                  help="comma-separated (default: every active variant)"),
                      task: str = typer.Option("T1", "--task", help="the task the seeds are checked for")):
     """Whether this root's experiment is ready to run: the host, the config,
     the definition, each variant, every cell's seed, the infra. Exit 1 on
     any failure; each names its fix."""
     from fae.driver import check
-    check.main(_ns(walk=walk, static=static, smoke=smoke, arms=arms, task=task))
+    check.main(_ns(walk=walk, static=static, smoke=smoke, variants=variants, task=task))
 
 
 @rig_app.command("selftest")
@@ -495,7 +497,7 @@ def rig_trace_reset(dry_run: bool = typer.Option(False, "--dry-run",
 
 @experiment_app.command("infra")
 def experiment_infra():
-    """Every arm's infra preflight (variants.py infra_ok) + a sweep
+    """Every variant's infra preflight (infra_ok) + a sweep
     of stale per-verify kind clusters. Creates nothing: each verify provisions
     its own infra."""
     rig.infra(_ns())
@@ -503,9 +505,9 @@ def experiment_infra():
 
 @rig_app.command("agent-image")
 def rig_agent_image(rebuild: bool = typer.Option(False, "--rebuild",
-                                                 help="build what is missing or behind: the base, then each arm's layer")):
+                                                 help="build what is missing or behind: the base, then each variant's layer")):
     """The agent images: the base's clients (claude, opencode, agy) installed
-    vs latest upstream, and each arm's layer over it. --rebuild builds the
+    vs latest upstream, and each variant's layer over it. --rebuild builds the
     base when missing or behind and a layer when its content moved."""
     from fae.driver import image
     behind = image.report()
@@ -515,15 +517,17 @@ def rig_agent_image(rebuild: bool = typer.Option(False, "--rebuild",
 
 
 @experiment_app.command("smoke")
-def experiment_smoke(arms: str = typer.Option("", "--arms", help="comma-separated (default: every arm)"),
-              only: str = typer.Option("", "--only", help="substring filter on the arm name"),
+def experiment_smoke(variants: str = typer.Option("", "--variants",
+                                              help="comma-separated (default: one per way "
+                                                   "of being judged)"),
+              only: str = typer.Option("", "--only", help="substring filter on the variant id"),
               rep: int = typer.Option(1, "--rep"),
               full_gate: bool = typer.Option(False, "--full-gate",
-                                             help="every arrangement of the gate per arm "
+                                             help="every arrangement of the gate per variant "
                                                   "(default: the canonical one)")):
-    """Pipeline check: one reference cell per arm through the driver
+    """Pipeline check: one reference cell per variant through the driver
     (`-m fae.cell ... --stub`), in ws-test.nosync. Exit 0 iff all green."""
-    rig.smoke(_ns(arms=arms, only=only, rep=rep, full_gate=full_gate))
+    rig.smoke(_ns(variants=variants, only=only, rep=rep, full_gate=full_gate))
 
 
 @experiment_app.command("prepare")

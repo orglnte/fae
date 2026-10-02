@@ -353,19 +353,17 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestClusterMapAsksTheVariantForTheTech(unittest.TestCase):
-    """An arm whose name does not start with its tech (`kedap_access` of
-    tech `keda`) still owns the cluster its variant names."""
+class TestClusterMapAsksTheCellsVariant(unittest.TestCase):
+    """A cell owns the cluster its own variant names."""
 
-    def test_the_tech_is_the_variants_not_the_arm_prefix(self):
+    def test_the_cluster_is_named_by_the_cells_variant(self):
         from fae.cell import variants as _tr
-        beta = _tr.registry()["beta"]
+        beta = _tr.registry()["beta_apidocs"]
         cid = "testpy_high_beta_apidocs_T1_r1"
         with tempfile.TemporaryDirectory() as d:
             ws = Path(d)
             (ws / cid).mkdir()
             with mock.patch.object(common, "WS", ws), \
-                    mock.patch.object(beta, "TECH", "shared"), \
                     mock.patch.object(beta, "infra_identities",
                                       classmethod(lambda cls, c: [("cluster", f"cl-{c}")])), \
                     mock.patch.dict(zombies._CLMAP, {"key": None, "map": {}}):

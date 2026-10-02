@@ -84,10 +84,7 @@ def spec_cid(p):
 
 
 def read_spec(p):
-    spec = json.loads(p.read_text())
-    if "condition" not in spec and "variant" in spec:      # a spec written before the rename
-        spec["condition"] = spec.pop("variant")
-    return spec
+    return json.loads(p.read_text())
 
 
 def _seqs(d):
@@ -141,8 +138,7 @@ def lane_has(model, cid):
 def enqueue(model, spec, front=False):
     """Add a spec to a lane. Returns its path, or None when the lane already
     holds that cid — or when the cell is sealed and must never run again."""
-    cid = common.cell_id(model, spec["treatment"], spec["condition"],
-                  spec.get("rep", 1), spec.get("task", "T1"))
+    cid = common.cell_id(model, spec["variant"], spec.get("rep", 1), spec.get("task", "T1"))
     if lane_has(model, cid):
         return None
     # Queueing a sealed cell would put a spec in a lane that conduct can only

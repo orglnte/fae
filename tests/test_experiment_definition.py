@@ -20,10 +20,14 @@ ENGINE = ["cli.py", "driver", "harness", "scoring"]
 _IMPORT = re.compile(r"^\s*(from experiment[.\s]|import experiment[.\s]|import experiment$)", re.M)
 
 
-def _write_definition(root, body):
+def _write_definition(root, body, variants=None):
     d = Path(root) / "experiment"
     d.mkdir()
     (d / "__init__.py").write_text(textwrap.dedent(body))
+    if variants:
+        (d / "variants").mkdir()
+        for vid, text in variants.items():
+            (d / "variants" / f"{vid}.toml").write_text(textwrap.dedent(text))
     return d
 
 
@@ -42,9 +46,9 @@ class TestEngineNeverImportsTheExperiment(unittest.TestCase):
 class TestMinimalDefinition(unittest.TestCase):
     """Run in a child: the process-wide `experiment` package is the fixture one here."""
 
-    def _run(self, body, code):
+    def _run(self, body, code, variants=None):
         with tempfile.TemporaryDirectory() as td:
-            _write_definition(td, body)
+            _write_definition(td, body, variants)
             prog = ("import sys; sys.path.insert(0, %r)\n"
                     "from fae.cell import experiment as exp\n"
                     "d = exp.load(%r)\n" % (str(ROOT), str(Path(td) / "experiment"))) + code
@@ -53,50 +57,48 @@ class TestMinimalDefinition(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout
 
-    def test_defaults_when_the_definition_declares_only_subjects(self):
-        out = self._run('''
-            from fae.cell.variants.base import Variant
-            class Only(Variant):
-                ARM = "only"; TECH = "py"; CONDITIONS = ("apidocs",)
-            def variant_classes():
-                return (Only,)
-        ''', '''
-print(d.name, d.arms, d.matrix, d.seed_docs, d.gate.arity, d.verbs, d.exclusive)
-''')
-        self.assertEqual(out.split(), ["experiment", "('only',)", "{'only':", "['apidocs']}",
-                                       "{}", "1", "{}", "None"])
+    def test_defaults_when_the_definition_declares_nothing(self):
+        out = self._run("", "print(d.name, d.ids, d.active, d.gate.arity, d.verbs, d.exclusive)\n")
+        self.assertEqual(out.split(), ["experiment", "()", "()", "1", "{}", "None"])
 
-    def test_retired_arms_are_registered_but_outside_the_matrix(self):
-        out = self._run('''
-            from fae.cell.variants.base import Variant
-            class New(Variant):
-                ARM = "new"; TECH = "py"; CONDITIONS = ("apidocs",)
-            class Old(Variant):
-                ARM = "old"; TECH = "py"; CONDITIONS = ("apidocs",)
-            def variant_classes():
-                return (New, Old)
-            MATRIX = {"new": ["apidocs"]}
-            RETIRED = ("old",)
-        ''', '''
-print(sorted(d.arms), sorted(d.matrix), d.retired)
-''')
-        self.assertEqual(out.split(), ["['new',", "'old']", "['new']", "('old',)"])
+    def test_each_file_is_a_variant_and_retired_ones_are_not_scheduled(self):
+        out = self._run("", "print(d.ids, d.active)\n", variants={
+            "new_one": "[authoring]\nsurface = { files = ['a.py'] }\n",
+            "old_one": "retired = true\n"})
+        self.assertEqual(out.split(), ["('new_one',", "'old_one')", "('new_one',)"])
 
-    def test_no_retired_arms_by_default(self):
-        out = self._run('''
-            from fae.cell.variants.base import Variant
-            class Only(Variant):
-                ARM = "only"; TECH = "py"; CONDITIONS = ("apidocs",)
-            def variant_classes():
-                return (Only,)
-        ''', "print(d.retired)\n")
-        self.assertEqual(out.strip(), "()")
+    def test_a_file_becomes_the_variants_data(self):
+        code = ('v = d.variant("only")\n'
+                'print(v.ID, v.LABEL, v.AUTHORING_SURFACE, v.FACTORS, sorted(v.INPUTS),\n'
+                '      v.RUN["command"], v.LOCK, v.LOCK_SLOTS, v.ACCESS_INFRA, v.TEMPLATE[0].name)\n')
+        out = self._run("", code, variants={"only": """
+            label = "Only"
+            factors = { docs = "apidocs" }
+            [authoring]
+            template = ["task/skeleton"]
+            surface = { files = ["a.py"], prefixes = ["app/"] }
+            access_infra = true
+            [authoring.inputs]
+            "TODO.md" = "task/T1.PROMPT.md"
+            [verify.run]
+            image = "python:3"
+            command = ["python3", "a.py"]
+            [infra]
+            lock = "only"
+            lock_slots = 2
+            """})
+        self.assertEqual(out.split(), ["only", "Only", "(('a.py',),", "('app/',))",
+                                       "{'docs':", "'apidocs'}", "['TODO.md']",
+                                       "['python3',", "'a.py']", "only", "2", "True", "skeleton"])
+
+    def test_an_unknown_key_is_refused_naming_the_file(self):
+        with self.assertRaises(AssertionError) as ctx:
+            self._run("", "d.variants\n", variants={"only": "[verify]\nrn = 1\n"})
+        self.assertIn("only.toml: unknown key(s) in [verify]: rn", str(ctx.exception))
 
     def test_a_verifier_that_is_not_a_Verifier_is_refused(self):
         with self.assertRaises(AssertionError) as ctx:
             self._run('''
-                def variant_classes():
-                    return ()
                 def verifier_class():
                     return object
             ''', "d.verifier_class()\n")
@@ -105,15 +107,11 @@ print(sorted(d.arms), sorted(d.matrix), d.retired)
     def test_a_definition_without_a_verifier_is_refused_when_one_is_asked_for(self):
         with self.assertRaises(AssertionError) as ctx:
             self._run('''
-                def variant_classes():
-                    return ()
             ''', "d.verifier_class()\n")
         self.assertIn("declares no verifier_class()", str(ctx.exception))
 
     def test_declared_config_keys_reach_the_config_and_its_exports(self):
         out = self._run('''
-            def variant_classes():
-                return ()
             CONFIG = {"CALC_BIN": ("paths", "calc_bin", "bin/calc", "path"),
                       "CALC_CASES": ("paths", "calc_cases", "{experiment}/cases", "path"),
                       "CALC_MODE": ("run", "calc_mode", "strict", "str")}
@@ -131,8 +129,6 @@ print(c.values["CALC_BIN"].endswith("/bin/calc"), c.values["CALC_CASES"] == str(
     def test_the_gate_is_the_definitions(self):
         out = self._run('''
             from fae.cell.experiment import Gate
-            def variant_classes():
-                return ()
             GATE = Gate(("A", "B", "C"), rotate=False)
         ''', '''
 import os, tempfile
@@ -147,8 +143,6 @@ print(c.gate_shapes, c.gate_def.arity, c.gate_def.rotate)
 
     def test_a_second_definition_is_refused_until_unload(self):
         out = self._run('''
-            def variant_classes():
-                return ()
         ''', '''
 import tempfile, pathlib
 other = pathlib.Path(tempfile.mkdtemp()) / "experiment"; other.mkdir()

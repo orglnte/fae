@@ -208,10 +208,10 @@ def _conduct_preflight():
     # what `cli.py experiment infra` shows, run once before admission.
     from fae.driver import rig as _rig
     print("conduct: infra preflight", flush=True)
-    bad = _rig._probe_arms()
+    bad = _rig._probe_variants()
     if bad:
-        print(f"conduct: NOTE — {bad} arm(s) refused their preflight; cells of "
-              f"those arms will HALT.", flush=True)
+        print(f"conduct: NOTE — {bad} variant(s) refused their preflight; cells of "
+              f"those variants will HALT.", flush=True)
     return True
 
 
@@ -539,8 +539,7 @@ def _spec_of(st):
     """The queue-spec equivalent of a cell's state — how an interrupted cell
     re-enters the backlog (conduct-resume, supervision repair). NEVER fresh:
     attempts persist."""
-    return dict(task=st["task"], treatment=st["treatment"],
-                condition=st["condition"], rep=int(st["rep"]), fresh=False)
+    return dict(task=st["task"], variant=st["variant"], rep=int(st["rep"]), fresh=False)
 
 
 def _known_models():

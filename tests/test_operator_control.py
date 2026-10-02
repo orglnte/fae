@@ -120,23 +120,19 @@ class TestQueuedCids(OperatorTestCase):
     verb, because select_cells enumerates workspaces."""
 
     def test_finds_specs_with_no_workspace(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=2)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2)])
         self.assertEqual(runs.ops.queued_cids("all"),
                          ["sonnet_high_alpha_apidocs_T1_r2"])
 
     def test_ignores_specs_that_already_have_a_workspace(self):
         """Those are select_cells' business; counting them twice would
         double-report the backlog."""
-        self.queue("sonnet", [dict(task="T1", treatment="beta",
-                                   condition="apidocs", rep=1)])
+        self.queue("sonnet", [dict(task="T1", variant="beta_apidocs", rep=1)])
         self.assertEqual(runs.ops.queued_cids("all"), [])
 
     def test_selector_applies_and_is_anchored(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=2)])
-        self.queue("haiku", [dict(task="T1", treatment="beta",
-                                  condition="howto", rep=3)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2)])
+        self.queue("haiku", [dict(task="T1", variant="beta_howto", rep=3)])
         self.assertEqual(len(runs.ops.queued_cids("sonnet")), 1)
         self.assertEqual(len(runs.ops.queued_cids("haiku")), 1)
         self.assertEqual(len(runs.ops.queued_cids("T1")), 2)   # whole token
@@ -158,11 +154,11 @@ class TestQueuedSummaryCountsOnlyRealBacklog(OperatorTestCase):
     def test_the_headline_breaks_pending_specs_down_by_state(self):
         """Every pending spec is counted; the breakdown says what each is
         waiting on, so a lane full of paused work cannot read as backlog."""
-        fresh = dict(task="T1", treatment="alpha", condition="apidocs",
+        fresh = dict(task="T1", variant="alpha_apidocs",
                      rep=7, budget=10, fresh=False)
         self.queue("sonnet", [fresh])
-        m, t, v, task, rep = runs.parse_cell_id(CIDS[0])
-        self.queue("sonnet", [dict(task=task, treatment=t, condition=v,
+        m, v, task, rep = runs.parse_cell_id(CIDS[0])
+        self.queue("sonnet", [dict(task=task, variant=v,
                                    rep=int(rep), budget=10, fresh=False)])
         (self.ws / CIDS[0] / ".paused").write_text("manual by=operator\n")
         with mock.patch.object(runs.state, "loop_parents", return_value={}):
@@ -176,8 +172,8 @@ class TestQueuedSummaryCountsOnlyRealBacklog(OperatorTestCase):
         unadmittable — without the count the lane reads as ready to go for as
         long as the lock stands. Counted the same way as the headline, so the
         lane numbers add up to it."""
-        m, t, v, task, rep = runs.parse_cell_id(CIDS[0])
-        self.queue("sonnet", [dict(task=task, treatment=t, condition=v,
+        m, v, task, rep = runs.parse_cell_id(CIDS[0])
+        self.queue("sonnet", [dict(task=task, variant=v,
                                    rep=int(rep), budget=10, fresh=False)])
         (self.ws / CIDS[0] / ".paused").write_text("manual by=operator\n")
         with mock.patch.object(runs.state, "loop_parents", return_value={}):
@@ -187,8 +183,7 @@ class TestQueuedSummaryCountsOnlyRealBacklog(OperatorTestCase):
         self.assertIn("1 paused", lines[0], "the headline must agree")
 
     def test_a_lane_with_nothing_paused_says_nothing(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=7, budget=10)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7, budget=10)])
         with mock.patch.object(runs.state, "loop_parents", return_value={}):
             lane = next(l for l in runs.render.queued_summary()
                         if l.strip().startswith("sonnet"))
@@ -196,8 +191,8 @@ class TestQueuedSummaryCountsOnlyRealBacklog(OperatorTestCase):
 
     def test_a_running_cell_is_not_counted_as_queued(self):
         cid = CIDS[0]
-        m, t, v, task, rep = runs.parse_cell_id(cid)
-        self.queue("sonnet", [dict(task=task, treatment=t, condition=v,
+        m, v, task, rep = runs.parse_cell_id(cid)
+        self.queue("sonnet", [dict(task=task, variant=v,
                                    rep=int(rep), budget=10)])
         with mock.patch.object(runs.state, "loop_parents", return_value={cid: 4242}):
             lines = runs.render.queued_summary()
@@ -206,16 +201,14 @@ class TestQueuedSummaryCountsOnlyRealBacklog(OperatorTestCase):
         self.assertIn("1 running", head, "a live cell's spec must say so")
 
     def test_a_pending_cell_with_no_loop_still_counts(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=2, budget=10)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2, budget=10)])
         with mock.patch.object(runs.state, "loop_parents", return_value={}):
             lines = runs.render.queued_summary()
         self.assertIn("QUEUED (1)", lines[0])
         self.assertIn("1 fresh", lines[0])
 
     def test_a_parked_lane_is_shown_tagged_paused(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=2, budget=10)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2, budget=10)])
         runs.queue.park_lane("sonnet")
         with mock.patch.object(runs.state, "loop_parents", return_value={}):
             lines = runs.render.queued_summary()
@@ -239,7 +232,7 @@ class TestConductStop(OperatorTestCase):
         return rp
 
     def test_the_backlog_survives_a_blanket_stop(self):
-        specs = [dict(task="T1", treatment="alpha", condition="apidocs",
+        specs = [dict(task="T1", variant="alpha_apidocs",
                       rep=r) for r in (2, 3)]
         self.queue("sonnet", specs)
         self._stop(["all"])
@@ -249,17 +242,14 @@ class TestConductStop(OperatorTestCase):
                          "specs were shelved; a stop should not move them")
 
     def test_a_parked_lane_keeps_its_backlog(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=2)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2)])
         runs.queue.park_lane("sonnet")
         self._stop(["all"])
         self.assertEqual(len(self.parked_pending("sonnet")), 1)
 
     def test_scoped_stop_pauses_only_its_lanes_cells(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=2)])
-        self.queue("haiku", [dict(task="T1", treatment="beta",
-                                  condition="howto", rep=3)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2)])
+        self.queue("haiku", [dict(task="T1", variant="beta_howto", rep=3)])
         rp = self._stop(["haiku"])
         self.assertEqual(len(self.pending("sonnet")), 1)
         self.assertEqual(len(self.pending("haiku")), 1,
@@ -268,8 +258,7 @@ class TestConductStop(OperatorTestCase):
         self.assertTrue(all(c.startswith("haiku_") for c in paused), paused)
 
     def test_it_refuses_without_a_confirmation(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=2)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2)])
         with mock.patch.object(runs.sys.stdin, "isatty", return_value=True), \
              mock.patch("builtins.input", return_value="n"), \
              mock.patch.object(runs.ops, "request_pause") as rp, \
@@ -350,8 +339,7 @@ class TestStopConductor(OperatorTestCase):
 class TestQueueParkUnpark(OperatorTestCase):
 
     def test_park_and_unpark_roundtrip(self):
-        self.queue("sonnet", [dict(task="T1", treatment="beta",
-                                   condition="apidocs", rep=1)])
+        self.queue("sonnet", [dict(task="T1", variant="beta_apidocs", rep=1)])
         self.assertEqual(runs.queue.park_lane("sonnet"), "parked")
         self.assertFalse(runs.queue.lane_dir("sonnet").exists())
         self.assertTrue(runs.queue.lane_dir("sonnet", parked=True).is_dir())
@@ -360,8 +348,7 @@ class TestQueueParkUnpark(OperatorTestCase):
         self.assertTrue(runs.queue.lane_dir("sonnet").is_dir())
 
     def test_unpark_refuses_to_clobber_a_conflicting_live_file(self):
-        self.queue("sonnet", [dict(task="T1", treatment="beta",
-                                   condition="apidocs", rep=1)])
+        self.queue("sonnet", [dict(task="T1", variant="beta_apidocs", rep=1)])
         runs.queue.park_lane("sonnet")
         runs.queue.lane_dir("sonnet").mkdir(parents=True)   # hand-made live lane
         self.assertEqual(runs.queue.unpark_lane("sonnet"), "conflict")
@@ -392,13 +379,12 @@ class TestExactlyOneCellRule(OperatorTestCase):
 
     def test_spawn_refuses_a_rep_list(self):
         with self.assertRaises(SystemExit):
-            runs.ops.spawn(mock.Mock(model="sonnet", treatment="beta",
-                                 condition="apidocs", rep="2,3", task="T1",
+            runs.ops.spawn(mock.Mock(model="sonnet", variant="beta_apidocs", rep="2,3", task="T1",
                                  budget=10, fresh=False))
 
     def _spawn_one(self, image_ready):
         from fae.driver import image
-        args = mock.Mock(model="sonnet", treatment="beta", condition="apidocs",
+        args = mock.Mock(model="sonnet", variant="beta_apidocs",
                          rep="1", task="T1", budget=10, fresh=False)
         with mock.patch.object(image, "ensure_agent_for", return_value=image_ready) as ready, \
              mock.patch.object(runs.ops, "_spawn_detached", return_value=None) as spawned, \
@@ -412,7 +398,7 @@ class TestExactlyOneCellRule(OperatorTestCase):
 
     def test_spawn_builds_the_arms_agent_image_before_the_cell_starts(self):
         ready, spawned = self._spawn_one(True)
-        ready.assert_called_once_with("beta")
+        ready.assert_called_once_with("beta_apidocs")
         spawned.assert_called_once()
 
     def test_spawn_refuses_when_the_arms_agent_image_cannot_be_built(self):
@@ -432,7 +418,7 @@ class TestStopCells(OperatorTestCase):
              mock.patch.object(runs.state, "cell_state",
                                return_value=dict(cid=cid, state="RUNNING",
                                                  why="agent",
-                                                 treatment="beta")), \
+                                                 variant="beta_apidocs")), \
              mock.patch.object(runs.subprocess, "run"), \
              mock.patch.object(runs.os, "kill"):
             runs.ops.stop_cells(mock.Mock(selectors=[cid], cancel=cancel,
@@ -455,8 +441,8 @@ class TestStopCells(OperatorTestCase):
 
     def test_stop_scrubs_the_cells_queued_spec_with_backup(self):
         cid = CIDS[0]
-        m, t, v, task, rep = runs.parse_cell_id(cid)
-        self.queue("sonnet", [dict(task=task, treatment=t, condition=v,
+        m, v, task, rep = runs.parse_cell_id(cid)
+        self.queue("sonnet", [dict(task=task, variant=v,
                                    rep=int(rep))])
         self._stop(cid)
         self.assertEqual(self.pending("sonnet"), [],
@@ -477,7 +463,7 @@ class TestStopCells(OperatorTestCase):
              mock.patch.object(runs.state, "containers", return_value=[]), \
              mock.patch.object(runs.state, "cell_state",
                                return_value=dict(cid=cid, state="RUNNING",
-                                                 why="agent", treatment="beta")), \
+                                                 why="agent", variant="beta_apidocs")), \
              mock.patch.object(runs.subprocess, "run", return_value=mock.Mock(returncode=0)), \
              mock.patch.object(_verify, "run_teardown",
                                side_effect=lambda ctx, variant, **kw: torn.append((ctx, variant))), \
@@ -490,9 +476,9 @@ class TestStopCells(OperatorTestCase):
         self.assertEqual(len(torn), 1)
         ctx, variant = torn[0]
         self.assertEqual((ctx.cid, ctx.variant, ctx.artifacts, ctx.out),
-                         (cid, "beta", str(self.ws / cid / "artifacts"),
+                         (cid, "beta_apidocs", str(self.ws / cid / "artifacts"),
                           str(self.ws / cid / ".verify-out")))
-        self.assertEqual(type(variant).ARM, "beta")
+        self.assertEqual(type(variant).ID, "beta_apidocs")
 
     def test_plain_stop_of_a_live_loop_emits_crash_not_kill(self):
         """Trace conformance: Pause leaves the model's loop alive; the SIGKILL
@@ -514,9 +500,9 @@ class TestConductResume(OperatorTestCase):
         (self.ws / cid / ".paused").write_text(f"{reason} by=operator\n")
 
     def _st(self, cid, state="CRASHED", why="loop"):
-        m, t, v, task, rep = runs.parse_cell_id(cid)
-        return dict(cid=cid, state=state, why=why, model=m, treatment=t,
-                    condition=v, task=task, rep=rep, budget=10)
+        m, v, task, rep = runs.parse_cell_id(cid)
+        return dict(cid=cid, state=state, why=why, model=m, variant=v,
+                    task=task, rep=rep, budget=10)
 
     def _resume(self, scope, live=None, states=None):
         """Cells default to DONE (no requeue); a test names the ones it wants
@@ -547,12 +533,11 @@ class TestConductResume(OperatorTestCase):
     def test_drain_pause_is_lifted_and_requeued_at_front(self):
         cid = CIDS[0]
         self._paused(cid, "drain")
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=7)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         self._resume(["all"], states={cid: self._st(cid)})
         self.assertFalse((self.ws / cid / ".paused").exists())
         rows = self.pending("sonnet")
-        self.assertEqual(rows[0]["treatment"], "beta",
+        self.assertEqual(rows[0]["variant"], "beta_apidocs",
                          "the resumed cell's spec must go to the FRONT")
         self.assertEqual(len(rows), 2)
 
@@ -579,9 +564,9 @@ class TestConductResume(OperatorTestCase):
 
     def test_requeue_deduplicates_against_an_existing_spec(self):
         cid = CIDS[0]
-        m, t, v, task, rep = runs.parse_cell_id(cid)
+        m, v, task, rep = runs.parse_cell_id(cid)
         self._paused(cid, "drain")
-        self.queue("sonnet", [dict(task=task, treatment=t, condition=v,
+        self.queue("sonnet", [dict(task=task, variant=v,
                                    rep=int(rep))])
         self._resume(["all"], states={cid: self._st(cid)})
         rows = self.pending("sonnet")
@@ -605,8 +590,7 @@ class TestConductResume(OperatorTestCase):
                          "a cell with a live loop was requeued")
 
     def test_parked_lanes_are_unparked(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=7)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         runs.queue.park_lane("sonnet")
         self._resume(["all"])
         self.assertTrue(runs.queue.lane_dir("sonnet").is_dir())
@@ -724,13 +708,13 @@ class TestLimitWall(OperatorTestCase):
         d = runs.queue.rundir(cid.split("_", 1)[0])
         d.mkdir(parents=True, exist_ok=True)
         (d / f"{cid}.json").write_text(json.dumps(
-            {"task": "T1", "treatment": "beta", "condition": "apidocs",
+            {"task": "T1", "variant": "beta_apidocs",
              "rep": 1, "budget": 10, "fresh": False}) + "\n")
 
     def _sweep(self, cid, detail="Error: Individual quota reached.", dry=False):
         (self.ws / cid / "iterations.log").touch()
         st = dict(cid=cid, state="WAITING", why="limit", detail=detail,
-                  model="sonnet", treatment="beta", condition="apidocs",
+                  model="sonnet", variant="beta_apidocs",
                   task="T1", rep="1", budget=10)
 
         def _cs(ws, loops, boxes):
@@ -797,7 +781,7 @@ class TestLimitWall(OperatorTestCase):
         os.utime(ws / "iterations.log", (old, old))
         os.utime(ws / "agent.attempt-1.log", (old, old))
         st = dict(cid=cid, state="RUNNING", why="agent", detail="",
-                  model="sonnet", treatment="beta", condition="apidocs",
+                  model="sonnet", variant="beta_apidocs",
                   task="T1", rep="1", budget=10)
         with mock.patch.object(runs.state, "loop_pids", return_value={}), \
              mock.patch.object(runs.state, "loop_parents", return_value={}), \
@@ -843,7 +827,7 @@ class TestLaneWrites(OperatorTestCase):
     operator paused."""
 
     def spec(self, rep=1):
-        return dict(task="T1", treatment="beta", condition="apidocs",
+        return dict(task="T1", variant="beta_apidocs",
                     rep=rep, budget=10, fresh=False)
 
     def test_enqueue_into_a_parked_lane_stays_parked(self):
@@ -877,8 +861,7 @@ class TestStopRemovesTheClaim(OperatorTestCase):
 
     def test_stopping_a_running_cell_shelves_its_claim(self):
         cid = CIDS[0]
-        self.queue("sonnet", [dict(task="T1", treatment="beta",
-                                   condition="apidocs", rep=1, budget=10,
+        self.queue("sonnet", [dict(task="T1", variant="beta_apidocs", rep=1, budget=10,
                                    fresh=False)])
         runs.queue.claim("sonnet", runs.queue.lane_specs("sonnet")[0])
         with mock.patch.object(runs.state, "loop_parents", return_value={}), \
@@ -887,7 +870,7 @@ class TestStopRemovesTheClaim(OperatorTestCase):
              mock.patch.object(runs.state, "cell_state",
                                return_value=dict(cid=cid, state="RUNNING",
                                                  why="agent",
-                                                 treatment="beta")), \
+                                                 variant="beta_apidocs")), \
              mock.patch.object(runs.subprocess, "run"), \
              mock.patch.object(runs.os, "kill"):
             runs.ops.stop_cells(mock.Mock(selectors=[cid], cancel=False,
@@ -900,8 +883,7 @@ class TestStopRemovesTheClaim(OperatorTestCase):
 class TestConductPause(OperatorTestCase):
 
     def test_partial_parks_and_pauses(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=7)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         with mock.patch.object(runs.ops, "request_pause") as rp:
             runs.conduct.conduct_pause(mock.Mock(scope=["sonnet"], admission_only=False,
                                          dry_run=False, interval=1))
@@ -911,8 +893,7 @@ class TestConductPause(OperatorTestCase):
                         all(c.startswith("sonnet_") for c in paused), paused)
 
     def test_admission_only_leaves_running_cells_alone(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=7)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         with mock.patch.object(runs.ops, "request_pause") as rp:
             runs.conduct.conduct_pause(mock.Mock(scope=["sonnet"], admission_only=True,
                                          dry_run=False, interval=1))
@@ -1019,8 +1000,7 @@ class TestPendingKind(OperatorTestCase):
 
 class TestQueuedSummaryDisplay(OperatorTestCase):
     def test_a_cooling_lane_carries_its_limit_tag(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=7)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         runs.weekly._cooldown_file("sonnet").write_text(
             f"{int(runs.time.time()) + 9999} quota\n")
         with mock.patch.object(runs.state, "loop_parents", return_value={}):
@@ -1056,8 +1036,7 @@ class TestConductPauseDryRun(OperatorTestCase):
         return out.getvalue(), rp, sc
 
     def test_partial_preview_touches_nothing(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=7)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         out, rp, sc = self._dry(["sonnet"], live={CIDS[0]: 4242})
         self.assertIn("would pause", out)
         self.assertIn("would park queue[sonnet]", out)
@@ -1071,16 +1050,14 @@ class TestConductPauseDryRun(OperatorTestCase):
         self.assertIn("--admission-only", out)
 
     def test_an_already_parked_lane_is_not_offered_again(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=7)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         runs.queue.park_lane("sonnet")
         out, _, _ = self._dry(["sonnet"])
         self.assertNotIn("would park", out)
 
     def test_full_preview_names_conduct_and_the_backlog(self):
         (self.orch / "conduct.pid").write_text("4242 cap=7")
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=7)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         out, rp, sc = self._dry(["all"], live={CIDS[0]: 4242})
         self.assertIn("would stop conduct", out)
         self.assertIn("queued spec(s) in place", out)
@@ -1168,13 +1145,12 @@ class TestVerbEdges(OperatorTestCase):
         self.assertFalse((self.ws / cid / ".paused").exists())
 
     def test_stop_dry_run_previews_a_queued_spec(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=7)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         with mock.patch.object(runs.state, "loop_pids", return_value={}), \
              mock.patch.object(runs.state, "containers", return_value=set()), \
              mock.patch.object(runs.state, "cell_state", return_value=None):
             out = self.out_of(runs.ops.stop_cells,
-                              mock.Mock(selectors=[runs.cell_id("sonnet", "alpha", "apidocs", 7)],
+                              mock.Mock(selectors=[runs.cell_id("sonnet", "alpha_apidocs", 7)],
                                         cancel=True, dry_run=True))
         self.assertIn("would drop queued spec", out)
         self.assertIn("Nothing done (--dry-run)", out)
@@ -1260,8 +1236,7 @@ class TestVerbEdges(OperatorTestCase):
         self.assertIn("stopped [all]", out)
 
     def test_conduct_resume_refuses_to_merge_a_conflicting_lane(self):
-        self.queue("sonnet", [dict(task="T1", treatment="alpha",
-                                   condition="apidocs", rep=7)])
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         runs.queue.park_lane("sonnet")
         runs.queue.lane_dir("sonnet").mkdir(parents=True)
         with mock.patch.object(runs.state, "loop_parents", return_value={}), \
@@ -1284,8 +1259,7 @@ class TestVerbEdges(OperatorTestCase):
              mock.patch.object(runs.state, "cell_state",
                                return_value=dict(cid=cid, state="CRASHED",
                                                  why="loop", model="sonnet",
-                                                 treatment="beta",
-                                                 condition="apidocs", task="T1",
+                                                 variant="beta_apidocs", task="T1",
                                                  rep="1", budget=10)):
             out = self.out_of(runs.conduct.conduct_resume, mock.Mock(scope=["sonnet"]))
         self.assertIn("flag cleared", out)
@@ -1318,7 +1292,7 @@ class TestStandingStateSurvivesBulkVerbs(OperatorTestCase):
              mock.patch.object(runs.state, "cell_state",
                                return_value={"cid": cid, "state": "RUNNING",
                                              "why": "agent",
-                                             "treatment": "beta"}), \
+                                             "variant": "beta_apidocs"}), \
              mock.patch.object(runs.subprocess, "run"), \
              mock.patch.object(runs.os, "kill", side_effect=ProcessLookupError):
             runs.ops.stop_cells(mock.Mock(selectors=[cid], cancel=False,
@@ -1427,7 +1401,7 @@ class TestTheWeeklyWallCoolsTheLane(OperatorTestCase):
         cid = CIDS[0]
         st = dict(cid=cid, state="WAITING", why="limit",
                   detail="You've hit your weekly limit · resets 12am (UTC)",
-                  model="sonnet", treatment="beta", condition="apidocs",
+                  model="sonnet", variant="beta_apidocs",
                   task="T1", rep="1", budget=10)
         (self.ws / cid / "iterations.log").touch()
         with mock.patch.object(runs.state, "loop_pids", return_value={}), \

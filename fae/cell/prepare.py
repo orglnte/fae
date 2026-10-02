@@ -1,4 +1,5 @@
-"""Seed one cell's workspace: skeleton, task materials, manifest, agent repo.
+"""Seed one cell's workspace from its variant: the template directories, the
+inputs the agent reads, the manifest, the agent's repo.
 
 Idempotent. It does not clobber the seed or the agent's authored files, and it
 does not wipe iterations.log, unless `fresh` is passed — which never deletes
@@ -6,7 +7,7 @@ either: safe_wipe MOVES the old workspace aside for review.
 
 One implementation, three callers: Cell.prepare() at every run start,
 `cli.py experiment prepare` over the matrix, and main() for the
-operator (`python3 -m fae.cell.prepare TASK TREATMENT CONDITION [REP]`).
+operator (`python3 -m fae.cell.prepare TASK VARIANT [REP]`).
 """
 from __future__ import annotations
 
@@ -37,31 +38,11 @@ GITIGNORE = "__pycache__/\n*.pyc\n.skeleton_manifest\n*.log\n"
 CELL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*_r[0-9]+$")
 
 
-def task_dir(root, cfg=None):
-    """The shared task: skeleton/ (every variant's common files) and the prompts."""
-    return Path((cfg or {}).get("TASK_DIR") or Path(root) / _config.DEFAULT_EXPERIMENT_DIR / "task")
-
-
-def seed_dir(treatment):
-    """The variant's own seed tree (Variant.seed_root)."""
-    cls = _experiment.current().variant(treatment)
+def variant_of(vid):
+    cls = _experiment.current().variant(vid)
     if cls is None:
-        raise FileNotFoundError(f"no variant named {treatment!r} in the experiment")
-    return cls.seed_root()
-
-
-def tech_for(treatment):
-    """The arm's tech, which names its skeleton overlay and the fallback
-    project layout; an undeclared arm is its own tech."""
-    from . import experiment as _experiment
-    return _experiment.current().tech_of(treatment)
-
-
-def docs_for(treatment):
-    """The name the arm's api docs carry (`any.<docs>[.<condition>].api.md`):
-    the variant's DOCS, else its tech."""
-    from . import experiment as _experiment
-    return _experiment.current().docs_of(treatment)
+        raise FileNotFoundError(f"no variant named {vid!r} in the experiment")
+    return cls
 
 
 def safe_wipe(target, workspaces):
@@ -108,53 +89,41 @@ def _copy_tree(src, dst):
     shutil.copytree(src, dst, dirs_exist_ok=True)
 
 
-def seed_skeleton(task, treatment, artifacts, condition, cfg):
-    """Copy the task's skeleton + the variant's overlay + the docs, then
-    record the manifest.
+def _lay(src, dst):
+    """Copy the tree `src` over `dst`, replacing read-only files."""
+    for p in sorted(Path(src).rglob("*")):
+        d = Path(dst) / p.relative_to(src)
+        if p.is_dir():
+            d.mkdir(parents=True, exist_ok=True)
+        else:
+            d.parent.mkdir(parents=True, exist_ok=True)
+            if d.exists():
+                d.chmod(0o644)
+            shutil.copy2(p, d)
 
-    The overlay (the variant's seed/overlay, optional) wins on collision.
-    Docs are the variant's, named <task|any>.<tech|docs|treatment>.<kind>:
-    the prompt is the task's, project_layout is per-treatment falling back to
-    the tech's, and the api doc is per-docs-name (Variant.DOCS, else the
-    tech) with an optional condition.
-    """
+
+def seed(task, vid, artifacts):
+    """The variant's template directories merged in order, then its inputs at
+    their workspace paths; then the manifest and the seal."""
+    from .variants import files
+    cls = variant_of(vid)
+    problems = files.problems(cls)
+    if problems:
+        raise FileNotFoundError(f"{vid}: " + "; ".join(problems))
     artifacts = Path(artifacts)
-    common = task_dir(ROOT, cfg) / "skeleton"
-    tech = tech_for(treatment)
-    docs = docs_for(treatment)
-    seed = seed_dir(treatment)
-    overlay = seed / "overlay"
-    if not common.is_dir():
-        raise FileNotFoundError(f"missing skeleton dir {common}")
-
-    prompt = task_dir(ROOT, cfg) / f"{task}.PROMPT.md"
-    layout = seed / f"{task}.{treatment}.project_layout.md"
-    if not layout.is_file():
-        layout = seed / f"{task}.{tech}.project_layout.md"
-    api = seed / f"any.{docs}.api.md"
-    cond_doc = seed / f"any.{docs}.{condition}.api.md"
-    if cond_doc.is_file():
-        api = cond_doc
-    for f in (prompt, layout, api):
-        if not f.is_file():
-            raise FileNotFoundError(f"missing task material {f}")
-
     artifacts.mkdir(parents=True, exist_ok=True)
-    _copy_tree(common, artifacts)
-    if overlay.is_dir():             # a tech with nothing of its own seeds common alone
-        _copy_tree(overlay, artifacts)
-    shutil.copy2(prompt, artifacts / "TODO.md")
-    (artifacts / "docs").mkdir(exist_ok=True)
-    shutil.copy2(layout, artifacts / "docs" / "project.md")
-    shutil.copy2(api, artifacts / "docs" / f"{tech}.md")
-
-    surface = Surface(artifacts, treatment)
+    for d in cls.TEMPLATE:
+        _copy_tree(d, artifacts)
+    for rel, src in sorted(cls.INPUTS.items()):
+        dst = artifacts / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+    surface = Surface(artifacts, vid)
     surface.seal(surface.record())
-    _seed_repo(artifacts, task, treatment)
-    return api
+    _seed_repo(artifacts, task, vid)
 
 
-def _seed_repo(artifacts, task, treatment):
+def _seed_repo(artifacts, task, vid):
     """The workspace is the AGENT's own git repo: its commits land here, never
     in the study repo, and the seed is the initial commit."""
     (artifacts / ".gitignore").write_text(GITIGNORE)
@@ -168,7 +137,7 @@ def _seed_repo(artifacts, task, treatment):
     git("config", "user.email", "agent@fae.local")
     git("config", "user.name", "fae agent")
     git("add", "-A")
-    git("commit", "-q", "-m", f"seed: task {task}, {treatment}")
+    git("commit", "-q", "-m", f"seed: task {task}, {vid}")
 
 
 _runs_cache = {}
@@ -183,23 +152,13 @@ def runs_module(root=None):
     return common
 
 
-def expected_seed_doc(treatment, condition, root=None):
-    """The doc this combination MUST be seeded with (the experiment's
-    SEED_DOCS), or None when the matrix does not define it.
-
-    A fallback to the arm's base doc is correct for conditions that carry no
-    prose of their own and CATASTROPHIC otherwise: the cell would run on the
-    base doc while being labelled with the condition it never received.
-    """
-    from . import experiment as _experiment
-    pinned = _experiment.current().seed_docs.get((treatment, condition))
-    return None if pinned is None else pinned[0]
-
-
-def prepare(cid, task, treatment, condition, rep, workspaces, root=ROOT,
-            fresh=False, impl="bash", model_version="?", cfg=None):
+def prepare(cid, task, vid, rep, workspaces, root=ROOT, fresh=False, reference=False,
+            impl="bash", model_version="?", cfg=None):
+    """The cell's workspace, seeded from variant `vid`; with `reference` the
+    variant's known answer is laid over the template (a smoke cell)."""
     workspaces = Path(workspaces)
     cfg = cfg if cfg is not None else _config.load(root)
+    cls = variant_of(vid)
     ws = workspaces / cid
     if fresh:
         moved = safe_wipe(ws, workspaces)
@@ -208,52 +167,21 @@ def prepare(cid, task, treatment, condition, rep, workspaces, root=ROOT,
     (ws / "artifacts").mkdir(parents=True, exist_ok=True)
     (ws / "PROMPT.md").write_text(PROMPT)
 
-    tech = tech_for(treatment)
-    docs = docs_for(treatment)
-    seed = seed_dir(treatment)
-    api = seed / f"any.{docs}.api.md"
-    cond_doc = seed / f"any.{docs}.{condition}.api.md"
-    if condition != "reference" and cond_doc.is_file():
-        api = cond_doc
-
-    if condition != "reference":
-        want = expected_seed_doc(treatment, condition, root)
-        if want is None and os.environ.get("ALLOW_UNPINNED_SEED") != "1":
-            raise RuntimeError(
-                f"{treatment}/{condition} is not a defined matrix combination "
-                f"— no seed doc is pinned, so the cell would run on "
-                f"{api.name!r} while being labelled {condition!r}")
-        if want is not None and api.name != want:
-            raise RuntimeError(
-                f"{treatment}/{condition} must be seeded with {want!r} but "
-                f"resolved to {api.name!r} — the condition doc is missing or "
-                f"renamed, and the cell would silently get the base doc")
-
-    surface = Surface(ws / "artifacts", treatment)
+    surface = Surface(ws / "artifacts", vid)
     if surface.has_manifest():
         # A resumed cell keeps its tree; only the seal is brought up to date.
         surface.seal()
     else:
-        seed_skeleton(task, treatment, ws / "artifacts", condition, cfg)
-        if condition == "reference":
-            ref = seed / "reference" / "overlay"
-            if not ref.is_dir():
-                raise FileNotFoundError(f"no reference impl for {tech} ({ref})")
-            for p in sorted(ref.rglob("*")):
-                dst = ws / "artifacts" / p.relative_to(ref)
-                if p.is_dir():
-                    dst.mkdir(parents=True, exist_ok=True)
-                else:
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    if dst.exists():
-                        dst.chmod(0o644)
-                    shutil.copy2(p, dst)
+        seed(task, vid, ws / "artifacts")
+        if reference:
+            if cls.REFERENCE is None or not Path(cls.REFERENCE).is_dir():
+                raise FileNotFoundError(f"{vid} declares no reference ([verify] reference)")
+            _lay(cls.REFERENCE, ws / "artifacts")
 
-    doc_lines = api.read_text(errors="replace").count("\n")
     (ws / "cell.env").write_text(
-        f"CELL_ID={cid}\nTASK={task}\nTREATMENT={treatment}\n"
-        f"CONDITION={condition}\nREPEAT={rep}\nDOC_LINES={doc_lines}\n"
-        f"ATTEMPT_BUDGET={cfg.get('ATTEMPT_BUDGET', 10)}\nIMPL={impl}\n"
+        f"CELL_ID={cid}\nTASK={task}\nVARIANT={vid}\nREPEAT={rep}\n"
+        + ("REFERENCE=1\n" if reference else "")
+        + f"ATTEMPT_BUDGET={cfg.get('ATTEMPT_BUDGET', 10)}\nIMPL={impl}\n"
         f"MODEL_VERSION={model_version}\n")
 
     ledger = ws / "iterations.log"
@@ -265,18 +193,18 @@ def prepare(cid, task, treatment, condition, rep, workspaces, root=ROOT,
 
 def main(argv=None):
     a = argv if argv is not None else sys.argv[1:]
-    if len(a) < 3:
-        print("usage: prepare TASK TREATMENT CONDITION [REPEAT]", file=sys.stderr)
+    if len(a) < 2:
+        print("usage: prepare TASK VARIANT [REPEAT]", file=sys.stderr)
         return 1
-    task, treatment, condition = a[0], a[1], a[2]
-    rep = a[3] if len(a) > 3 else "1"
+    task, vid = a[0], a[1]
+    rep = a[2] if len(a) > 2 else "1"
     root = _paths.root()
     cfg = _config.load(root)
     common = runs_module(root)
-    cid = common.cell_id(os.environ.get("MODEL", "?"), treatment, condition, rep,
+    cid = common.cell_id(os.environ.get("MODEL", "?"), vid, rep,
                          task, effort=os.environ.get("EFFORT", "high"),
                          smoke=bool(os.environ.get("SMOKE")))
-    ws = prepare(cid, task, treatment, condition, rep,
+    ws = prepare(cid, task, vid, rep,
                  workspaces=cfg.get("WORKSPACES_DIR"), root=root,
                  fresh=bool(os.environ.get("FRESH")),
                  impl=os.environ.get("CELL_IMPL", "bash"),

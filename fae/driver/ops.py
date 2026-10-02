@@ -136,20 +136,18 @@ def _spawn_detached(argv, env, cid, what="spawn"):
     return p.returncode
 
 
-def _cell_argv(task, treatment, condition, rep):
-    return [sys.executable, "-m", "fae.cell", task, treatment,
-            condition, str(rep)]
+def _cell_argv(task, variant, rep):
+    return [sys.executable, "-m", "fae.cell", task, variant, str(rep)]
 
 
 def _spawn_spec(model, spec, cid, what):
     """Start one cell from its spec. Returns the spawn rc (None = alive)."""
     prestart_clean(cid)
-    env = dict(os.environ, MODEL=model, CONDITION=spec["condition"])
+    env = dict(os.environ, MODEL=model)
     if spec.get("fresh"):
         env["FRESH"] = "1"
     return _spawn_detached(
-        _cell_argv(spec.get("task", "T1"),
-                   spec["treatment"], spec["condition"], spec["rep"]),
+        _cell_argv(spec.get("task", "T1"), spec["variant"], spec["rep"]),
         env, cid, what)
 
 
@@ -587,38 +585,38 @@ def _bringup_teardown(cid):
     if cls is None or not (ws / "artifacts").is_dir():
         return
     cell = _ShimCell(cid, ws, common.ROOT)
-    cell.treatment = p[1]
+    cell.variant = p[1]
     variant = cls(cell)
     run_out = ws / _verify.RUN_OUT
     run_out.mkdir(exist_ok=True)
     ctx = _verify.Ctx(root=str(common.ROOT), experiment_dir=str(cell.conf.get("EXPERIMENT_DIR")),
                       workspace=str(ws), artifacts=str(ws / "artifacts"), out=str(run_out),
-                      cid=cid, task=p[3], variant=p[1])
+                      cid=cid, task=p[2], variant=p[1])
     _verify.run_teardown(ctx, variant, timeout_s=TEARDOWN_TIMEOUT_S, log_dir=ws)
 
 
-def _variant_teardown(treatment, cid, timeout=None):
-    """The arm's teardown (fae/cell/variants.py <Arm>.teardown), run
-    in-process through the cell it belongs to — the same call the driver's own
-    `finally` makes. Best-effort and idempotent by the treatment's contract;
+def _variant_teardown(variant, cid, timeout=None):
+    """The variant's teardown (fae/cell/variants), run in-process through the
+    cell it belongs to — the same call the driver's own `finally` makes.
+    Best-effort and idempotent by the variant's contract;
     an exception lands as an ALERT in the cell's ledger (Cell.teardown).
 
     `timeout`: run it on a thread and give up waiting after that many
     seconds. The thread is a daemon, so a docker call that hangs past it is
     abandoned rather than wedging conduct; it is reported, never hidden.
     """
-    if not treatment:
+    if not variant:
         return
 
     def run():
         sys.path.insert(0, str(common.ROOT))
         from fae.cell import Cell
         c = Cell(cid, workspaces=common.WS, root=common.ROOT)
-        c._env.setdefault("TREATMENT", treatment)
+        c._env.setdefault("VARIANT", variant)
         try:
             c.teardown()
         except Exception as e:           # Cell.teardown already ALERTs; a
-            common._rec_log(f"{cid} treatment teardown raised {type(e).__name__}: {e}")
+            common._rec_log(f"{cid} variant teardown raised {type(e).__name__}: {e}")
 
     if timeout is None:
         run()
@@ -627,11 +625,11 @@ def _variant_teardown(treatment, cid, timeout=None):
     t.start()
     t.join(timeout)
     if t.is_alive():
-        common._rec_log(f"{cid} treatment teardown still running after {timeout}s "
-                 f"— abandoned (inspect the {treatment} infra by hand)")
+        common._rec_log(f"{cid} variant teardown still running after {timeout}s "
+                 f"— abandoned (inspect the {variant} infra by hand)")
 
 
-def _teardown_cell(cid, treatment=None, *, reason, grace=STOP_GRACE_S,
+def _teardown_cell(cid, variant=None, *, reason, grace=STOP_GRACE_S,
                    unblock_agent=False, dry=False):
     """THE one way a cell dies by conduct's hand. Returns what it took:
     "cooperative" | "termed" | "killed" | "absent".
@@ -642,9 +640,9 @@ def _teardown_cell(cid, treatment=None, *, reason, grace=STOP_GRACE_S,
     the instant the owner dies. A kill that does not also tear down therefore
     hands the arm to a new cell while the old cluster is still running.
     """
-    if treatment is None:
+    if variant is None:
         st = state.cell_state(common.WS / cid, {}, set())
-        treatment = (st or {}).get("treatment")
+        variant = (st or {}).get("variant")
     pid = state.loop_parents().get(cid)
     if dry:
         return "dry"
@@ -677,9 +675,9 @@ def _teardown_cell(cid, treatment=None, *, reason, grace=STOP_GRACE_S,
     # Always, and always AFTER the loop is dead: running it under a live loop
     # tears down infra the loop is still using. Idempotent, so the
     # cooperative case re-runs a no-op.
-    _variant_teardown(treatment, cid, timeout=TEARDOWN_TIMEOUT_S)
+    _variant_teardown(variant, cid, timeout=TEARDOWN_TIMEOUT_S)
     subprocess.run(["docker", "rm", "-f", "-v", common.agent_container(cid),
-                    *common.infra_containers(treatment, cid)], capture_output=True)
+                    *common.infra_containers(variant, cid)], capture_output=True)
     return outcome
 
 
@@ -742,7 +740,7 @@ def stop_cells(args):
     request_pause(cids, "killed" if cancel else "stopped")
     # DURABLE INTENT FIRST, before any slow or failure-prone work. This used to
     # be written per-cid at the END of the teardown loop below, after SIGKILL,
-    # `docker rm -f` and the treatment teardown — so a Ctrl-C, an exception or a
+    # `docker rm -f` and the variant teardown — so a Ctrl-C, an exception or a
     # hung docker call between here and there left the cell holding
     # `.paused reason=killed` with NO `.cancelled`. That cell renders
     # PAUSED·killed instead of DONE·cancelled, which means the kill did not
@@ -785,7 +783,7 @@ def stop_cells(args):
                        capture_output=True)
         st = state.cell_state(common.WS / cid, {}, set())
         if st:
-            _variant_teardown(st["treatment"], cid)
+            _variant_teardown(st["variant"], cid)
     # With --cancel, .cancelled is what makes it STICK — the cell renders
     # DONE·cancelled, reconcile treats it as terminal, resume skips DONE, and
     # conduct's doneness check sees a finished cell. It is written above,
@@ -803,57 +801,39 @@ def stop_cells(args):
 
 
 def spawn_matrix(args):
-    specs = []
-    for rep in range(1, args.reps + 1):
-        for treatment, conditions in common.definition().matrix.items():
-            for condition in conditions:
-                specs.append(dict(task=args.task, treatment=treatment,
-                                  condition=condition, rep=rep, fresh=args.fresh))
+    """Every active variant, `--reps` reps each, rep-outer."""
+    specs = [dict(task=args.task, variant=v, rep=rep, fresh=args.fresh)
+             for rep in range(1, args.reps + 1)
+             for v in common.definition().active]
     n = sum(queue.enqueue(args.model, s) is not None for s in specs)
     print(f"enqueued {n} runs for {args.model} — conduct admits them "
           f"(start it if not running: python3 cli.py conduct run)"
           + (f"; {len(specs) - n} already pending" if n < len(specs) else ""))
 
 
-def _parse_combo(s):
-    """'treatment·condition' or 'treatment/condition' -> (treatment, condition)."""
-    for sep in ("·", "/"):
-        if sep in s:
-            t, v = s.split(sep, 1)
-            if t in common.definition().matrix and v in common.definition().matrix[t]:
-                return t, v
-            sys.exit(f"unknown combo '{s}' — valid: "
-                     + ", ".join(f"{t}·{v}" for t in common.definition().matrix for v in common.definition().matrix[t]))
-    sys.exit(f"combo '{s}' needs the form treatment·condition or treatment/condition")
-
-
-def _default_combos(conditions, all_conditions):
-    """apidocs on every treatment, plus any condition named — or the whole
-    matrix. The apidocs batch is the study's comparison; the other conditions
-    are opt-in so a bare top-up never widens it."""
-    wanted = None if all_conditions else {"apidocs", *conditions}
-    for v in conditions:
-        if not any(v in vs for vs in common.definition().matrix.values()):
-            sys.exit(f"unknown condition '{v}' — valid: "
-                     + ", ".join(sorted({x for vs in common.definition().matrix.values() for x in vs})))
-    return [(t, v) for t in common.definition().matrix for v in common.definition().matrix[t]
-            if wanted is None or v in wanted]
+def _selected(variants):
+    """The variants named, each one of the experiment's; none named: every
+    active one."""
+    d = common.definition()
+    for v in variants:
+        if v not in d.variants:
+            sys.exit(f"unknown variant '{v}' — valid: {', '.join(d.active)}")
+    return list(variants) or list(d.active)
 
 
 def top_up(args):
-    """Fill each selected combo's missing reps up to --to-rep, rep-outer.
+    """Fill each selected variant's missing reps up to --to-rep, rep-outer.
 
-    Rep-outer keeps every combination advancing together, so a partially
-    drained queue still yields comparable n across the matrix. A rep is
-    skipped when its workspace has RUN (any verdict, or attempts in flight) or
-    a spec for it is already queued. Workers are NOT started.
+    Rep-outer keeps every variant advancing together, so a partially drained
+    queue still yields comparable n across the variants. A rep is skipped
+    when its workspace has RUN (any verdict, or attempts in flight) or a spec
+    for it is already queued. Workers are NOT started.
 
     A prepared-but-never-launched workspace does not count as a rep: it holds
     no attempt and will never produce a score, so counting it silently caps
-    the combo below target and every coverage report inherits the error.
+    the variant below target and every coverage report inherits the error.
     """
-    combos = [_parse_combo(c) for c in args.combos] if args.combos \
-        else _default_combos(getattr(args, "conditions", []), getattr(args, "all_conditions", False))
+    variants = _selected(getattr(args, "variants", []))
     queued = set()
     for d_ in (queue.lane_dir(args.model), queue.lane_dir(args.model, parked=True)):
         for p in queue._dir_specs(d_):
@@ -861,32 +841,31 @@ def top_up(args):
                 s = queue.read_spec(p)
             except (OSError, json.JSONDecodeError):
                 continue
-            queued.add((s["treatment"], s["condition"], s["rep"]))
+            queued.add((s["variant"], s["rep"]))
     have = collections.defaultdict(set)
     unstarted = collections.defaultdict(set)
     for d in common.WS.iterdir():
         if not d.is_dir():
             continue
         p = common.parse_cell_id(d.name)
-        if not (p and p[0] == args.model and p[3] == args.task):
+        if not (p and p[0] == args.model and p[2] == args.task):
             continue
         if common.ledger.parse(d)["iters"] or (d / ".loop").exists():
-            have[(p[1], p[2])].add(int(p[4]))
+            have[p[1]].add(int(p[3]))
         else:
-            unstarted[(p[1], p[2])].add(int(p[4]))
-    need = {c: [r for r in range(1, args.to_rep + 1)
-                if r not in have[c] and (c[0], c[1], r) not in queued]
-            for c in combos}
-    specs = [dict(task=args.task, treatment=t, condition=v, rep=rep, fresh=False)
+            unstarted[p[1]].add(int(p[3]))
+    need = {v: [r for r in range(1, args.to_rep + 1)
+                if r not in have[v] and (v, r) not in queued]
+            for v in variants}
+    specs = [dict(task=args.task, variant=v, rep=rep, fresh=False)
              for rep in range(1, args.to_rep + 1)
-             for (t, v) in combos if rep in need[(t, v)]]
-    for (t, v) in combos:
-        idle = sorted(unstarted[(t, v)] & set(need[(t, v)]))
-        print(f"{args.model:7} {t}·{v:9} have={sorted(have[(t, v)])} "
-              f"add={need[(t, v)]}"
+             for v in variants if rep in need[v]]
+    for v in variants:
+        idle = sorted(unstarted[v] & set(need[v]))
+        print(f"{args.model:7} {v:24} have={sorted(have[v])} add={need[v]}"
               + (f"  (of which {idle} were prepared but never ran)" if idle else ""))
     if not specs:
-        print("nothing to add — every selected combo is at target or queued")
+        print("nothing to add — every selected variant is at target or queued")
         return
     if args.dry_run:
         print(f"[dry-run] would enqueue {len(specs)} spec(s) for {args.model}")
@@ -907,8 +886,8 @@ def spawn(args):
 
     if args.model != "human":
         from fae.driver import image
-        if not image.ensure_agent_for(args.treatment):
-            sys.exit(f"refusing: the agent image for {args.treatment} could not be built "
+        if not image.ensure_agent_for(args.variant):
+            sys.exit(f"refusing: the agent image for {args.variant} could not be built "
                      f"(the lines above say why)")
 
     live = state.loop_parents()
@@ -916,7 +895,7 @@ def spawn(args):
         # smoke= must flow here exactly as prepare passes it: a SMOKE=1 spawn
         # that computes the unsmoke cid guards one identity while the cell
         # process (which honors SMOKE via load_config) runs under another.
-        cid = common.cell_id(args.model, args.treatment, args.condition, rep, args.task,
+        cid = common.cell_id(args.model, args.variant, rep, args.task,
                       smoke=bool(os.environ.get("SMOKE")))
         if cid in live:
             print(f"refusing: loop already running for {cid} (pid {live[cid]}) — "
@@ -940,17 +919,15 @@ def spawn(args):
             print(f"HUMAN cell {cid} — run this in YOUR terminal (tmux for long sessions):\n")
             print(f"  cd {common.ROOT} && "
                   + (f"FRESH=1 " if args.fresh else "")
-                  + f"MODEL=human CONDITION={args.condition} "
-                  f"python3 -m fae.cell {args.task} {args.treatment} "
-                  f"{args.condition} {rep}\n")
+                  + f"MODEL=human "
+                  f"python3 -m fae.cell {args.task} {args.variant} {rep}\n")
             print("Each attempt: edit workspaces*/{cid}/artifacts, press ENTER to "
                   "verify (q to stop).".format(cid=cid))
             continue
-        env = dict(os.environ, MODEL=args.model, CONDITION=args.condition)
+        env = dict(os.environ, MODEL=args.model)
         if args.fresh:
             env["FRESH"] = "1"
-        if _spawn_detached(_cell_argv(args.task, args.treatment,
-                                      args.condition, rep),
+        if _spawn_detached(_cell_argv(args.task, args.variant, rep),
                            env, cid, "spawn") is None:
             print(f"spawned {cid}")
 
@@ -1008,9 +985,9 @@ def _respawn(st, dry):
         common._rec_log(f"{cid} respawn skipped — a live loop already owns the workspace")
         return False
     prestart_clean(cid)
-    env = dict(os.environ, MODEL=st["model"], CONDITION=st["condition"])
-    if _spawn_detached(_cell_argv(st["task"], st["treatment"],
-                            st["condition"], st["rep"]), env, cid, "respawn") is not None:
+    env = dict(os.environ, MODEL=st["model"])
+    if _spawn_detached(_cell_argv(st["task"], st["variant"], st["rep"]),
+                       env, cid, "respawn") is not None:
         # Do NOT bump the respawn budget for a launch that never started: a
         # cell refused on a preflight would otherwise walk to MAX_RESPAWNS and
         # be flagged for a human, with the real cause never reported anywhere.
@@ -1136,7 +1113,7 @@ def _tr_emit(line):
 
 def log(args):
     """The cell's most recent story: the verify log if one exists, else the
-    treatment hooks' log; a bash-era cell still has its run_cell.log."""
+    variant hooks' log."""
     ws = common.WS / args.cell
     for name in ("verify.log", "hooks.log", "run_cell.log"):
         if (ws / name).exists():

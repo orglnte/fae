@@ -1,15 +1,14 @@
-"""The treatment interface and the registry of the experiment's variants.
+"""The experiment's variants: the registry (read from the variant files,
+fae/cell/variants/files.py) and the infra a cell of one gets.
 
-`base.Variant` is what the driver calls — setup / teardown / infra_ok
-— and what every variant answers. The variants themselves belong to the
-experiment, which declares them (fae/cell/experiment.py); this package
-reads that registry, keyed by arm.
+`base.Variant` is what the driver calls — setup / teardown / infra_ok — and
+what every variant answers.
 
-Slots are NOT taken here: the driver holds the work slot and the arm slot on
+Slots are NOT taken here: the driver holds the work slot and the lock slot on
 its own fds for the cell's whole life (Cell.acquire_slots), so provisioning
 never waits on a queue.
 
-`python3 -m fae.cell.variants <arm> setup|teardown|infra <cid> <ws>`
+`python3 -m fae.cell.variants <variant> setup|teardown|infra <cid> <ws>`
 is the operator's hand entry; `cli.py experiment infra` calls the classes
 directly.
 """
@@ -27,26 +26,27 @@ NOOP_ENV = "FAE_VARIANT_NOOP"
 
 
 def registry():
-    """arm -> class, from the experiment definition (fae/cell/experiment.py)."""
+    """id -> class, from the experiment's variant files."""
     from .. import experiment as _experiment
     return _experiment.current().variants
 
 
 def for_cell(cell):
-    """The cell's treatment. FAE_VARIANT_NOOP=1 in the environment is the
-    fixture seam: a root with no infra provisions nothing."""
+    """The cell's variant, as its infra. FAE_VARIANT_NOOP=1 in the
+    environment is the fixture seam: a root with no infra provisions
+    nothing."""
     if os.environ.get(NOOP_ENV) == "1":
         return NoopVariant(cell)
-    cls = registry().get(cell.treatment)
+    cls = registry().get(cell.variant)
     if cls is None:
         return NoopVariant(cell)
     return cls(cell)
 
 
 class _ShimCell:
-    """What the operator's infra preflight (`cli.py experiment infra`)
-    hands the treatment: the cell as the hooks knew it
-    — cid, workspace, root, config, condition."""
+    """What the operator's infra preflight (`cli.py experiment infra`) hands
+    a variant: the cell as the hooks knew it — cid, workspace, root, config,
+    variant."""
 
     def __init__(self, cid, ws, root):
         from .. import config as _config
@@ -54,37 +54,34 @@ class _ShimCell:
         self.ws = Path(ws)
         self.root = Path(root)
         self.conf = _config.load(self.root)
-        self.treatment = ""
-        self.condition = os.environ.get("CONDITION", "")
+        self.variant = ""
         try:
             for line in (self.ws / "cell.env").read_text().splitlines():
                 k, _, v = line.partition("=")
-                if k == "TREATMENT":
-                    self.treatment = v.strip()
-                elif k == "CONDITION" and not self.condition:
-                    self.condition = v.strip()
+                if k == "VARIANT":
+                    self.variant = v.strip()
         except OSError:
             pass
 
 
 def main(argv=None):
-    """python3 -m fae.cell.variants <arm> setup|teardown|infra <cid> <ws>"""
+    """python3 -m fae.cell.variants <variant> setup|teardown|infra <cid> <ws>"""
     a = list(argv if argv is not None else sys.argv[1:])
     if len(a) < 2:
         print(main.__doc__, file=sys.stderr)
         return 2
-    arm, hook = a[0], a[1]
+    vid, hook = a[0], a[1]
     from fae import paths
     root = paths.root()
     if hook == "infra":
         cell = _ShimCell(a[2] if len(a) > 2 else "", a[3] if len(a) > 3 else "/nonexistent", root)
-        cell.treatment = arm
+        cell.variant = vid
         return 0 if for_cell(cell).infra_ok() else 1
     if len(a) < 4:
         print(main.__doc__, file=sys.stderr)
         return 2
     cell = _ShimCell(a[2], a[3], root)
-    cell.treatment = arm
+    cell.variant = vid
     t = for_cell(cell)
     if hook == "setup":
         try:

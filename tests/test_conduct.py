@@ -68,8 +68,8 @@ class ConductCase(OrchTmpCase):
     def claimed(self, model):
         return [runs.queue.spec_cid(p) for p in runs.queue.running_specs(model)]
 
-    def spec(self, treatment="beta", condition="apidocs", rep=1):
-        return {"task": "T1", "treatment": treatment, "condition": condition,
+    def spec(self, variant="beta_apidocs", rep=1):
+        return {"task": "T1", "variant": variant,
                 "rep": rep, "budget": 10, "fresh": False}
 
     def run_conduct(self, n=5, supervise=0):
@@ -165,8 +165,8 @@ class TestFinishedSpecsAreRetired(ConductCase):
 
     def test_a_done_cells_spec_leaves_the_lane(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
-        m, t, v, task, rep = runs.parse_cell_id(cid)
-        runs.queue.enqueue(m, dict(task=task, treatment=t, condition=v, rep=int(rep),
+        m, v, task, rep = runs.parse_cell_id(cid)
+        runs.queue.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         self._done_cell(cid)
         with mock.patch.object(runs.state, "containers", return_value=set()):
@@ -176,8 +176,8 @@ class TestFinishedSpecsAreRetired(ConductCase):
 
     def test_an_unfinished_cells_spec_stays(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
-        m, t, v, task, rep = runs.parse_cell_id(cid)
-        runs.queue.enqueue(m, dict(task=task, treatment=t, condition=v, rep=int(rep),
+        m, v, task, rep = runs.parse_cell_id(cid)
+        runs.queue.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         d = self.ws / cid
         (d / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -192,8 +192,8 @@ class TestFinishedSpecsAreRetired(ConductCase):
         """`cell resume` is what leaves these behind — it respawns without
         going through admission, so the spec is never claimed."""
         cid = "sonnet_high_beta_apidocs_T1_r1"
-        m, t, v, task, rep = runs.parse_cell_id(cid)
-        runs.queue.enqueue(m, dict(task=task, treatment=t, condition=v, rep=int(rep),
+        m, v, task, rep = runs.parse_cell_id(cid)
+        runs.queue.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         self._done_cell(cid)
         out = io.StringIO()
@@ -209,8 +209,8 @@ class TestFinishedSpecsAreRetired(ConductCase):
         conduct can admit it a second time. The claim is one rename(2), so the
         two cannot both win."""
         cid = "sonnet_high_beta_apidocs_T1_r1"
-        m, t, v, task, rep = runs.parse_cell_id(cid)
-        runs.queue.enqueue(m, dict(task=task, treatment=t, condition=v, rep=int(rep),
+        m, v, task, rep = runs.parse_cell_id(cid)
+        runs.queue.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         d = self.ws / cid
         (d / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -229,8 +229,8 @@ class TestFinishedSpecsAreRetired(ConductCase):
 
     def test_a_spawn_that_never_starts_gives_the_spec_back(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
-        m, t, v, task, rep = runs.parse_cell_id(cid)
-        runs.queue.enqueue(m, dict(task=task, treatment=t, condition=v, rep=int(rep),
+        m, v, task, rep = runs.parse_cell_id(cid)
+        runs.queue.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         d = self.ws / cid
         (d / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -249,8 +249,8 @@ class TestFinishedSpecsAreRetired(ConductCase):
 
     def test_a_preview_moves_nothing(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
-        m, t, v, task, rep = runs.parse_cell_id(cid)
-        runs.queue.enqueue(m, dict(task=task, treatment=t, condition=v, rep=int(rep),
+        m, v, task, rep = runs.parse_cell_id(cid)
+        runs.queue.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         self._done_cell(cid)
         with mock.patch.object(runs.state, "containers", return_value=set()):
@@ -297,7 +297,7 @@ class TestPreflight(unittest.TestCase):
     def test_every_arm_is_probed_and_a_refusal_is_a_note(self):
         # The experiment's infra (its daemons, images, tools) is the
         # variants' own preflight; conduct runs it and reports, never installs.
-        with mock.patch.object(runs.rig, "_probe_arms", return_value=2) as probe:
+        with mock.patch.object(runs.rig, "_probe_variants", return_value=2) as probe:
             ok, calls = self._run({})
         self.assertTrue(ok, "a refused arm is a note, not a stop")
         self.assertEqual(probe.call_count, 1)
@@ -349,7 +349,7 @@ class TestClaims(ConductCase):
         cid = "aaa_high_beta_apidocs_T1_r7"
         (self.ws / cid).mkdir(parents=True)
         st = {"cid": cid, "state": "CRASHED", "why": "loop", "model": "aaa",
-              "treatment": "beta", "condition": "apidocs", "task": "T1",
+              "variant": "beta_apidocs", "task": "T1",
               "rep": "7", "budget": 10}
         with mock.patch.object(runs.common, "RECONCILE_LOG", self.orch / "rec.log"):
             runs.supervise._reclaim(st, dry=False)
@@ -408,8 +408,7 @@ class TestClaims(ConductCase):
         with mock.patch.object(runs.state, "cell_state",
                                return_value={"cid": cid, "state": "RUNNING",
                                              "why": "agent", "model": "aaa",
-                                             "treatment": "beta",
-                                             "condition": "apidocs", "task": "T1",
+                                             "variant": "beta_apidocs", "task": "T1",
                                              "rep": "9", "budget": 10}):
             out = self.run_conduct()
         self.assertIn("adopted 1 live cell", out)
@@ -452,7 +451,7 @@ class TestGates(ConductCase):
         instead left the arm idle between cells and could idle a whole lane
         whose backlog was all alpha."""
         self.live["x_high_alpha_apidocs_T1_r9"] = 1
-        self.q("aaa", [self.spec(treatment="alpha")])
+        self.q("aaa", [self.spec(variant="alpha_apidocs")])
         self.run_conduct()
         self.assertEqual(len(self.spawned), 1, self.spawned)
         self.assertEqual(self.pending("aaa"), [])
@@ -461,7 +460,7 @@ class TestGates(ConductCase):
         """The flag quarantines from ADMISSION too: repair stops requeueing a
         flagged cell, but a spec already in the lane would respawn it right
         past the flag."""
-        cid = runs.cell_id("aaa", "beta", "apidocs", 1, "T1")
+        cid = runs.cell_id("aaa", "beta_apidocs", 1, "T1")
         (self.ws / cid).mkdir(parents=True)
         (self.ws / cid / "reconcile.flagged").touch()
         self.q("aaa", [self.spec()])
@@ -472,7 +471,7 @@ class TestGates(ConductCase):
                                        "operator's resume")
 
     def test_done_cell_spec_is_skipped(self):
-        cid = runs.cell_id("aaa", "beta", "apidocs", 1, "T1")
+        cid = runs.cell_id("aaa", "beta_apidocs", 1, "T1")
         (self.ws / cid).mkdir(parents=True)
         with mock.patch.object(runs.state, "cell_state",
                                return_value={"cid": cid, "state": "DONE", "why": "green"}):

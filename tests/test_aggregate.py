@@ -141,47 +141,47 @@ class TestShortModelStripsGatewayPaths(unittest.TestCase):
 
 class TestRowOrdering(unittest.TestCase):
     """Rows group by model, then rank BEST FIRST: green rate descending, then
-    mean iterations-to-green ascending. Alphabetical-by-treatment said nothing;
-    a reader comparing two arms of one model had to do it by eye."""
+    mean iterations-to-green ascending. Alphabetical-by-variant said nothing;
+    a reader comparing two variants of one model had to do it by eye."""
 
     def rows(self, cells):
         return list(aggregate.group_and_rank(cells))
 
     def test_higher_green_rate_ranks_first(self):
-        cells = ([dict(cell(False), model="m", treatment="lo", condition="c")] * 3
-                 + [dict(cell(True, itg=9), model="m", treatment="hi", condition="c")] * 3)
+        cells = ([dict(cell(False), model="m", variant="lo_c")] * 3
+                 + [dict(cell(True, itg=9), model="m", variant="hi_c")] * 3)
         got = self.rows(cells)
-        self.assertTrue(got[0].endswith("hi/c"), got)
+        self.assertTrue(got[0].endswith("hi_c"), got)
 
     def test_equal_green_rate_breaks_on_faster_itg(self):
-        cells = ([dict(cell(True, itg=8), model="m", treatment="slow", condition="c")] * 2
-                 + [dict(cell(True, itg=1), model="m", treatment="fast", condition="c")] * 2)
+        cells = ([dict(cell(True, itg=8), model="m", variant="slow_c")] * 2
+                 + [dict(cell(True, itg=1), model="m", variant="fast_c")] * 2)
         got = self.rows(cells)
-        self.assertTrue(got[0].endswith("fast/c"), got)
+        self.assertTrue(got[0].endswith("fast_c"), got)
 
-    def test_arms_with_no_green_sort_LAST_not_first(self):
+    def test_variants_with_no_green_sort_LAST_not_first(self):
         """mean_itg is None there; a naive None-as-zero would rank them best."""
-        cells = ([dict(cell(False), model="m", treatment="never", condition="c")] * 3
-                 + [dict(cell(True, itg=7), model="m", treatment="some", condition="c")] * 3)
+        cells = ([dict(cell(False), model="m", variant="never_c")] * 3
+                 + [dict(cell(True, itg=7), model="m", variant="some_c")] * 3)
         got = self.rows(cells)
-        self.assertTrue(got[-1].endswith("never/c"), got)
+        self.assertTrue(got[-1].endswith("never_c"), got)
 
     def test_pooled_model_ids_share_one_row(self):
         """POOLED_MODELS folds a model id into another at grouping only."""
-        cells = ([dict(cell(True, itg=2), model="claude-fable-5", treatment="t", condition="c")] * 2
-                 + [dict(cell(True, itg=4), model="claude-fable-5-1", treatment="t", condition="c")] * 2)
+        cells = ([dict(cell(True, itg=2), model="claude-fable-5", variant="t_c")] * 2
+                 + [dict(cell(True, itg=4), model="claude-fable-5-1", variant="t_c")] * 2)
         got = aggregate.group_and_rank(cells)
-        self.assertEqual(list(got), ["fable-5.1/5 / t/c"])
-        self.assertEqual(got["fable-5.1/5 / t/c"]["n_cells"], 4)
+        self.assertEqual(list(got), ["fable-5.1/5 / t_c"])
+        self.assertEqual(got["fable-5.1/5 / t_c"]["n_cells"], 4)
         self.assertEqual(aggregate.short_model("fable-5.1/5"), "fable-5.1/5")
 
     def test_a_single_id_can_carry_a_custom_row_label(self):
-        cells = [dict(cell(True, itg=1), model="Gemini 3.1 Pro (High)", treatment="t", condition="c")] * 2
-        self.assertEqual(list(aggregate.group_and_rank(cells)), ["g31pro / t/c"])
+        cells = [dict(cell(True, itg=1), model="Gemini 3.1 Pro (High)", variant="t_c")] * 2
+        self.assertEqual(list(aggregate.group_and_rank(cells)), ["g31pro / t_c"])
 
     def test_models_stay_grouped(self):
-        cells = ([dict(cell(True, itg=9), model="aaa", treatment="t", condition="c")] * 2
-                 + [dict(cell(True, itg=1), model="zzz", treatment="t", condition="c")] * 2)
+        cells = ([dict(cell(True, itg=9), model="aaa", variant="t_c")] * 2
+                 + [dict(cell(True, itg=1), model="zzz", variant="t_c")] * 2)
         got = self.rows(cells)
         self.assertTrue(got[0].startswith("aaa"), got)
         self.assertTrue(got[-1].startswith("zzz"), got)
@@ -192,30 +192,27 @@ class TestTableColumns(unittest.TestCase):
     number attributed to the wrong metric."""
 
     def test_header_order_is_itg_then_loc_no_defects(self):
-        hdrs = [h for h, _ in aggregate.table_columns(True, None)]
+        hdrs = [h for h, _ in aggregate.table_columns(None)]
         self.assertLess(hdrs.index("ITG mn/avg/mx"), hdrs.index("SLoC avg -mn/+mx"))
         self.assertNotIn("DEFECTS", hdrs)
 
     def test_row_order_matches_the_header(self):
         src = (Path(ROOT) / "fae" / "scoring" / "aggregate.py").read_text()
         row = next(l for l in src.splitlines() if "[str(n), e2e, grn, itg, agent_min, per_att, lines]" in l)
-        hdrs = [h for h, _ in aggregate.table_columns(True, None)]
+        hdrs = [h for h, _ in aggregate.table_columns(None)]
         self.assertLess(row.index("itg"), row.index("agent_min"))
         self.assertLess(row.index("agent_min"), row.index("per_att"))
         self.assertLess(row.index("per_att"), row.index("lines"))
         self.assertEqual(hdrs[hdrs.index("ITG mn/avg/mx") + 1:hdrs.index("SLoC avg -mn/+mx")],
                          ["MIN mn/avg/mx", "MIN/ATT"])
 
-    def test_the_condition_column_goes_when_the_table_is_one_variant(self):
-        with_c = [h for h, _ in aggregate.table_columns(True, None)]
-        without = [h for h, _ in aggregate.table_columns(False, "bash")]
-        self.assertIn("COND", with_c)
-        self.assertNotIn("COND", without)
+    def test_a_row_is_a_model_and_a_variant(self):
+        self.assertEqual([h for h, _ in aggregate.table_columns(None)][:2], ["MODEL", "VARIANT"])
 
     def test_the_baseline_comparison_is_two_columns(self):
-        hdrs = [h for h, _ in aggregate.table_columns(True, "bash")]
+        hdrs = [h for h, _ in aggregate.table_columns("bash")]
         self.assertEqual(hdrs[-3:], ["N: GRN%  Δpt", "ITG  Δ", "SIG(p)  GRADE"])
-        without = [h for h, _ in aggregate.table_columns(False, None)]
+        without = [h for h, _ in aggregate.table_columns(None)]
         self.assertNotIn("N: GRN%  Δpt", without)
 
     def test_auth_lines_label_is_gone(self):
@@ -225,7 +222,7 @@ class TestTableColumns(unittest.TestCase):
     def test_the_loc_column_is_wide_enough_for_its_header_and_values(self):
         """A narrow field does not truncate, it silently stops padding, and the
         DEFECTS column walks left under the wrong header."""
-        width = dict(aggregate.table_columns(True, None))["SLoC avg -mn/+mx"]
+        width = dict(aggregate.table_columns(None))["SLoC avg -mn/+mx"]
         self.assertGreaterEqual(width, aggregate.LOC_MEAN_W + len("   -9999/+9999"))
         self.assertGreaterEqual(width, len("SLoC avg -mn/+mx"))
 
@@ -312,7 +309,7 @@ class TestTheSummaryCarriesTheExperimentsEntries(unittest.TestCase):
         from fae.cell import experiment as _experiment
         d = _experiment.current()
         src = (Path(ROOT) / "fae" / "scoring" / "aggregate.py").read_text()
-        for word in set(d.arms) | {d.tech_of(a) for a in d.arms}:
+        for word in set(d.ids) | {f for c in d.variants.values() for f in c.FACTORS.values()}:
             self.assertIsNone(re.search(rf"\b{re.escape(word)}\b", src), word)
 
 
@@ -325,9 +322,9 @@ class TestScoreboardCuts(unittest.TestCase):
     cell.env for records written before it was part of score.json."""
 
     def rows(self):
-        return [dict(condition="apidocs", impl="bash", cell_id="a"),
-                dict(condition="apidocs", impl="py", cell_id="b"),
-                dict(condition="howto", impl="py", cell_id="c")]
+        return [dict(variant="v_apidocs", factors={"docs": "apidocs"}, impl="bash", cell_id="a"),
+                dict(variant="v_apidocs", factors={"docs": "apidocs"}, impl="py", cell_id="b"),
+                dict(variant="v_howto", factors={"docs": "howto"}, impl="py", cell_id="c")]
 
     def test_impl_cut(self):
         cells, banners = aggregate.filter_cells(self.rows(), impl="py")
@@ -335,10 +332,16 @@ class TestScoreboardCuts(unittest.TestCase):
         self.assertEqual(banners, ["FILTERED: impl 'py' only — showing 2 of 3 scored cell(s)"])
 
     def test_variant_then_impl(self):
-        cells, banners = aggregate.filter_cells(self.rows(), "apidocs", "py")
+        cells, banners = aggregate.filter_cells(self.rows(), "v_apidocs", "py")
         self.assertEqual([c["cell_id"] for c in cells], ["b"])
         self.assertEqual(len(banners), 2)
         self.assertIn("1 of 2", banners[1])
+
+    def test_a_factor_level_cut(self):
+        cells, banners = aggregate.filter_cells(self.rows(), where={"docs": "howto"})
+        self.assertEqual([c["cell_id"] for c in cells], ["c"])
+        self.assertEqual(banners, ["FILTERED: factor docs 'howto' only — showing 1 of 3 "
+                                   "scored cell(s)"])
 
     def test_no_cut_no_banner(self):
         cells, banners = aggregate.filter_cells(self.rows())
@@ -736,8 +739,7 @@ class TestTheScoreboardRunsEndToEnd(unittest.TestCase):
         d = root / cid
         d.mkdir()
         (d / "score.json").write_text(json.dumps({
-            "cell_id": cid, "model": "m-1", "task": "T1", "treatment": "beta",
-            "condition": "apidocs", "impl": "py", "repeat": 1, "doc_lines": 10,
+            "cell_id": cid, "model": "m-1", "task": "T1", "variant": "beta_apidocs", "factors": {"docs": "apidocs"}, "impl": "py", "repeat": 1,
             "attempt_budget": 10, "consistency_defect_count": None, "codes": [],
             "deploy_ok": True, "e2e_pass": 7, "e2e_total": 7, "e2e_green": green,
             "load_errors": 0, "load_total": 100, "load_ran": True, "k6_available": True,
@@ -746,13 +748,14 @@ class TestTheScoreboardRunsEndToEnd(unittest.TestCase):
             "author_surface": {"files": 1, "languages": ["Python"], "language_count": 1,
                                "lines": 10, "sloc": 8}}))
 
-    def test_the_table_prints_for_the_whole_corpus_and_for_one_condition(self):
+    def test_the_table_prints_for_the_whole_corpus_and_for_one_variant(self):
         import io, tempfile
         from contextlib import redirect_stdout
         root = Path(tempfile.mkdtemp())
         self.cell(root, "m_high_beta_apidocs_T1_r1", True)
         self.cell(root, "m_high_beta_apidocs_T1_r2", False)
-        for argv in (["aggregate"], ["aggregate", "--condition", "apidocs"]):
+        for argv in (["aggregate"], ["aggregate", "--variant", "beta_apidocs"],
+                     ["aggregate", "--where", "docs=apidocs"]):
             out = io.StringIO()
             with unittest.mock.patch.object(aggregate, "WORKSPACES", root), \
                  unittest.mock.patch.object(aggregate, "OUT_CSV", root / "results.csv"), \

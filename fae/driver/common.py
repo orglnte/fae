@@ -73,9 +73,8 @@ from fae import ledger, mutex  # noqa: E402
 from fae.cell import faults  # noqa: E402
 
 CREDS = ROOT / ".agent-home" / ".claude" / ".credentials.json"
-# The experiment definition (fae/cell/experiment.py): the matrix
-# (arm -> conditions), the pinned seed docs and each arm's variant class
-# are read through definition(); nothing here copies them.
+# The experiment definition (fae/cell/experiment.py) and its variants are
+# read through definition(); nothing here copies them.
 
 
 def definition():
@@ -94,9 +93,9 @@ def agent_container(cid):
     return _cellconfig.agent_container(cid)
 
 
-def infra_containers(treatment, cid):
-    """The containers a cell of this arm provisions, as its variant names them."""
-    s = definition().variant(treatment)
+def infra_containers(variant, cid):
+    """The containers a cell of this variant provisions, as its variant names them."""
+    s = definition().variant(variant)
     return [i for k, i in (s.infra_identities(cid) if s else []) if k == "container"]
 
 
@@ -157,12 +156,12 @@ def mem_pressure():
             "swap_used_mb": su, "swap_total_mb": su + sf}
 
 
-def cell_id(model, treatment, condition, rep, task="T1", effort="high", smoke=False):
-    # Mirrors the CELL_PREFIX construction: effort="" (not just unset) disables
-    # the suffix. THE one implementation: fae/cell/__main__.py and
-    # fae/cell/prepare.py import this rather than re-encoding the format.
+def cell_id(model, variant, rep, task="T1", effort="high", smoke=False):
+    # effort="" (not just unset) disables the suffix. THE one implementation:
+    # fae/cell/__main__.py and fae/cell/prepare.py import this rather than
+    # re-encoding the format.
     prefix = model + (f"_{effort}" if effort else "") + ("_smoke" if smoke else "")
-    return f"{prefix}_{treatment}_{condition}_{task}_r{rep}"
+    return f"{prefix}_{variant}_{task}_r{rep}"
 
 
 _MODEL_RE = re.compile(r"^[a-zA-Z0-9-]+$")
@@ -171,23 +170,24 @@ _REP_RE = re.compile(r"^r(\d+)$")
 
 
 def parse_cell_id(cid):
-    """<model>_<effort>[_smoke]_<arm>_<condition>_<task>_r<rep>, or None.
+    """<model>_<effort>[_smoke]_<variant>_<task>_r<rep> as (model, variant,
+    task, rep), or None.
 
-    Model, effort and condition carry no underscore; the arm may (`x_sealed`),
-    so it is whatever lies between the effort and the last three tokens — and
-    it must be one of the experiment's arms: a name from another experiment
-    or a retired vocabulary is not a cell of this one."""
+    Model and effort carry no underscore; the variant may, so it is whatever
+    lies between the effort and the last two tokens — and it must be one of
+    the experiment's variants: a name from another experiment is not a cell
+    of this one."""
     t = cid.split("_")
-    if len(t) < 6:
+    if len(t) < 5:
         return None
     rep = _REP_RE.match(t[-1])
     if not rep or not _TASK_RE.match(t[-2]) or not _MODEL_RE.match(t[0]):
         return None
     i = 3 if t[2] == "smoke" else 2
-    arm, condition = "_".join(t[i:-3]), t[-3]
-    if not arm or not condition or arm not in definition().arms:
+    variant = "_".join(t[i:-2])
+    if not variant or variant not in definition().variants:
         return None
-    return t[0], arm, condition, t[-2], rep.group(1)  # model, treatment, condition, task, rep
+    return t[0], variant, t[-2], rep.group(1)
 
 
 def _hhmm():

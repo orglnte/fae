@@ -120,6 +120,18 @@ def ensure(name, dockerfile_dir, context=(), base=None, log=print):
 
 # --- what the definition declares -------------------------------------------
 
+def dir_tag_name(definition, directory):
+    """The image name of a Dockerfile directory of the experiment: its path
+    under the experiment, so variants that name one directory share one
+    image."""
+    d = Path(directory).resolve()
+    try:
+        rel = d.relative_to(Path(definition.path).resolve())
+    except ValueError:
+        rel = Path(d.name)
+    return "-".join((definition.name, *rel.parts))
+
+
 def for_verifier(definition, conf, log=print):
     """The experiment verifier's image: its tools and the engine's runtime."""
     cls = definition.verifier_class()
@@ -131,12 +143,13 @@ def for_verifier(definition, conf, log=print):
 
 
 def for_variant(variant_cls, definition, conf, log=print):
-    """The image a cell of this variant is verified in: the variant's own,
-    layered on the verifier's, or the verifier's when it declares none."""
+    """The image a cell of this variant is verified in: the variant's own
+    layer ([verify] image_dir) on the verifier's, or the verifier's when it
+    declares none."""
     base = for_verifier(definition, conf, log)
     if not variant_cls.IMAGE_DIR:
         return base
-    return ensure(f"{definition.name}-{variant_cls.TECH}", variant_cls.IMAGE_DIR,
+    return ensure(dir_tag_name(definition, variant_cls.IMAGE_DIR), variant_cls.IMAGE_DIR,
                   variant_cls.image_context(conf), base=base, log=log)
 
 
@@ -201,12 +214,13 @@ def base_tag(definition, root):
 
 
 def agent_tag(definition, root, variant_cls=None):
-    """The image an arm's agents run in: its variant's layer over the base,
-    one per arm family (TECH), so an agent sees its own arm's tools and no
-    other's; the base when the variant declares no layer. A moving tag: the
-    clients inside the base are kept at upstream latest."""
+    """The image a variant's agents run in: its tools layer ([authoring]
+    tools) over the base, one per layer directory, so an agent sees its own
+    variant's tools and no other's; the base when the variant names none. A
+    moving tag: the clients inside the base are kept at upstream latest."""
     if variant_cls is not None and variant_cls.AGENT_IMAGE_DIR:
-        return f"{TAG_PREFIX}{definition.name}-agent-{variant_cls.TECH}:latest"
+        name = dir_tag_name(definition, variant_cls.AGENT_IMAGE_DIR)
+        return f"{TAG_PREFIX}{name}:latest"
     return base_tag(definition, root)
 
 

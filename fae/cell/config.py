@@ -182,7 +182,7 @@ def render_default_toml(definition, experiment_dir=None):
             out.append(f"# {key}: declared by the experiment")
             out.append(f'{name} = "{default}"')
     out += ["", "# model tag -> (agent CLI binary, the model id that binary receives). The",
-            "# tag names every cell id (<tag>_<effort>_<arm>_<condition>_T1_r1), so sweeps",
+            "# tag names every cell id (<tag>_<effort>_<variant>_T1_r1), so sweeps",
             "# write to disjoint workspaces. An unknown MODEL passes through as a claude",
             "# model id unchanged.",
             "[models]"]
@@ -397,7 +397,7 @@ def build_agent_argv(conf, cid, art, home, prompt_file, docker_net="", kube_moun
                    "ERROR", "--model", model, prompt])
     if cli == "testagent":
         return (common + ["-v", f"{home}:/home/node/.testagent",
-                          "-e", "CELL_ID", "-e", "TECH", "-e", "TESTAGENT_PLAN", "-e", "SERVICE_PORT"] + net
+                          "-e", "CELL_ID", "-e", "VARIANT", "-e", "TESTAGENT_PLAN", "-e", "SERVICE_PORT"] + net
                 + [image, "python3", "/home/node/.testagent/testagent.py", prompt])
     # claude
     oauth = Path(conf.get("AGENT_HOME", "")) / ".claude" / ".oauth_token"
@@ -462,13 +462,9 @@ def stage_agent(conf, cli, dest, root):
         shutil.copy(paths.ENGINE / "testagent.py",
                     Path(dest) / "testagent.py")
         from . import experiment as _experiment
-        seen = set()
-        for cls in _experiment.current().variants.values():
-            ref = cls.seed_root() / "reference"
-            if cls.TECH in seen or not ref.is_dir():
-                continue
-            seen.add(cls.TECH)
-            shutil.copytree(ref, Path(dest) / "reference" / cls.TECH)
+        for vid, cls in _experiment.current().variants.items():
+            if cls.REFERENCE is not None and Path(cls.REFERENCE).is_dir():
+                shutil.copytree(cls.REFERENCE, Path(dest) / "reference" / vid)
         subprocess_chmod(dest)
         return
     # claude

@@ -26,17 +26,17 @@ RIG_OWNED = frozenset({".git", ".gitignore"})
 CACHE_DIRS = frozenset({"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"})
 
 
-def authorable(treatment):
-    """(exact relpaths, dir prefixes) the agent may write for this arm: the
-    variant's AUTHORING_SURFACE. An arm with no variant, or a variant that declares
-    none, has no surface and raises: a default would let one experiment's
-    layout decide what another's agents may write."""
+def authorable(vid):
+    """(exact relpaths, dir prefixes) the agent may write for this variant:
+    its [authoring] surface. A variant that is not one of the experiment's,
+    or one that declares no surface, raises: a default would let one
+    experiment's layout decide what another's agents may write."""
     from . import experiment as _experiment
-    s = _experiment.current().variant(treatment)
+    s = _experiment.current().variant(vid)
     if s is None:
-        raise RuntimeError(f"no variant for arm {treatment!r}: it has no authorable surface")
+        raise RuntimeError(f"no variant {vid!r}: it has no authorable surface")
     if s.AUTHORING_SURFACE is None:
-        raise RuntimeError(f"{s.__name__} (arm {treatment!r}) declares no AUTHORING_SURFACE: "
+        raise RuntimeError(f"variant {vid!r} declares no [authoring] surface: "
                            f"the files the agent may write must be declared")
     exact, prefixes = s.AUTHORING_SURFACE
     return tuple(exact), tuple(prefixes)
@@ -44,28 +44,22 @@ def authorable(treatment):
 
 class Surface:
 
-    def __init__(self, artifacts, treatment):
+    def __init__(self, artifacts, vid):
         self.artifacts = Path(artifacts)
-        self.tech = str(treatment).split("_")[0]
-        self.exact, self.prefixes = authorable(treatment)
+        self.exact, self.prefixes = authorable(vid)
         self.manifest = self.artifacts.parent / MANIFEST
-        self._legacy = self.artifacts / MANIFEST
 
     def is_authorable(self, rel):
         return rel in self.exact or rel.startswith(self.prefixes)
 
     def has_manifest(self):
-        """A cell seeded before the manifest moved out of artifacts/ keeps its
-        record there; it is adopted on first use."""
-        if not self.manifest.exists() and self._legacy.is_file():
-            os.replace(self._legacy, self.manifest)
         return self.manifest.exists()
 
     def record(self):
         """Write the manifest from the tree as seeded: (rel, lines, sha) rows."""
         rows = []
         for p in sorted(self.artifacts.rglob("*")):
-            if not p.is_file() or p == self._legacy or self._ignored(p):
+            if not p.is_file() or self._ignored(p):
                 continue
             data = p.read_bytes()
             rows.append((p.relative_to(self.artifacts).as_posix(),
@@ -99,19 +93,18 @@ class Surface:
             if p.is_file():
                 p.chmod(0o644)
 
-    def heal(self, common, overlay):
+    def heal(self, sources):
         """Restore every fixed file that differs from its row, from the current
-        seed (the variant's overlay wins over the task's skeleton), re-seal
+        seed (`sources`: workspace path -> the file it is seeded from), re-seal
         it and re-baseline its row. Returns the restored relpaths."""
-        common, overlay = Path(common), Path(overlay)
         rows, restored = [], []
         for rel, lines, sha in self.rows():
             if not self.is_authorable(rel):
                 dst = self.artifacts / rel
                 ok = dst.is_file() and hashlib.sha256(dst.read_bytes()).hexdigest() == sha
                 if not ok:
-                    for src in (overlay / rel, common / rel):
-                        if src.is_file():
+                    for src in (sources.get(rel),):
+                        if src is not None and Path(src).is_file():
                             dst.parent.mkdir(parents=True, exist_ok=True)
                             if dst.exists():
                                 dst.chmod(0o644)      # the agent may have chmod'ed it odd

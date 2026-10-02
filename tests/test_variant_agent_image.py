@@ -1,6 +1,6 @@
-"""Every arm's agents run in an image of their own: the base (every model's
-client) plus the arm's layer, so one arm's agent never finds another arm's
-tools or SDK. No docker: tags, paths and argv only."""
+"""Every variant's agents run in an image of their own: the base (every
+model's client) plus the variant's tools layer, so one variant's agent never
+finds another's tools or SDK. No docker: tags, paths and argv only."""
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,11 +15,11 @@ from fae.cell.variants.base import Variant
 
 class _Def:
     name = "exp"
+    path = Path("/exp")
 
 
-def _variant(tech, layer_dir=None):
-    return type(f"V_{tech}", (Variant,), {"TECH": tech, "ARM": f"{tech}_sealed",
-                                          "AGENT_IMAGE_DIR": layer_dir})
+def _variant(vid, layer_dir=None):
+    return type(f"V_{vid}", (Variant,), {"ID": vid, "AGENT_IMAGE_DIR": layer_dir})
 
 
 class TestTheTags(unittest.TestCase):
@@ -28,13 +28,18 @@ class TestTheTags(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
 
-    def test_each_arm_family_gets_its_own_layer_tag(self):
-        a = _image.agent_tag(_Def, self.root, _variant("alpha", "/x"))
-        b = _image.agent_tag(_Def, self.root, _variant("beta", "/y"))
-        self.assertEqual(a, "fae-exp-agent-alpha:latest")
-        self.assertEqual(b, "fae-exp-agent-beta:latest")
+    def test_each_tools_directory_gets_its_own_layer_tag(self):
+        a = _image.agent_tag(_Def, self.root, _variant("alpha_x", "/exp/variants/alpha/agent"))
+        b = _image.agent_tag(_Def, self.root, _variant("beta_x", "/exp/variants/beta/agent"))
+        self.assertEqual(a, "fae-exp-variants-alpha-agent:latest")
+        self.assertEqual(b, "fae-exp-variants-beta-agent:latest")
 
-    def test_an_arm_without_a_layer_runs_in_the_base(self):
+    def test_variants_that_name_one_directory_share_one_tag(self):
+        a = _image.agent_tag(_Def, self.root, _variant("alpha_x", "/exp/variants/alpha/agent"))
+        b = _image.agent_tag(_Def, self.root, _variant("alpha_y", "/exp/variants/alpha/agent"))
+        self.assertEqual(a, b)
+
+    def test_a_variant_without_a_layer_runs_in_the_base(self):
         self.assertEqual(_image.agent_tag(_Def, self.root, _variant("alpha")), _image.BASE_AGENT)
 
     def test_the_experiments_own_base_is_used_when_its_root_has_one(self):
@@ -63,7 +68,7 @@ class TestTheArgv(unittest.TestCase):
                           "fae-exp-agent-alpha:latest")
         self.assertIn("fae-exp-agent-alpha:latest", argv)
 
-    def test_AGENT_IMAGE_forces_one_image_on_every_arm(self):
+    def test_AGENT_IMAGE_forces_one_image_on_every_variant(self):
         argv = self._argv({"AGENT_CLI": "claude", "AGENT_MODEL": "m", "AGENT_IMAGE": "forced:1"},
                           "fae-exp-agent-alpha:latest")
         self.assertIn("forced:1", argv)
@@ -71,7 +76,7 @@ class TestTheArgv(unittest.TestCase):
 
 
 class TestTheConfig(unittest.TestCase):
-    def test_rig_init_no_longer_writes_one_image_for_all_arms(self):
+    def test_experiment_init_writes_no_one_image_for_all_variants(self):
         src = (Path(_config.__file__)).read_text()
         body = src[src.index("def render_default_toml("):src.index("def render_default_toml(") + 4000]
         self.assertNotIn("agent_image =", body)
@@ -92,7 +97,7 @@ class TestTheLayerBuild(unittest.TestCase):
                  mock.patch.object(_image, "label", return_value="old"), \
                  mock.patch.object(_image, "build") as build:
                 tag = _image.for_agent(_Def, {}, cls, Path(d), log=lambda *_: None)
-            self.assertEqual(tag, "fae-exp-agent-alpha:latest")
+            self.assertEqual(tag, "fae-exp-layer:latest")
             self.assertEqual(build.call_args.kwargs["base"], _image.BASE_AGENT)
 
     def test_no_layer_no_build(self):
