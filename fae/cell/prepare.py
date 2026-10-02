@@ -5,7 +5,7 @@ does not wipe iterations.log, unless `fresh` is passed — which never deletes
 either: safe_wipe MOVES the old workspace aside for review.
 
 One implementation, three callers: Cell.prepare() at every run start,
-`cli.py rig prepare` over the matrix, and main() for the
+`cli.py experiment prepare` over the matrix, and main() for the
 operator (`python3 -m fae.cell.prepare TASK TREATMENT CONDITION [REP]`).
 """
 from __future__ import annotations

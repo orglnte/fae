@@ -467,7 +467,7 @@ logs mounted at `/feedback/` are the class's `FEEDBACK_LOGS` from it
 the experiment:
 
 ```sh
-python3 cli.py rig init --experiment shout     # refuses to overwrite an existing one
+python3 cli.py experiment init --experiment shout     # refuses to overwrite an existing one
 ```
 
 which sets `[paths] experiment_dir = "shout"` and renders the rest for
@@ -482,7 +482,7 @@ cell does not pay for the build under a lock:
 
 ```sh
 docker pull python:3.12.3-slim
-EXPERIMENT_DIR=shout python3 cli.py rig substrate
+EXPERIMENT_DIR=shout python3 cli.py experiment substrate
 ```
 
 ## 8. Run a cell with no agent

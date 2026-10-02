@@ -10,7 +10,7 @@ its own fds for the cell's whole life (Cell.acquire_slots), so provisioning
 never waits on a queue.
 
 `python3 -m fae.cell.variants <arm> setup|teardown|substrate <cid> <ws>`
-is the operator's hand entry; `cli.py rig substrate` calls the classes
+is the operator's hand entry; `cli.py experiment substrate` calls the classes
 directly.
 """
 from __future__ import annotations
@@ -44,7 +44,7 @@ def for_cell(cell):
 
 
 class _ShimCell:
-    """What the operator's substrate preflight (`cli.py rig substrate`)
+    """What the operator's substrate preflight (`cli.py experiment substrate`)
     hands the treatment: the cell as the hooks knew it
     — cid, workspace, root, config, condition."""
 

@@ -1,4 +1,4 @@
-"""rig smoke judges a reference cell by its ledger, whatever the verifier's
+"""experiment smoke judges a reference cell by its ledger, whatever the verifier's
 metrics carry."""
 import json
 import tempfile

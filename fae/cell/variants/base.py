@@ -224,7 +224,7 @@ class Variant:
     @classmethod
     def sweep(cls):
         """Operator preflight: remove this arm's stale substrate left by dead
-        cells (`cli.py rig substrate`). Nothing by default."""
+        cells (`cli.py experiment substrate`). Nothing by default."""
 
     @classmethod
     def substrate_identities(cls, cid):

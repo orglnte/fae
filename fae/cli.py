@@ -4,8 +4,8 @@
 DESIGN: this is a CLI LAYER, not the orchestrator. Every command builds the
 namespace the target fae/driver/*.py function already expects and calls it
 directly — fae/driver/ is the library, this is its one client. That includes
-fae/driver/rig.py (the rig-maintenance verbs: selftest, trace-reset, substrate,
-smoke, prepare, exp1, zombies) and the tail/log pair folded into fae/driver/ops.py.
+fae/driver/rig.py (the experiment's verbs: init, substrate, smoke, prepare,
+exp1; the rig's own: selftest, trace-reset, zombies) and the tail/log pair folded into fae/driver/ops.py.
 No orchestration logic is duplicated here.
 
 GROUPS
@@ -15,8 +15,10 @@ GROUPS
            bulk verb: run, pause, resume, stop, diagnose, queue-add, reconcile
   results  what the experiment produced, and whether to trust it: score,
            grade, validate, aggregate
+  experiment  the experiment this root runs: init, check, substrate,
+           smoke, prepare, exp1
   rig      the harness itself, not the experiment: selftest, trace-reset,
-           substrate, smoke, prepare, exp1, zombies
+           agent-image, zombies
   tools    instruments/*.py scripts, run standalone for debugging — the
            harness path-loads and calls them in-process (verify.py); this
            is a separate, human-facing subprocess invocation, not a second
@@ -70,18 +72,22 @@ def _ns(**kw):
 
 
 app = typer.Typer(add_completion=False, no_args_is_help=True,
-                  help="The fae orchestrator. Groups: cell, queue, fleet, "
-                       "results, rig.")
+                  help="The fae orchestrator. Groups: experiment, cell, "
+                       "conduct, results, rig, tools.")
 cell_app = typer.Typer(no_args_is_help=True, help="Act on exactly ONE named cell.")
 conduct_app = typer.Typer(no_args_is_help=True,
                           help="The queues' conductor: scheduler, supervisor, "
                                "backlog, and every bulk verb.")
 results_app = typer.Typer(no_args_is_help=True, help="What the run produced, and whether to trust it.")
+experiment_app = typer.Typer(no_args_is_help=True,
+                             help="The experiment this root runs: set it up, check it, "
+                                  "prove its pipeline.")
 rig_app = typer.Typer(no_args_is_help=True, help="The harness itself, not the experiment.")
 tools_app = typer.Typer(no_args_is_help=True,
                         help="instruments/*.py, run standalone for debugging — "
                              "the harness calls them in-process, not through here.")
 
+app.add_typer(experiment_app, name="experiment")
 app.add_typer(cell_app, name="cell")
 app.add_typer(conduct_app, name="conduct")
 app.add_typer(results_app, name="results")
@@ -439,10 +445,10 @@ def results_aggregate(
                         sort_discrepancy=sort_discrepancy, sort_significant=sort_significant))
 
 
-# --- rig --------------------------------------------------------------------
+# --- experiment / rig ------------------------------------------------------
 
-@rig_app.command("init")
-def rig_init(experiment: str = typer.Option("", "--experiment",
+@experiment_app.command("init")
+def experiment_init(experiment: str = typer.Option("", "--experiment",
                                             help="the experiment directory the file "
                                                  "points the engine at (relative to the "
                                                  "root or absolute); default `experiment`")):
@@ -464,8 +470,8 @@ def rig_trace_reset(dry_run: bool = typer.Option(False, "--dry-run",
     rig.trace_reset(_ns(dry_run=dry_run))
 
 
-@rig_app.command("substrate")
-def rig_substrate():
+@experiment_app.command("substrate")
+def experiment_substrate():
     """Every arm's substrate preflight (variants.py substrate_ok) + a sweep
     of stale per-verify kind clusters. Creates nothing: each verify provisions
     its own substrate."""
@@ -485,8 +491,8 @@ def rig_agent_image(rebuild: bool = typer.Option(False, "--rebuild",
     raise SystemExit(1 if behind else 0)
 
 
-@rig_app.command("smoke")
-def rig_smoke(arms: str = typer.Option("", "--arms", help="comma-separated (default: every arm)"),
+@experiment_app.command("smoke")
+def experiment_smoke(arms: str = typer.Option("", "--arms", help="comma-separated (default: every arm)"),
               only: str = typer.Option("", "--only", help="substring filter on the arm name"),
               rep: int = typer.Option(1, "--rep"),
               full_gate: bool = typer.Option(False, "--full-gate",
@@ -497,8 +503,8 @@ def rig_smoke(arms: str = typer.Option("", "--arms", help="comma-separated (defa
     rig.smoke(_ns(arms=arms, only=only, rep=rep, full_gate=full_gate))
 
 
-@rig_app.command("prepare")
-def rig_prepare(model: str = typer.Option("", "--model", help="lane name (default: $MODEL)"),
+@experiment_app.command("prepare")
+def experiment_prepare(model: str = typer.Option("", "--model", help="lane name (default: $MODEL)"),
                 reps: int = typer.Option(1, "--reps", help="reps per combination"),
                 task: str = typer.Option("T1", "--task", help="task id: T<n>, one the experiment's task/ carries")):
     """Seed the matrix's workspaces WITHOUT launching anything
@@ -506,8 +512,8 @@ def rig_prepare(model: str = typer.Option("", "--model", help="lane name (defaul
     rig.prepare(_ns(model=model, reps=reps, task=task))
 
 
-@rig_app.command("exp1")
-def rig_exp1(reps: int = typer.Option(3, "--reps", help="runs per arm"),
+@experiment_app.command("exp1")
+def experiment_exp1(reps: int = typer.Option(3, "--reps", help="runs per arm"),
              arms: Optional[str] = typer.Option(None, "--arms",
                                                 help="comma-separated; default the sealed trio"),
              report_only: bool = typer.Option(False, "--report-only",

@@ -1,7 +1,7 @@
 """The harness configuration, read once.
 
 `values` is every config key a caller reads: the rig defaults, overlaid with
-fae.toml at the root the engine works in (the operator surface; `cli.py rig
+fae.toml at the root the engine works in (the operator surface; `cli.py experiment
 init` writes one with every key and its default) and the process
 environment. Most keys carry a built-in default, so a missing config still
 reads whole.
@@ -109,7 +109,7 @@ def _toml(root):
 
 
 # model tag -> (agent CLI binary, the model id that binary receives): the
-# engine's known agents, what `rig init` writes and what a config without a
+# engine's known agents, what `experiment init` writes and what a config without a
 # [models] table reads. The tag also names every cell id.
 DEFAULT_MODELS = {
     "haiku": {"cli": "claude", "id": "claude-haiku-4-5-20251001"},
@@ -127,7 +127,7 @@ DEFAULT_MODELS = {
 
 
 def render_default_toml(definition, experiment_dir=None):
-    """The fae.toml `rig init` writes: every key the engine reads with its
+    """The fae.toml `experiment init` writes: every key the engine reads with its
     default and a comment, the caps for the locks the experiment's variants
     declare, and the machine-local keys the experiment declares (CONFIG),
     each under the section it names. `experiment_dir` is the directory the
@@ -140,7 +140,7 @@ def render_default_toml(definition, experiment_dir=None):
     for key, (section, name, default, kind) in definition.config_keys.items():
         declared.setdefault(section, []).append((name, default, key))
     out = [f"# fae.toml — machine-local configuration for this checkout (experiment: {definition.name}).",
-           "# Written by `cli.py rig init` with every key at its default; gitignored: it",
+           "# Written by `cli.py experiment init` with every key at its default; gitignored: it",
            "# holds your local paths and your agent choice. Never a secret — the agent",
            "# authenticates through its own creds home, never a value here.",
            "",

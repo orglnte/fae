@@ -280,7 +280,7 @@ class TestIdempotence(PrepareTestCase):
 
 class TestOneImplementation(unittest.TestCase):
     """prepare() is the one seeding; the driver calls it directly and
-    `cli.py rig prepare` (fae/driver/rig.py) calls the same function over the
+    `cli.py experiment prepare` (fae/driver/rig.py) calls the same function over the
     matrix."""
 
     def test_the_driver_calls_the_module(self):

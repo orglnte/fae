@@ -238,7 +238,7 @@ Each check below names where to run or read it.
 answer as charged.**
 
 1. **Reference solutions.** Every arm of the example experiments carries a
-   known-good answer; `cli.py rig smoke` runs each through the full
+   known-good answer; `cli.py experiment smoke` runs each through the full
    pipeline (sealed workspace, the verifier's container, the ledger) with
    no agent, and `--full-gate` runs every arrangement. A reference that is
    not green is a rig fault to fix before any scored cell runs.

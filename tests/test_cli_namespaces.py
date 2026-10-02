@@ -197,41 +197,41 @@ class TestFleetStatus(unittest.TestCase):
 
 class TestRigCommands(unittest.TestCase):
     def test_init_carries_the_experiment_directory(self):
-        (ns,), _ = invoke("init", ["rig", "init"], mod=cli.rig)
+        (ns,), _ = invoke("init", ["experiment", "init"], mod=cli.rig)
         self.assertEqual(vars(ns), dict(experiment=""))
-        (ns,), _ = invoke("init", ["rig", "init", "--experiment", "shout"], mod=cli.rig)
+        (ns,), _ = invoke("init", ["experiment", "init", "--experiment", "shout"], mod=cli.rig)
         self.assertEqual(ns.experiment, "shout")
 
     def test_substrate_takes_no_arguments(self):
         """fae/driver/rig.py's substrate ignores its namespace entirely; an
         earlier cli signature accepted an `arm` argument it silently discarded."""
-        (ns,), _ = invoke("substrate", ["rig", "substrate"], mod=cli.rig)
+        (ns,), _ = invoke("substrate", ["experiment", "substrate"], mod=cli.rig)
         self.assertEqual(vars(ns), {})
 
     def test_smoke_carries_every_field_runs_smoke_reads(self):
         """fae/driver/rig.py's smoke reads arms/only/rep/full_gate unconditionally;
         the namespace must carry all four, with its own defaults."""
-        (ns,), _ = invoke("smoke", ["rig", "smoke"], mod=cli.rig)
+        (ns,), _ = invoke("smoke", ["experiment", "smoke"], mod=cli.rig)
         self.assertEqual(vars(ns), dict(arms="", only="", rep=1, full_gate=False))
-        (ns,), _ = invoke("smoke", ["rig", "smoke", "--only", "keda", "--rep", "2",
+        (ns,), _ = invoke("smoke", ["experiment", "smoke", "--only", "keda", "--rep", "2",
                                     "--full-gate"], mod=cli.rig)
         self.assertEqual(vars(ns), dict(arms="", only="keda", rep=2, full_gate=True))
 
     def test_prepare(self):
-        (ns,), _ = invoke("prepare", ["rig", "prepare", "--reps", "2", "--task", "T2"],
+        (ns,), _ = invoke("prepare", ["experiment", "prepare", "--reps", "2", "--task", "T2"],
                           mod=cli.rig)
         self.assertEqual(vars(ns), dict(model="", reps=2, task="T2"))
-        (ns,), _ = invoke("prepare", ["rig", "prepare", "--model", "sonnet"], mod=cli.rig)
+        (ns,), _ = invoke("prepare", ["experiment", "prepare", "--model", "sonnet"], mod=cli.rig)
         self.assertEqual(ns.model, "sonnet")
 
     def test_exp1_carries_report_only(self):
         """fae/driver/exp1.py's exp1 reads args.report_only unconditionally; the
         cli command once omitted it and every invocation would have died on
-        AttributeError. `rig exp1` routes through rig.exp1_cmd like every
+        AttributeError. `experiment exp1` routes through rig.exp1_cmd like every
         other rig verb — cli.py passes the raw --arms value through
-        unresolved, the same convention `rig smoke` uses for its own
+        unresolved, the same convention `experiment smoke` uses for its own
         --arms default (resolved inside rig.py, not in cli.py)."""
-        (ns,), _ = invoke("exp1_cmd", ["rig", "exp1", "--report-only"], mod=cli.rig)
+        (ns,), _ = invoke("exp1_cmd", ["experiment", "exp1", "--report-only"], mod=cli.rig)
         self.assertEqual(ns.report_only, True)
         self.assertEqual(ns.reps, 3)
         self.assertIsNone(ns.arms)
