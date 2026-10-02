@@ -22,11 +22,12 @@ verdict rules: [`AGENTS.md`](AGENTS.md).
    New experiment: [`HOWTO.md`](HOWTO.md).
 2. Agent CLIs you plan to run: `claude` (logged in), `agy`, and/or `opencode`.
    For opencode the operator writes the API key **themselves** to
-   `.agent-home/.opencode/opencode.key` (chmod 600, gitignored; holds
-   the opencode Go key — `openrouter.key` is the legacy name and still works).
-   Never commit keys; `fae.toml` is
-   gitignored — never put secrets in it either (the agent authenticates
-   through `.agent-home`, not a config value).
+   `.agent-home/.opencode/opencode.key` (chmod 600, gitignored; the
+   opencode Go key), or into the home `fae.toml` names for that agent
+   (`[agents.<tag>] home`). Never commit keys; `fae.toml` is gitignored —
+   never put secrets in it either (the agent authenticates through its
+   credentials home, not a config value). The agents themselves are the
+   experiment's `agents.toml`, in git.
 3. From the experiment root (the directory holding the experiment; `REPO_ROOT` in the environment overrides), `python3 cli.py experiment init [--experiment DIR]` writes `fae.toml` (every key at its default, pointed at `DIR`); set the
    machine-local rig paths under `[paths]`. The engine is the `fae` package
    at this root: `python3 cli.py …` runs it uninstalled, and `pip install -e .`

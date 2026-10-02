@@ -538,12 +538,22 @@ about its sandbox are in the cell's `.agent-testagent/findings.json`.
 
 ## 10. Run a cell with a real agent
 
-The model tag names the agent CLI and the model id, in `fae.toml`
-`[models]`; `sonnet`, `opus`, `haiku`, `fable` map to the `claude` CLI.
-The agent authenticates through the credentials home in `[paths]
-agent_home` (`.agent-home` by default), never through a config value: log
-the CLI in on the host and the engine stages a fresh per-cell copy before
-every attempt. `README.md` §1 has the per-CLI details.
+The agents an experiment compares are its own, in git:
+`<experiment>/agents.toml`, one `[agents.<tag>]` per agent with its `cli`
+(`claude`, `agy`, `opencode`), its `model` and optionally its `effort`. The
+tag names every cell id. Each agent authenticates through a credentials
+home on this machine, never through a config value: `fae.toml`
+`[agents.<tag>] home`, else the CLI's default (`.agent-home/.claude`,
+`.agent-home/.gemini`, `.agent-home/.opencode`). Log the CLI in once and the
+engine stages a fresh per-cell copy before every attempt. `README.md` has
+the per-CLI details.
+
+```toml
+# shout/agents.toml
+[agents.sonnet]
+cli = "claude"
+model = "claude-sonnet-5"
+```
 
 Start one cell in the background and watch it:
 

@@ -108,22 +108,10 @@ def _toml(root):
     return {}
 
 
-# model tag -> (agent CLI binary, the model id that binary receives): the
-# engine's known agents, what `experiment init` writes and what a config without a
-# [models] table reads. The tag also names every cell id.
-DEFAULT_MODELS = {
-    "haiku": {"cli": "claude", "id": "claude-haiku-4-5-20251001"},
-    "sonnet": {"cli": "claude", "id": "claude-sonnet-5"},
-    "opus": {"cli": "claude", "id": "claude-opus-5"},
-    "fable": {"cli": "claude", "id": "claude-fable-5-1"},
-    "gemini": {"cli": "agy", "id": "Gemini 3.1 Pro (High)"},
-    "g36f": {"cli": "agy", "id": "Gemini 3.6 Flash (High)"},
-    "g38f": {"cli": "agy", "id": "Gemini 3.8 Flash (High)"},
-    "dsv4f": {"cli": "opencode", "id": "opencode-go/deepseek-v4-flash"},
-    "dsv4p": {"cli": "opencode", "id": "opencode-go/deepseek-v4-pro"},
-    "kimi": {"cli": "opencode", "id": "opencode-go/kimi-k3"},
-    "testagent": {"cli": "testagent", "id": "testagent"},
-}
+# Where an agent's credentials live on this machine when fae.toml names no
+# `home` for it: one directory per agent CLI.
+AGENT_HOME_DEFAULT = {"claude": ".agent-home/.claude", "agy": ".agent-home/.gemini",
+                      "opencode": ".agent-home/.opencode", "testagent": ""}
 
 
 def render_default_toml(definition, experiment_dir=None):
@@ -148,10 +136,9 @@ def render_default_toml(definition, experiment_dir=None):
            "# 1 = every attempt runs the experiment's full gate (all arrangements);",
            "# 0 = the single seed arrangement. Env SHAPE_VARIATION overrides.",
            "shape_variation = 1",
-           "# The default agent model tag (see [models]) and effort; MODEL= / EFFORT=",
-           "# in the environment override per spawn; effort = \"\" disables --effort.",
+           "# The agent a spawn without MODEL= runs (a tag of the experiment's",
+           "# agents.toml).",
            'model = "opus"',
-           'effort = "high"',
            "# true -> the agent runs with stream-json + --verbose so its turn-by-turn",
            "# tool trace lands in the per-attempt log.",
            "stream_agent = true",
@@ -159,12 +146,7 @@ def render_default_toml(definition, experiment_dir=None):
            "[paths]",
            "# The experiment definition, relative to this root or absolute. Env",
            "# EXPERIMENT_DIR overrides.",
-           f'experiment_dir = "{experiment_dir or DEFAULT_EXPERIMENT_DIR}"',
-           "# The shared creds home each cell copies from, per agent CLI. The",
-           "# agent images are not configured here: each arm runs in its own layer",
-           "# over the base (fae/cell/image.py); env AGENT_IMAGE forces one image",
-           "# for every arm (rig tests only).",
-           'agent_home = ".agent-home"']
+           f'experiment_dir = "{experiment_dir or DEFAULT_EXPERIMENT_DIR}"']
     for name, default, key in declared.get("paths", []):
         out.append(f"# {key}: declared by the experiment; env {key} overrides")
         out.append(f'{name} = "{default}"')
@@ -181,13 +163,12 @@ def render_default_toml(definition, experiment_dir=None):
         for name, default, key in items:
             out.append(f"# {key}: declared by the experiment")
             out.append(f'{name} = "{default}"')
-    out += ["", "# model tag -> (agent CLI binary, the model id that binary receives). The",
-            "# tag names every cell id (<tag>_<effort>_<variant>_T1_r1), so sweeps",
-            "# write to disjoint workspaces. An unknown MODEL passes through as a claude",
-            "# model id unchanged.",
-            "[models]"]
-    for tag, m in DEFAULT_MODELS.items():
-        out.append(f'{tag:<9} = {{ cli = "{m["cli"]}", id = "{m["id"]}" }}')
+    out += ["", "# Where each agent's credentials live on this machine (the cell copies",
+            "# them into a home of its own). The agents themselves are the",
+            "# experiment's agents.toml. Default per CLI: " + ", ".join(
+                f"{c} {h}" for c, h in AGENT_HOME_DEFAULT.items() if h) + ".",
+            "# [agents.sonnet]",
+            '# home = ".agent-home/.claude"']
     return "\n".join(out) + "\n"
 
 
@@ -201,13 +182,17 @@ def experiment_dir(root, env=None, paths=None):
     return Path(rel if os.path.isabs(rel) else f"{root}/{rel}")
 
 
-def model_map(model, cfg=None):
-    """model tag -> (agent CLI, the model id that CLI receives). An unknown tag
-    passes through as a claude model id unchanged."""
-    m = ((cfg or {}).get("models") or DEFAULT_MODELS).get(model)
-    if m:
-        return m["cli"], m["id"]
-    return "claude", model
+def agent_for(tag, definition, toml):
+    """(cli, model id, effort, credentials home) of the agent `tag`: the
+    experiment declares the first three (agents.toml), this machine's
+    fae.toml the home (`[agents.<tag>] home`, else the CLI's default). A tag
+    the experiment does not declare runs no agent (a stub or reference
+    cell): ("", "", None, "")."""
+    a = definition.agents.get(tag)
+    if not a:
+        return "", "", None, ""
+    home = ((toml.get("agents") or {}).get(tag) or {}).get("home")
+    return a["cli"], a["model"], a.get("effort"), home if home is not None else AGENT_HOME_DEFAULT[a["cli"]]
 
 
 def _fp_extra_files(root, trees):
@@ -275,9 +260,9 @@ def _build(root, env, toml, definition=None):
         return rel if os.path.isabs(rel) else f"{root}/{rel}"
 
     model = env.get("MODEL") or run.get("model", "opus")
-    effort = env["EFFORT"] if "EFFORT" in env else run.get("effort", "high")
     smoke = env.get("SMOKE", "")
-    cli, model_id = model_map(model, toml)
+    cli, model_id, agent_effort, agent_home = agent_for(model, definition, toml)
+    effort = env["EFFORT"] if "EFFORT" in env else (agent_effort if agent_effort is not None else "high")
 
     v = dict(_ENGINE_DEFAULTS)
     v.update({k: str(val) for k, val in rig.items() if k.isupper()})
@@ -319,7 +304,7 @@ def _build(root, env, toml, definition=None):
         if val is None:
             val = str(default).format(experiment=v["EXPERIMENT_DIR"])
         v[key] = path(str(val)) if kind == "path" else str(val)
-    v["AGENT_HOME"] = env.get("AGENT_HOME") or path(paths.get("agent_home", ".agent-home"))
+    v["AGENT_HOME"] = env.get("AGENT_HOME") or (path(agent_home) if agent_home else "")
     # one image forced on every arm (rig tests); empty: each arm runs in its
     # own layer over the base, resolved per cell (fae/cell/image.py)
     v["AGENT_IMAGE"] = env.get("AGENT_IMAGE") or ""
@@ -344,13 +329,8 @@ def _build(root, env, toml, definition=None):
 # --- agent launch + credential staging ----------------------------------------
 
 def opencode_key_file(agent_home):
-    """The opencode key path (opencode.key; openrouter.key is the legacy name)."""
-    d = Path(agent_home) / ".opencode"
-    for name in ("opencode.key", "openrouter.key"):
-        p = d / name
-        if p.is_file() and p.stat().st_size:
-            return p
-    return d / "opencode.key"
+    """The opencode key path in the agent's credentials home."""
+    return Path(agent_home) / "opencode.key"
 
 
 def agent_cpu_args(conf):
@@ -400,7 +380,7 @@ def build_agent_argv(conf, cid, art, home, prompt_file, docker_net="", kube_moun
                           "-e", "CELL_ID", "-e", "VARIANT", "-e", "TESTAGENT_PLAN", "-e", "SERVICE_PORT"] + net
                 + [image, "python3", "/home/node/.testagent/testagent.py", prompt])
     # claude
-    oauth = Path(conf.get("AGENT_HOME", "")) / ".claude" / ".oauth_token"
+    oauth = Path(conf.get("AGENT_HOME", "")) / ".oauth_token"
     tok = []
     if oauth.is_file() and oauth.stat().st_size:
         tok = ["-e", f"CLAUDE_CODE_OAUTH_TOKEN={oauth.read_text().strip()}"]
@@ -428,9 +408,11 @@ def stage_agent(conf, cli, dest, root):
     import shutil
     dest = str(dest)
     home = Path(conf.get("AGENT_HOME", ""))
+    if not cli:
+        raise RuntimeError(f"no agent {conf.get('MODEL', '')!r} in the experiment's agents.toml")
     if cli == "agy":
         _refuse(dest, "/.agent-gemini")
-        src = home / ".gemini"
+        src = home
         if not src.is_dir():
             raise RuntimeError(f"no authed {src} — run the one-time container login (README: agy in Docker)")
         shutil.rmtree(dest, ignore_errors=True)
@@ -471,11 +453,11 @@ def stage_agent(conf, cli, dest, root):
     _refuse(dest, "/.agent-claude")
     shutil.rmtree(dest, ignore_errors=True)
     os.makedirs(dest)
-    cred = home / ".claude" / ".credentials.json"
+    cred = home / ".credentials.json"
     if not cred.is_file():
         raise RuntimeError(
-            f"no .credentials.json under {home}/.claude — agent not authenticated "
-            f"(docker run -it --rm -v {home}/.claude:/home/node/.claude "
+            f"no .credentials.json under {home} — agent not authenticated "
+            f"(docker run -it --rm -v {home}:/home/node/.claude "
             f"{conf.get('AGENT_IMAGE') or '<the agent base image>'} claude auth login)")
     d = Path(dest) / ".credentials.json"
     shutil.copy(cred, d)

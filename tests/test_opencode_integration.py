@@ -16,16 +16,35 @@ TOML = C._toml(str(ROOT))
 
 
 class TestAgentCliSelection(unittest.TestCase):
-    def test_the_three_clis_are_selected_by_model_key(self):
+    """The experiment declares its agents (agents.toml); the machine's
+    fae.toml only says where each one's credentials are."""
+
+    def definition(self):
+        from fae.cell import experiment
+        return experiment.current()
+
+    def test_each_agent_is_its_declared_cli_and_model(self):
         for key, cli in (("gemini", "agy"), ("dsv4f", "opencode"),
                          ("dsv4p", "opencode"), ("kimi", "opencode"),
                          ("sonnet", "claude")):
-            self.assertEqual(C.model_map(key, TOML)[0], cli, key)
+            self.assertEqual(C.agent_for(key, self.definition(), {})[0], cli, key)
 
-    def test_unknown_model_keys_still_fall_through_to_claude(self):
-        cli, model = C.model_map("some-unlisted-id", TOML)
-        self.assertEqual(cli, "claude")
-        self.assertEqual(model, "some-unlisted-id")
+    def test_an_undeclared_tag_runs_no_agent(self):
+        self.assertEqual(C.agent_for("some-unlisted-id", self.definition(), {}), ("", "", None, ""))
+
+    def test_the_home_is_the_cli_default_unless_the_machine_names_one(self):
+        d = self.definition()
+        self.assertEqual(C.agent_for("sonnet", d, {})[3], ".agent-home/.claude")
+        self.assertEqual(C.agent_for("dsv4f", d, {})[3], ".agent-home/.opencode")
+        toml = {"agents": {"sonnet": {"home": "/creds/second-account"}}}
+        self.assertEqual(C.agent_for("sonnet", d, toml)[3], "/creds/second-account")
+
+    def test_the_effort_is_the_agents_own_when_it_declares_one(self):
+        self.assertEqual(C.agent_for("opus", self.definition(), {})[2], "high")
+        self.assertIsNone(C.agent_for("sonnet", self.definition(), {})[2])
+
+    def test_the_scripted_agent_is_always_there(self):
+        self.assertEqual(C.agent_for("testagent", self.definition(), {})[:2], ("testagent", "testagent"))
 
 
 def _opencode_conf(home):
@@ -38,8 +57,7 @@ class TestOpencodeContainment(unittest.TestCase):
     def _argv(self):
         home = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
-        (home / ".opencode").mkdir()
-        (home / ".opencode" / "opencode.key").write_text("KEY123\n")
+        (home / "opencode.key").write_text("KEY123\n")
         prompt = home / "PROMPT.md"
         prompt.write_text("do the task\n")
         return C.build_agent_argv(_opencode_conf(home), "cid1", "/ws/art",

@@ -1,0 +1,29 @@
+# The agents this fixture experiment compares; the tag names every cell id.
+[agents.haiku]
+cli = "claude"
+model = "claude-haiku-4-5-20251001"
+
+[agents.sonnet]
+cli = "claude"
+model = "claude-sonnet-5"
+
+[agents.opus]
+cli = "claude"
+model = "claude-opus-5"
+effort = "high"
+
+[agents.gemini]
+cli = "agy"
+model = "Gemini 3.1 Pro (High)"
+
+[agents.dsv4f]
+cli = "opencode"
+model = "opencode-go/deepseek-v4-flash"
+
+[agents.dsv4p]
+cli = "opencode"
+model = "opencode-go/deepseek-v4-pro"
+
+[agents.kimi]
+cli = "opencode"
+model = "opencode-go/kimi-k3"

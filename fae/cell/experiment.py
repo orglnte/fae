@@ -65,6 +65,39 @@ from pathlib import Path
 
 PACKAGE = "experiment"
 
+AGENTS_FILE = "agents.toml"
+AGENT_CLIS = ("claude", "agy", "opencode", "testagent")
+AGENT_KEYS = {"cli", "model", "effort"}
+BUILTIN_AGENTS = {"testagent": {"cli": "testagent", "model": "testagent"}}
+
+
+def load_agents(path):
+    """{tag: entry} from an agents file's `[agents.<tag>]` tables; none when
+    the file is absent. A malformed entry is refused, naming the tag."""
+    try:
+        import tomllib
+    except ModuleNotFoundError:          # Python < 3.11
+        import tomli as tomllib
+    path = Path(path)
+    if not path.is_file():
+        return {}
+    with path.open("rb") as f:
+        doc = tomllib.load(f)
+    extra = set(doc) - {"agents"}
+    if extra:
+        raise ValueError(f"{path}: unknown top-level key(s) {sorted(extra)}; agents go under [agents.<tag>]")
+    out = {}
+    for tag, entry in (doc.get("agents") or {}).items():
+        unknown = set(entry) - AGENT_KEYS
+        if unknown:
+            raise ValueError(f"{path}: agent {tag!r}: unknown key(s) {sorted(unknown)}")
+        if entry.get("cli") not in AGENT_CLIS:
+            raise ValueError(f"{path}: agent {tag!r}: cli must be one of {AGENT_CLIS}")
+        if not entry.get("model"):
+            raise ValueError(f"{path}: agent {tag!r}: no model")
+        out[tag] = dict(entry)
+    return out
+
 
 @dataclass(frozen=True)
 class Gate:
@@ -89,6 +122,16 @@ class Definition:
         self.path = Path(path)
         self.name = getattr(module, "NAME", self.path.name)
         self._subjects = None
+        self._agents = None
+
+    @property
+    def agents(self):
+        """{tag: {"cli", "model"[, "effort"]}}: the agents the experiment
+        compares, from `<experiment>/agents.toml`, plus the engine's scripted
+        agent. The tag names every cell id."""
+        if self._agents is None:
+            self._agents = {**BUILTIN_AGENTS, **load_agents(self.path / AGENTS_FILE)}
+        return self._agents
 
     @property
     def variants(self):
