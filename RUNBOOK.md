@@ -35,6 +35,7 @@ verdict rules: [`AGENTS.md`](AGENTS.md).
 Then let the preflight localize anything missing:
 
 ```sh
+python3 cli.py experiment check      # the definition, every seed, each arm's substrate (--walk: step by step)
 python3 cli.py experiment substrate  # [ok]/[MISS] per arm: its daemon, tools and images
 python3 cli.py experiment smoke      # one reference cell per arm, one arrangement (--full-gate: the whole gate)
 ```
@@ -50,7 +51,8 @@ python3 cli.py cell spawn|pause|resume|stop|tail|log|seal|reverify …   # ONE c
 python3 cli.py conduct run|pause|resume|stop|diagnose|reconcile|queue-add …
 python3 cli.py fleet-status                              # read-only table
 python3 cli.py results score|grade|validate|aggregate …
-python3 cli.py rig selftest|trace-reset|substrate|smoke|prepare|exp1|zombies …
+python3 cli.py experiment init|check|substrate|smoke|prepare|exp1 …   # the experiment this root runs
+python3 cli.py rig selftest|trace-reset|agent-image|zombies …          # the harness itself
 python3 cli.py tools run <name> [args]                   # one instrument standalone: the engine's, a contrib block's, the experiment's
 ```
 

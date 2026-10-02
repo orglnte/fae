@@ -54,7 +54,8 @@ verifier runs, runs in containers.
 git clone https://github.com/orglnte/fae
 git clone https://github.com/orglnte/fae-authoring-a-calculator
 cd fae-authoring-a-calculator
-python3 cli.py experiment init       # writes fae.toml, the machine-local config
+python3 cli.py experiment init       # writes fae.toml, the machine-local config, then offers the walk
+python3 cli.py experiment check      # everything in place? (--walk: step by step, with the fixes)
 python3 cli.py experiment smoke      # one cell per language, the known answer in place of an agent
 ```
 
@@ -122,7 +123,7 @@ tool typically gets wrong:
 
 ```sh
 cd ../fae-terraform-vs-pulumi
-python3 cli.py experiment init && python3 cli.py experiment substrate
+python3 cli.py experiment init && python3 cli.py experiment check
 python3 cli.py experiment smoke --full-gate                    # both tools' known answers, both scenarios
 python3 cli.py conduct queue-add sonnet --matrix --reps 5
 python3 cli.py conduct run -n 1                         # the scheduler; Ctrl-C detaches
