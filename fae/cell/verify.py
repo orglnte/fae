@@ -310,6 +310,12 @@ class Verifier(ABC):
         """One arrangement on `ctx`; every failure of the rig rather than
         of the build answers `charge=False`."""
 
+    def teardown(self, ctx):
+        """Remove what this verifier provisioned for `ctx` outside its own
+        container (a store), derivable from `ctx` alone: it runs in a fresh
+        container when a verify ended without finishing (killed, timed out,
+        crashed). Idempotent. Nothing by default."""
+
 
 CHILD_ARGV = ["python3", "-m", "fae.cell.verify_child"]
 WORKDIR = ".verifier"
@@ -438,8 +444,8 @@ def teardown_argv(ctx, image, conf=None, environ=None):
 
 
 def run_teardown(ctx, infra, timeout_s=900, log_dir=None):
-    """Run the variant's teardown for `ctx` — the artifacts' runner
-    stopped, then its infra's `verify_teardown` — in a fresh container of
+    """Run the teardown for `ctx` — the artifacts' runner stopped, its
+    infra's `verify_teardown`, then the verifier's own `teardown` — in a fresh container of
     its image (see `teardown_argv`); returns the child's exit code, or None
     when no container could run (no image, no daemon). Best effort: the
     reaper covers what this leaves. `log_dir` holds verifier.log (the host's
@@ -477,8 +483,11 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
     image of `infra`'s variant and return its Verdict. A verifier that hangs past
     `timeout_s`, crashes, or exits without writing a verdict is a rig
     fault: `charge=False`, the attempt is retried. The container is removed
-    on every path, so nothing the verifier started outlives it. `log_dir`
-    holds verifier.log (the host's record of the run), default `ctx.out`."""
+    on every path; when the verify did not end on its own (a timeout, a
+    signal, any exception) the full teardown runs too (`run_teardown`),
+    since what it started beside its container (the artifacts' runner, the
+    infra, a store) does not die with it. `log_dir` holds verifier.log (the
+    host's record of the run), default `ctx.out`."""
     from . import experiment as _experiment
     from . import image as _image
     work = Path(ctx.out) / WORKDIR
@@ -502,18 +511,22 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
     _log_line(out, f"verifier start arrangement={ctx.arrangement or 'seed'} "
                    f"image={image} container={name}"
                    + (f" cpus={cls.CPUS}" if cls.CPUS is not None else ""))
+    ended = False
     with (out / "verifier.log").open("a") as log:
         p = subprocess.Popen(argv, cwd=ctx.root, stdout=log, stderr=subprocess.STDOUT,
                              start_new_session=True)
         try:
             rc = p.wait(timeout=timeout_s)
+            ended = True
         except subprocess.TimeoutExpired:
-            _end(p, name)
             return Verdict(ok=False, stage="verifier-timeout", charge=False,
                            why=f"the verifier ran past {timeout_s}s; its container was removed",
                            arrangement=ctx.arrangement)
         finally:
             _end(p, name)
+            if not ended:
+                _log_line(out, "verify did not end on its own: running its teardown")
+                run_teardown(ctx, infra, log_dir=out)
     if verdict_path.is_file():
         try:
             return Verdict.from_json(verdict_path.read_text())
@@ -568,7 +581,10 @@ def main(argv=None):
         from .infra import secrunner
         secrunner.stop_by_name(ctx.cid, ctx.out,
                                log=Path(ctx.out) / definition.verifier_class().RUN_LOG)
-        vcls.INFRA(vcls, cell).verify_teardown(ctx, dict(os.environ))
+        try:
+            vcls.INFRA(vcls, cell).verify_teardown(ctx, dict(os.environ))
+        finally:
+            definition.verifier_class()().teardown(ctx)
         return 0
     cls = definition.verifier_class()
     verdict = cls().verify(ctx)

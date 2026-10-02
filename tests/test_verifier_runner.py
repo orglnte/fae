@@ -248,11 +248,67 @@ class TestEveryFailureIsARefundedRigFault(RunnerCase):
         rms = [c[1] for c in self.calls if c[0] == "run" and c[1][:3] == ["docker", "rm", "-f"]]
         self.assertTrue(any("fae-verify-cell-x" in r for r in rms))
 
+    def test_a_verify_that_did_not_end_on_its_own_is_torn_down(self):
+        """A timeout, a signal (SIGTERM reaches the cell as KeyboardInterrupt)
+        or any exception: what the verify started beside its container is
+        removed by the full teardown; a verify that ended runs none."""
+        exp = _definition(self.root, "")
+
+        def hang(argv):
+            raise subprocess.TimeoutExpired(argv, 2)
+
+        raised = []
+
+        def signalled(argv):
+            # the signal interrupts the first wait; the cleanup's wait then returns
+            if not raised:
+                raised.append(1)
+                raise KeyboardInterrupt("signal 15")
+            return -15
+        with mock.patch.object(verify, "run_teardown") as td:
+            self.run_with(exp, hang, timeout_s=2)
+        self.assertEqual(td.call_count, 1)
+        with mock.patch.object(verify, "run_teardown") as td:
+            with self.assertRaises(KeyboardInterrupt):
+                self.run_with(exp, signalled)
+        self.assertEqual(td.call_count, 1)
+        with mock.patch.object(verify, "run_teardown") as td:
+            self.run_with(exp, self._child_writes(Verdict(ok=True)))
+            self.run_with(exp, lambda argv: 1)
+        self.assertEqual(td.call_count, 0)
+
     def test_no_image_is_a_refunded_fault_not_a_verdict(self):
         exp = _definition(self.root, "")
         with mock.patch.object(_image, "for_variant", side_effect=RuntimeError("docker build failed")):
             v = run_verifier(self.ctx(exp), self.variant(), timeout_s=5)
         self.assertEqual((v.ok, v.stage, v.charge), (False, "verifier-image", False))
+
+
+class TestTheTeardownChild(unittest.TestCase):
+    """`verify_child --teardown`: the runner stopped, the infra's teardown,
+    then the verifier's own, even when the infra's raises."""
+
+    def test_the_verifier_tears_down_what_it_provisioned_after_the_infra(self):
+        d = _experiment.current()
+        vid = sorted(d.variants)[0]
+        order = []
+        with tempfile.TemporaryDirectory() as t:
+            ctx = Ctx(root=str(ROOT), experiment_dir=str(d.path), workspace=t,
+                      artifacts=t, out=t, cid="cell-x", task="T1", variant=vid)
+            (Path(t) / "ctx.json").write_text(ctx.to_json())
+            vcls = d.variant(vid)
+
+            def infra_down(self, ctx, env):
+                order.append("infra")
+                raise RuntimeError("cluster delete failed")
+            with mock.patch("fae.cell.infra.secrunner.stop_by_name",
+                            side_effect=lambda *a, **k: order.append("runner")), \
+                    mock.patch.object(vcls.INFRA, "verify_teardown", infra_down), \
+                    mock.patch.object(d.verifier_class(), "teardown",
+                                      lambda self, ctx: order.append("verifier")):
+                with self.assertRaises(RuntimeError):
+                    verify.main(["--ctx", str(Path(t) / "ctx.json"), "--teardown"])
+        self.assertEqual(order, ["runner", "infra", "verifier"])
 
 
 class TestTheChildIsItsOwnSession(unittest.TestCase):
