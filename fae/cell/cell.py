@@ -940,8 +940,8 @@ class Cell:
         _prepare.prepare(self.cid, self.task, self.variant,
                          self.rep, workspaces=self.workspaces, root=self.root,
                          fresh=fresh, reference=self.reference, impl=self.IMPL,
-                         model_version=self.conf.values.get("AGENT_MODEL")
-                         or os.environ.get("MODEL", "?"), cfg=self.conf)
+                         agent_model=self.conf.values.get("AGENT_MODEL")
+                         or os.environ.get("AGENT", "?"), cfg=self.conf)
         self._env = self._read_env()
         return self.ws
 
@@ -1172,9 +1172,9 @@ class Cell:
         else. One per cell: a shared home would let each agent read every prior
         agent's memory and transcripts.
 
-        Returns the staged path, or None when the model needs no CLI.
+        Returns the staged path, or None when the agent needs no CLI.
         """
-        if self.conf.get("MODEL", os.environ.get("MODEL", "")) == "human":
+        if self.conf.get("AGENT", os.environ.get("AGENT", "")) == "human":
             return None
         cli = self.conf.get("AGENT_CLI", "claude")
         rel, _ = self.AGENT_HOMES.get(cli, self.AGENT_HOMES["claude"])
@@ -1648,7 +1648,7 @@ class Cell:
                                f"--rebuild`) and re-run (cell resumes here)", 42)
                 if outcome is not True:
                     self.apply(T.CRASH, "agent-fault")
-                    raise Halt(f"HALT[agent]: no model output after "
+                    raise Halt(f"HALT[agent]: no agent output after "
                                f"{self.AGENT_FAULT_RETRIES} retries at "
                                f"{self.cid} attempt {attempt} — CLI fault, "
                                f"fix and re-run (cell resumes here)", 42)

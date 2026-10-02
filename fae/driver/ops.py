@@ -51,7 +51,7 @@ def _crash_before_spawn(cid):
     """Record the Crash a dying loop could not record itself — NOW, not in
     five minutes.
 
-    `_reconcile_dead_loop` already emits this, but only after MODEL_DEAD_GRACE
+    `_reconcile_dead_loop` already emits this, but only after AGENT_DEAD_GRACE
     (300s) of quiet, because a loop that is merely re-execing is briefly
     pidless and must not be declared dead. A respawn does not have that
     ambiguity: we are about to start a loop, so whoever held this cid before
@@ -101,7 +101,7 @@ def _spawn_detached(argv, env, cid, what="spawn"):
         print(f"refusing to {what} {cid}: SEALED — {common.seal_reason(cid)}")
         print("  a terminal result is read-only; delete and requeue to redo it")
         return common.SEAL_EXIT
-    # Spawning a stopped cell IS the decision to run it, and the model's
+    # Spawning a stopped cell IS the decision to run it, and the agent's
     # Spawn is enabled only on intent='run'. Lifting the pause here keeps the
     # two stores of intent — the .paused marker and the trace — in step;
     # without it a stop/spawn pair leaves the marker to be wiped by a --fresh
@@ -141,10 +141,10 @@ def _cell_argv(task, variant, rep):
     return [sys.executable, "-m", "fae.cell", task, variant, str(rep)]
 
 
-def _spawn_spec(model, spec, cid, what):
+def _spawn_spec(agent, spec, cid, what):
     """Start one cell from its spec. Returns the spawn rc (None = alive)."""
     prestart_clean(cid)
-    env = dict(os.environ, MODEL=model)
+    env = dict(os.environ, AGENT=agent)
     if spec.get("fresh"):
         env["FRESH"] = "1"
     return _spawn_detached(
@@ -221,8 +221,8 @@ def request_pause(cids, reason, who="operator"):
     through their teardown trap.
 
     Nothing is signalled. The old pause SIGSTOPped loops, which is not a pause
-    at all — a frozen loop still holds the per-arm lock, so pausing one model
-    would deadlock that arm for every other model until a human noticed."""
+    at all — a frozen loop still holds the per-arm lock, so pausing one agent
+    would deadlock that arm for every other agent until a human noticed."""
     stamp = f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}"
     written = []
     for cid in cids:
@@ -280,7 +280,7 @@ def pause(args):
     if len(cids) > 1:
         sys.exit(f"`pause` acts on exactly ONE cell; {' '.join(sels)!r} "
                  f"matches {len(cids)} — bulk pause goes through: "
-                 f"conduct-pause MODEL...|all")
+                 f"conduct-pause AGENT...|all")
     request_pause(cids, args.reason)
     print(f"pause requested [{args.reason}] for {len(cids)} cell(s) — each loop "
           f"stops at its next safe point; workspaces are preserved")
@@ -393,7 +393,7 @@ def resume(args):
     if len(matches) > 1:
         sys.exit(f"`resume` acts on exactly ONE cell; {' '.join(sels)!r} "
                  f"matches {len(matches)} — bulk resume goes through: "
-                 f"conduct-resume MODEL...|all")
+                 f"conduct-resume AGENT...|all")
     blanket = _is_blanket(sels)
     parents = state.loop_parents()
     touched = 0
@@ -418,7 +418,7 @@ def resume(args):
             # branch lifted any non-killed lock, roster included. The guard
             # therefore missed exactly the cells it was written for: the ones
             # paused most recently. That is the 2026-07-24 resurrection
-            # (a roster paused until Tuesday) coming back. Name the model or
+            # (a roster paused until Tuesday) coming back. Name the agent or
             # the cid to lift these.
             continue
         if st["state"] == "DONE" or parents.get(cid):
@@ -436,11 +436,11 @@ def resume(args):
             # than leave the lane reporting it as backlog and naming it as
             # `next:` until supervision or an admission scan gets to it.
             if st["state"] == "DONE":
-                model = cid.split("_", 1)[0]
-                for q in queue.lane_specs(model):
+                agent = cid.split("_", 1)[0]
+                for q in queue.lane_specs(agent):
                     if queue.spec_cid(q) == cid:
                         try:
-                            queue.finish(model, queue.claim(model, q))
+                            queue.finish(agent, queue.claim(agent, q))
                         except FileExistsError:
                             queue.shelve(q, "done-duplicate")
                         done_acts.append("spec retired (cell is DONE)")
@@ -456,7 +456,7 @@ def resume(args):
         if reason in ("roster", "manual") and blanket:
             # standing operator decisions survive a blanket resume: 'resume
             # all' is the routine drain-release step, and it once resurrected
-            # a roster paused until Tuesday (2026-07-24). Name the model or
+            # a roster paused until Tuesday (2026-07-24). Name the agent or
             # cell to lift these.
             continue
         acted = []
@@ -464,18 +464,18 @@ def resume(args):
             state._unpause(cid); acted.append("pause lifted")
         if (ws / "reconcile.flagged").exists():
             (ws / "reconcile.flagged").unlink(); acted.append("flag cleared")
-        # Per-model cap holds on resume too: locks are lifted above either
-        # way, but the RESPAWN defers while the model already has a live
+        # Per-agent cap holds on resume too: locks are lifted above either
+        # way, but the RESPAWN defers while the agent already has a live
         # loop (this call's own respawns included), unless --force pushes
         # past it. Without this, resuming several recovered cells quietly
-        # ran a model 2-wide against conduct's 1/model admission cap.
-        model = cid.split("_", 1)[0]
+        # ran a agent 2-wide against conduct's 1/agent admission cap.
+        agent = cid.split("_", 1)[0]
         if not getattr(args, "force", False):
-            live_m = sum(1 for c in state.loop_parents() if c.startswith(model + "_"))
-            if live_m >= common.PER_MODEL_CAP:
+            live_m = sum(1 for c in state.loop_parents() if c.startswith(agent + "_"))
+            if live_m >= common.PER_AGENT_CAP:
                 touched += 1
-                acted.append(f"respawn DEFERRED — {model} already has "
-                             f"{live_m} live loop(s) (cap {common.PER_MODEL_CAP}; "
+                acted.append(f"respawn DEFERRED — {agent} already has "
+                             f"{live_m} live loop(s) (cap {common.PER_AGENT_CAP}; "
                              f"--force overrides; resume again later)")
                 print(f"  {cid}: {', '.join(acted)}")
                 continue
@@ -496,10 +496,10 @@ def resume(args):
         # Without this the loop runs while its spec still reads as backlog.
         claimed = None
         if not _claimed(cid):
-            for q in queue.lane_specs(model):
+            for q in queue.lane_specs(agent):
                 if queue.spec_cid(q) == cid:
                     try:
-                        claimed = queue.claim(model, q)
+                        claimed = queue.claim(agent, q)
                         acted.append("spec claimed")
                     except (FileExistsError, OSError):
                         pass
@@ -507,7 +507,7 @@ def resume(args):
         if _respawn(st, dry=False):
             acted.append("respawned")
         elif claimed is not None:
-            queue.release(model, claimed, front=True)
+            queue.release(agent, claimed, front=True)
             acted.append("spec returned to the lane front")
         touched += 1
         print(f"  {cid}: {', '.join(acted)}")
@@ -521,8 +521,8 @@ def _shelve_specs(cids, why="stopped"):
     moving the file back into its lane."""
     n = 0
     for cid in sorted(set(cids)):
-        model = cid.split("_", 1)[0]
-        for d in (queue.lane_dir(model), queue.lane_dir(model, parked=True), queue.rundir(model)):
+        agent = cid.split("_", 1)[0]
+        for d in (queue.lane_dir(agent), queue.lane_dir(agent, parked=True), queue.rundir(agent)):
             if not d.is_dir():
                 continue
             for p in sorted(d.glob(f"*{cid}.json")):
@@ -714,7 +714,7 @@ def stop_cells(args):
     if len(cids) + len(q_only) > 1:
         sys.exit(f"`stop` acts on exactly ONE cell; {' '.join(sels)!r} matches "
                  f"{len(cids)} cell(s) + {len(q_only)} queued spec(s) — bulk "
-                 f"stop goes through: conduct-stop MODEL...|all")
+                 f"stop goes through: conduct-stop AGENT...|all")
     if getattr(args, "dry_run", False):
         verb = "cancel" if getattr(args, "cancel", False) else "stop"
         for cid in cids:
@@ -758,7 +758,7 @@ def stop_cells(args):
                 f"killed by=operator at={datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}\n")
     # Scrub the queue for BOTH: cells we just cancelled, and specs that never
     # had a workspace to cancel. `queues` was pruned by the selector: a full
-    # cid or model name touches only its own lane's file.
+    # cid or agent name touches only its own lane's file.
     _shelve_specs(set(cids) | set(q_only),
                   "cancelled" if cancel else "stopped")
     parents = state.loop_parents()
@@ -769,7 +769,7 @@ def stop_cells(args):
                 _kill_group(pid, signal.SIGKILL)
                 print(f"  {cid}: loop {pid} killed")
                 # trace conformance: a plain stop emitted Pause (intent only —
-                # the model's loop is still live); the SIGKILL is exactly
+                # the agent's loop is still live); the SIGKILL is exactly
                 # Crash(c) ("SIGKILL / OOM / laptop sleep"). Without it the
                 # replay's loop never reaches "none" and the eventual resume
                 # Spawn reads as a violation. --cancel already emitted Kill,
@@ -807,8 +807,8 @@ def spawn_matrix(args):
     specs = [dict(task=args.task, variant=v, rep=rep, fresh=args.fresh)
              for rep in range(1, args.reps + 1)
              for v in common.definition().active]
-    n = sum(queue.enqueue(args.model, s) is not None for s in specs)
-    print(f"enqueued {n} runs for {args.model} — conduct admits them "
+    n = sum(queue.enqueue(args.agent, s) is not None for s in specs)
+    print(f"enqueued {n} runs for {args.agent} — conduct admits them "
           f"(start it if not running: python3 cli.py conduct run)"
           + (f"; {len(specs) - n} already pending" if n < len(specs) else ""))
 
@@ -837,7 +837,7 @@ def top_up(args):
     """
     variants = _selected(getattr(args, "variants", []))
     queued = set()
-    for d_ in (queue.lane_dir(args.model), queue.lane_dir(args.model, parked=True)):
+    for d_ in (queue.lane_dir(args.agent), queue.lane_dir(args.agent, parked=True)):
         for p in queue._dir_specs(d_):
             try:
                 s = queue.read_spec(p)
@@ -850,7 +850,7 @@ def top_up(args):
         if not d.is_dir():
             continue
         p = common.parse_cell_id(d.name)
-        if not (p and p[0] == args.model and p[2] == args.task):
+        if not (p and p[0] == args.agent and p[2] == args.task):
             continue
         if common.ledger.parse(d)["iters"] or (d / ".loop").exists():
             have[p[1]].add(int(p[3]))
@@ -864,16 +864,16 @@ def top_up(args):
              for v in variants if rep in need[v]]
     for v in variants:
         idle = sorted(unstarted[v] & set(need[v]))
-        print(f"{args.model:7} {v:24} have={sorted(have[v])} add={need[v]}"
+        print(f"{args.agent:7} {v:24} have={sorted(have[v])} add={need[v]}"
               + (f"  (of which {idle} were prepared but never ran)" if idle else ""))
     if not specs:
         print("nothing to add — every selected variant is at target or queued")
         return
     if args.dry_run:
-        print(f"[dry-run] would enqueue {len(specs)} spec(s) for {args.model}")
+        print(f"[dry-run] would enqueue {len(specs)} spec(s) for {args.agent}")
         return
-    n = sum(queue.enqueue(args.model, s) is not None for s in specs)
-    print(f"enqueued {n} spec(s) for {args.model} (nothing started)")
+    n = sum(queue.enqueue(args.agent, s) is not None for s in specs)
+    print(f"enqueued {n} spec(s) for {args.agent} (nothing started)")
 
 
 def spawn(args):
@@ -886,7 +886,7 @@ def spawn(args):
                  "for several reps enqueue them (top-up / queue add) and let "
                  "conduct admit under its caps")
 
-    if args.model != "human":
+    if args.agent != "human":
         from fae.driver import image
         if not image.ensure_agent_for(args.variant):
             sys.exit(f"refusing: the agent image for {args.variant} could not be built "
@@ -897,7 +897,7 @@ def spawn(args):
         # smoke= must flow here exactly as prepare passes it: a SMOKE=1 spawn
         # that computes the unsmoke cid guards one identity while the cell
         # process (which honors SMOKE via load_config) runs under another.
-        cid = common.cell_id(args.model, args.variant, rep, args.task,
+        cid = common.cell_id(args.agent, args.variant, rep, args.task,
                       smoke=bool(os.environ.get("SMOKE")))
         if cid in live:
             print(f"refusing: loop already running for {cid} (pid {live[cid]}) — "
@@ -914,19 +914,19 @@ def spawn(args):
                 print(f"skipping {cid}: already DONE·cancelled — use --fresh to force a new run")
                 continue
         prestart_clean(cid)
-        if args.model == "human":
-            # human pseudo-model is INTERACTIVE (the driver pauses on a tty
+        if args.agent == "human":
+            # human pseudo-agent is INTERACTIVE (the driver pauses on a tty
             # each attempt) — print the command for the person's own terminal
             # instead of detaching it. Same cell machinery, budget and verify.
             print(f"HUMAN cell {cid} — run this in YOUR terminal (tmux for long sessions):\n")
             print(f"  cd {common.ROOT} && "
                   + (f"FRESH=1 " if args.fresh else "")
-                  + f"MODEL=human "
+                  + f"AGENT=human "
                   f"python3 -m fae.cell {args.task} {args.variant} {rep}\n")
             print("Each attempt: edit workspaces*/{cid}/artifacts, press ENTER to "
                   "verify (q to stop).".format(cid=cid))
             continue
-        env = dict(os.environ, MODEL=args.model)
+        env = dict(os.environ, AGENT=args.agent)
         if args.fresh:
             env["FRESH"] = "1"
         if _spawn_detached(_cell_argv(args.task, args.variant, rep),
@@ -987,7 +987,7 @@ def _respawn(st, dry):
         common._rec_log(f"{cid} respawn skipped — a live loop already owns the workspace")
         return False
     prestart_clean(cid)
-    env = dict(os.environ, MODEL=st["model"])
+    env = dict(os.environ, AGENT=st["agent"])
     if _spawn_detached(_cell_argv(st["task"], st["variant"], st["rep"]),
                        env, cid, "respawn") is not None:
         # Do NOT bump the respawn budget for a launch that never started: a
@@ -1006,17 +1006,17 @@ def _claimed(cid):
     return d.is_dir() and (d / f"{cid}.json").exists()
 
 
-def refresh_cell_creds(model):
+def refresh_cell_creds(agent):
     """The agent's credentials -> every live per-cell copy of a claude agent
     (staged once at cell start)."""
     from fae.cell import config as _cellconfig
-    conf = _cellconfig.load(common.ROOT, env=dict(os.environ, MODEL=model))
+    conf = _cellconfig.load(common.ROOT, env=dict(os.environ, AGENT=agent))
     if conf.get("AGENT_CLI") != "claude":
         return
     creds = Path(conf.get("AGENT_HOME", "")) / ".credentials.json"
     if not creds.is_file():
         return
-    for d in common.WS.glob(f"{model}_*/.agent-claude"):
+    for d in common.WS.glob(f"{agent}_*/.agent-claude"):
         (d / ".credentials.json").write_bytes(creds.read_bytes())
 
 

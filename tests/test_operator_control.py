@@ -55,16 +55,16 @@ class OperatorTestCase(OrchTmpCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def queue(self, model, specs):
+    def queue(self, agent, specs):
         for spec in specs:
-            runs.queue.enqueue(model, spec)
+            runs.queue.enqueue(agent, spec)
 
-    def pending(self, model):
-        return [runs.queue.read_spec(p) for p in runs.queue.lane_specs(model)]
+    def pending(self, agent):
+        return [runs.queue.read_spec(p) for p in runs.queue.lane_specs(agent)]
 
-    def parked_pending(self, model):
+    def parked_pending(self, agent):
         return [runs.queue.read_spec(p)
-                for p in runs.queue._dir_specs(runs.queue.lane_dir(model, parked=True))]
+                for p in runs.queue._dir_specs(runs.queue.lane_dir(agent, parked=True))]
 
 
 class TestSelectorIsAnchored(OperatorTestCase):
@@ -217,7 +217,7 @@ class TestQueuedSummaryCountsOnlyRealBacklog(OperatorTestCase):
 
 
 class TestConductStop(OperatorTestCase):
-    """The hard halt stops what is RUNNING. A scope of MODEL names touches
+    """The hard halt stops what is RUNNING. A scope of AGENT names touches
     only those lanes and leaves conduct up; `all` also TERMs conduct.
 
     It does NOT touch queues: the backlog is not run state, and a stop that
@@ -379,12 +379,12 @@ class TestExactlyOneCellRule(OperatorTestCase):
 
     def test_spawn_refuses_a_rep_list(self):
         with self.assertRaises(SystemExit):
-            runs.ops.spawn(mock.Mock(model="sonnet", variant="beta_apidocs", rep="2,3", task="T1",
+            runs.ops.spawn(mock.Mock(agent="sonnet", variant="beta_apidocs", rep="2,3", task="T1",
                                  budget=10, fresh=False))
 
     def _spawn_one(self, image_ready):
         from fae.driver import image
-        args = mock.Mock(model="sonnet", variant="beta_apidocs",
+        args = mock.Mock(agent="sonnet", variant="beta_apidocs",
                          rep="1", task="T1", budget=10, fresh=False)
         with mock.patch.object(image, "ensure_agent_for", return_value=image_ready) as ready, \
              mock.patch.object(runs.ops, "_spawn_detached", return_value=None) as spawned, \
@@ -502,7 +502,7 @@ class TestConductResume(OperatorTestCase):
 
     def _st(self, cid, state="CRASHED", why="loop"):
         m, v, task, rep = runs.parse_cell_id(cid)
-        return dict(cid=cid, state=state, why=why, model=m, variant=v,
+        return dict(cid=cid, state=state, why=why, agent=m, variant=v,
                     task=task, rep=rep, budget=10)
 
     def _resume(self, scope, live=None, states=None):
@@ -715,7 +715,7 @@ class TestLimitWall(OperatorTestCase):
     def _sweep(self, cid, detail="Error: Individual quota reached.", dry=False):
         (self.ws / cid / "iterations.log").touch()
         st = dict(cid=cid, state="WAITING", why="limit", detail=detail,
-                  model="sonnet", variant="beta_apidocs",
+                  agent="sonnet", variant="beta_apidocs",
                   task="T1", rep="1", budget=10)
 
         def _cs(ws, loops, boxes):
@@ -758,7 +758,7 @@ class TestLimitWall(OperatorTestCase):
 
     def test_transient_connection_fault_is_not_a_wall(self):
         """The `limit` phase also covers retryable API faults; standing a
-        lane down hours for a ConnectionRefused idles a healthy model."""
+        lane down hours for a ConnectionRefused idles a healthy agent."""
         cid = CIDS[0]
         for detail in ("API Error: Unable to connect to API (ConnectionRefused)",
                        "API Error: Connection closed mid-response. The response"):
@@ -782,7 +782,7 @@ class TestLimitWall(OperatorTestCase):
         os.utime(ws / "iterations.log", (old, old))
         os.utime(ws / "agent.attempt-1.log", (old, old))
         st = dict(cid=cid, state="RUNNING", why="agent", detail="",
-                  model="sonnet", variant="beta_apidocs",
+                  agent="sonnet", variant="beta_apidocs",
                   task="T1", rep="1", budget=10)
         with mock.patch.object(runs.state, "loop_pids", return_value={}), \
              mock.patch.object(runs.state, "loop_parents", return_value={}), \
@@ -909,7 +909,7 @@ class TestConductPause(OperatorTestCase):
 
 class TestResumeRespectsPerModelCap(OperatorTestCase):
     """Recovery must not out-run the scheduler: conduct admits 1 live cell
-    per model, so a resume that respawns a second one runs the model 2-wide.
+    per agent, so a resume that respawns a second one runs the agent 2-wide.
     Locks are still lifted; only the RESPAWN defers. --force pushes past."""
 
     def _resume(self, cid, force=False, live=None):
@@ -1259,7 +1259,7 @@ class TestVerbEdges(OperatorTestCase):
              mock.patch.object(runs.state, "containers", return_value=set()), \
              mock.patch.object(runs.state, "cell_state",
                                return_value=dict(cid=cid, state="CRASHED",
-                                                 why="loop", model="sonnet",
+                                                 why="loop", agent="sonnet",
                                                  variant="beta_apidocs", task="T1",
                                                  rep="1", budget=10)):
             out = self.out_of(runs.conduct.conduct_resume, mock.Mock(scope=["sonnet"]))
@@ -1402,7 +1402,7 @@ class TestTheWeeklyWallCoolsTheLane(OperatorTestCase):
         cid = CIDS[0]
         st = dict(cid=cid, state="WAITING", why="limit",
                   detail="You've hit your weekly limit · resets 12am (UTC)",
-                  model="sonnet", variant="beta_apidocs",
+                  agent="sonnet", variant="beta_apidocs",
                   task="T1", rep="1", budget=10)
         (self.ws / cid / "iterations.log").touch()
         with mock.patch.object(runs.state, "loop_pids", return_value={}), \

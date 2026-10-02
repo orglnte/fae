@@ -29,14 +29,14 @@ def _retire_finished_specs(dry=False):
     """Move a queued spec whose cell is already terminal to done/.
 
     Admission retires these too, but only for a lane it is about to admit
-    from — a lane at its per-model cap is never scanned, so a finished cell's
+    from — a lane at its per-agent cap is never scanned, so a finished cell's
     spec sits at the head counting as backlog and naming itself as `next:`.
     A cell resumed by hand leaves exactly that: the loop runs and finishes
     while the spec it came from is still in the lane, unclaimed.
     """
     boxes = state.containers()
     for d in queue.lane_dirs():
-        model = queue.lane_model(d)
+        agent = queue.lane_agent(d)
         for p in queue._dir_specs(d):
             cid = queue.spec_cid(p)
             if not (common.WS / cid).is_dir():
@@ -51,7 +51,7 @@ def _retire_finished_specs(dry=False):
             # Through the claim, so done/ holds one filename shape whether the
             # spec got there via admission or from the queue.
             try:
-                queue.finish(model, queue.claim(model, p))
+                queue.finish(agent, queue.claim(agent, p))
             except FileExistsError:
                 queue.shelve(p, "done-duplicate")
 
@@ -84,7 +84,7 @@ ARM_STALL_S = int(os.environ.get("ARM_STALL_S", 1800))
 PHASE_LIMITS = {
     "setup":       (int(os.environ.get("PHASE_SETUP_ALERT_S", 900)),
                     int(os.environ.get("PHASE_SETUP_KILL_S", 2700))),
-    # A single agent call runs past 90 minutes on the slower models, so this
+    # A single agent call runs past 90 minutes on the slower agents, so this
     # sits well above the observed normal rather than at it.
     "agent":       (int(os.environ.get("PHASE_AGENT_ALERT_S", 10800)), None),
     "arm-lock":    (int(os.environ.get("PHASE_WAIT_ALERT_S", 3600)), None),
@@ -179,7 +179,7 @@ def _attempt_out(ws):
     return stt.st_size, common.awake_age(stt.st_mtime)
 
 
-MODEL_DEAD_GRACE = int(os.environ.get("MODEL_DEAD_GRACE", 300))
+AGENT_DEAD_GRACE = int(os.environ.get("AGENT_DEAD_GRACE", 300))
 
 
 _VERIFY_MARK_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\t(?:VERIFY_READY|SHAPE)\t")
@@ -217,31 +217,31 @@ def _reconcile_dead_loop(cid, loop_pid, in_box, out_age, last, dry,
 
     Runs for EVERY cell, including paused ones the rest of supervision leaves
     alone: this writes a transition and touches nothing else. Without it a
-    cell killed while paused keeps a live loop in the model, its next
+    cell killed while paused keeps a live loop in the agent, its next
     legitimate Spawn replays as illegal, and every later event for it cascades
     — the conformance check goes deaf on exactly the cell that broke.
 
     Signals must agree before declaring the loop gone, because a loop re-execs
     (the FP re-pin) and is briefly pidless, and a freshly spawned one has not
     reached `ps` yet: no process, no container, an agent log untouched for
-    MODEL_DEAD_GRACE, and a last transition at least that old. The transition
+    AGENT_DEAD_GRACE, and a last transition at least that old. The transition
     age is what protects a cell that is starting right now — it has no agent
     log at all, so the log canary alone would call it dead.
     """
     last_action, last_ts = last if last else (None, None)
     if loop_pid or in_box or terminal:
-        return False       # a verdict ends the loop in the model too
+        return False       # a verdict ends the loop in the agent too
     if last_action in common.LOOP_CLEARED_BY or last_action is None:
         return False
-    if out_age is not None and out_age < MODEL_DEAD_GRACE:
+    if out_age is not None and out_age < AGENT_DEAD_GRACE:
         return False
     last_age = _age_of(last_ts)
-    if last_age is not None and last_age < MODEL_DEAD_GRACE:
+    if last_age is not None and last_age < AGENT_DEAD_GRACE:
         return False
     common._rec_log(f"{cid} loop gone without a Crash event (last={last_action} "
              f"{int(last_age) if last_age is not None else -1}s ago, "
              f"out_age={int(out_age) if out_age is not None else -1}s) -> "
-             f"reconciling the model" + (" [dry-run]" if dry else ""))
+             f"reconciling the agent" + (" [dry-run]" if dry else ""))
     if not dry:
         common._emit_transition("Crash", cid, "loop-vanished")
     return True
@@ -308,7 +308,7 @@ def _supervise_pass(dry=False, only=""):
             if only and only not in cid:
                 continue
             # Before every hands-off guard: a dead loop is a fact about the
-            # world, and the model has to learn it whatever the operator
+            # world, and the agent has to learn it whatever the operator
             # intends for the cell. Writes one transition, nothing else.
             _reconcile_dead_loop(cid, parents.get(cid),
                                  common.agent_container(cid) in boxes,
@@ -499,7 +499,7 @@ def _supervise_pass(dry=False, only=""):
                     and not weekly._is_quota_wall(st.get("detail") or ""):
                 continue    # transient API fault — the loop's own retry
                             # heals it; a lane cooldown here idles a healthy
-                            # model for hours (observed: ConnectionRefused)
+                            # agent for hours (observed: ConnectionRefused)
             elif st["state"] == "WAITING" and st["why"] == "limit":
                 # A quota-walled cell burns nothing but HOLDS its arm lock and
                 # work slot, and every cell of that arm queues behind it for
@@ -510,16 +510,16 @@ def _supervise_pass(dry=False, only=""):
                 # MUST sit above the silent-hang branch: wall retries keep the
                 # heartbeat fresh, so its veto `continue` would swallow
                 # exactly these cells.
-                model = cid.split("_", 1)[0]
+                agent = cid.split("_", 1)[0]
                 detail = st.get("detail") or ""
                 common._rec_log(f"{cid} LIMIT WALL ({detail[:60]}) -> stand down, "
-                         f"cool lane {model}"
+                         f"cool lane {agent}"
                          + (" [dry-run]" if dry else ""))
                 if not dry:
                     ops.request_pause([cid], "limit-wall", who="conduct")
                     _reclaim(st, dry)
-                    until = weekly._set_cooldown(model, detail)
-                    common._rec_log(f"lane {model}: cooling until "
+                    until = weekly._set_cooldown(agent, detail)
+                    common._rec_log(f"lane {agent}: cooling until "
                              f"{datetime.fromtimestamp(until, timezone.utc):%H:%M}Z")
             elif in_box and (out_size in (None, 0) or (out_age or 0) > T_HANG) \
                     and iter_age > T_HANG:
@@ -536,10 +536,10 @@ def _supervise_pass(dry=False, only=""):
                               if weekly._is_quota_wall(l) and "error" in l.lower()),
                              None)
                 if _line is not None:
-                    model = cid.split("_", 1)[0]
+                    agent = cid.split("_", 1)[0]
                     common._rec_log(f"{cid} LIMIT WALL inside a stuck agent "
                              f"({_line.strip()[-90:]}) -> kill agent, cool "
-                             f"lane {model}" + (" [dry-run]" if dry else ""))
+                             f"lane {agent}" + (" [dry-run]" if dry else ""))
                     if not dry:
                         # Tear down through the one path: a bare SIGKILL frees
                         # the arm slot in the kernel while this cell's cluster
@@ -551,8 +551,8 @@ def _supervise_pass(dry=False, only=""):
                         if _outcome in ("termed", "killed"):
                             common._emit_transition("Crash", cid, "limit-wall")
                         _reclaim(st, dry)
-                        until = weekly._set_cooldown(model, _line)
-                        common._rec_log(f"lane {model}: cooling until "
+                        until = weekly._set_cooldown(agent, _line)
+                        common._rec_log(f"lane {agent}: cooling until "
                                  f"{datetime.fromtimestamp(until, timezone.utc):%m-%d %H:%M}Z")
                     continue
                 # out_size==0 means the agent's first turn has not returned
@@ -638,11 +638,11 @@ def conduct_diagnose(_args):
         print(f"  {kind:<10} {ident}  owner={owner}  {note}")
     live = state.loop_parents()
     up = (common.ORCH / "conduct.pid").exists()
-    print(f"\n— ADMISSION PREVIEW — {len(live)} live loop(s), per-model cap "
-          f"{common.PER_MODEL_CAP}, conduct {'UP' if up else 'DOWN'}"
+    print(f"\n— ADMISSION PREVIEW — {len(live)} live loop(s), per-agent cap "
+          f"{common.PER_AGENT_CAP}, conduct {'UP' if up else 'DOWN'}"
           + ("" if up else " (nothing admits until `conduct run`)"))
     for d in queue.lane_dirs(include_parked=True):
-        m = queue.lane_model(d)
+        m = queue.lane_agent(d)
         parked = d.name.endswith(".parked")
         paths = queue._dir_specs(d)
         claims = queue.running_specs(m)
@@ -653,9 +653,9 @@ def conduct_diagnose(_args):
             note = (f"limit-cooling until "
                     f"{datetime.fromtimestamp(_cu, timezone.utc):%m-%d %H:%M}Z "
                     f"— conduct retries then")
-        elif len(claims) >= common.PER_MODEL_CAP:
+        elif len(claims) >= common.PER_AGENT_CAP:
             held = ", ".join(sorted(queue.spec_cid(p) for p in claims))
-            note = f"HELD at {common.PER_MODEL_CAP}/lane — claimed: {held}"
+            note = f"HELD at {common.PER_AGENT_CAP}/lane — claimed: {held}"
         else:
             skipped = 0
             for p in paths:

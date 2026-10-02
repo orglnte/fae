@@ -60,24 +60,24 @@ python3 cli.py tools run <name> [args]                   # one instrument standa
 **The rule**: a verb acts directly iff it touches exactly one cell; anything
 matching more goes through `conduct` — one spawner, one cap owner. `cell
 resume` respawns its one cell directly (cap-checked, `--force` overrides);
-`conduct resume {all|MODEL…}` never spawns — it unparks lanes, lifts pause
+`conduct resume {all|AGENT…}` never spawns — it unparks lanes, lifts pause
 locks and requeues interrupted cells at the FRONT, and a running conduct
 admits them under its caps.
 
 **The backlog is a directory tree, one file per spec** — pending in
-`.orch/queue/<model>/`, claimed by the lane's cell in `.orch/running/<model>/`,
+`.orch/queue/<agent>/`, claimed by the lane's cell in `.orch/running/<agent>/`,
 terminal in `.orch/done/`, and shelved (never deleted) in `.orch/backups/`.
 Each transition is a single atomic rename, so an interrupted scheduler can
 neither lose nor duplicate work. **One live cell per non-empty lane** is the
-invariant: `--per-model` (1) enforces it, `-n` is the global ceiling and
+invariant: `--per-agent` (1) enforces it, `-n` is the global ceiling and
 should equal the lane count (conduct warns when it does not).
 
 Everyday loop:
 
 ```sh
-python3 cli.py conduct queue-add MODEL --to-rep N --variant V   # fill backlog
+python3 cli.py conduct queue-add AGENT --to-rep N --variant V   # fill backlog
 python3 cli.py conduct run        # THE scheduler AND supervisor, FOREGROUND:
-                                  # global cap 7, 1 live cell per model,
+                                  # global cap 7, 1 live cell per agent,
                                   # starved-lanes-first round-robin; every
                                   # --supervise-interval (300s) it repairs
                                   # crashed/hung cells (requeue-front — its
@@ -94,8 +94,8 @@ python3 cli.py results score      # validate -> per-cell score.json -> table
 
 **conduct pause vs conduct stop**: `conduct pause all` is the graceful stop —
 stops conduct, pauses every cell cooperatively, waits (the FP-edit window);
-`conduct pause MODEL…` parks+pauses those lanes (`--admission-only` parks
-only; a parked lane shows `[PAUSED]` in status). `conduct stop {all|MODEL…}`
+`conduct pause AGENT…` parks+pauses those lanes (`--admission-only` parks
+only; a parked lane shows `[PAUSED]` in status). `conduct stop {all|AGENT…}`
 is the hard stop — loops TERMed mid-attempt, containers removed, the scope's
 queues backed up then cleared; `all` also TERMs conduct. Both are resumable
 via `conduct resume`. The terminal per-cell verdict is `cell stop --cancel`

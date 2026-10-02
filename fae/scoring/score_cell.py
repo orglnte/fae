@@ -391,7 +391,7 @@ def score_one(cell_id: str) -> int:
     
     record = {
         "cell_id": cell_id,
-        "model": env.get("MODEL_VERSION"),
+        "model": env.get("AGENT_MODEL"),
         "task": env.get("TASK"),
         "variant": env.get("VARIANT"),
         "factors": _factors(env.get("VARIANT")),

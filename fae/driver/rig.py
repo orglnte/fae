@@ -42,7 +42,7 @@ def tla_verify_path():
 
 from fae import paths as _paths  # noqa: E402
 
-TLA_DIR = _paths.ENGINE.parent / ".tla"      # the engine repo's model
+TLA_DIR = _paths.ENGINE.parent / ".tla"      # the engine repo's agent
 CONFORMANCE_SINCE = TLA_DIR / "conformance-since"
 _ISO_Z = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
@@ -238,7 +238,7 @@ def _verify_holder():
 
 
 def _loop_of_phase(phase, slot_held):
-    """Heartbeat phase -> the model's loop state.
+    """Heartbeat phase -> the agent's loop state.
 
     `idle` is the window between Spawn and AcquireSlot, and AcquireSlot is
     enabled only while the slot is NOT held — so a cell seeded `idle` that
@@ -502,13 +502,13 @@ def smoke(args):
                 if not args.only or args.only in v]
     if not variants:
         sys.exit(f"smoke: no variant matches --only {args.only!r}")
-    print("=== SMOKE MODE: model=ref — pipeline check, NOT a scored run "
+    print("=== SMOKE MODE: agent=ref — pipeline check, NOT a scored run "
           f"(cells tagged ref_high_smoke_*, in {SMOKE_WORKSPACES.name}) ===")
     # each variant's own preflight, so a missing daemon, tool or image is
     # named before any infra is spent
     if _probe_variants(variants):
         sys.exit("SMOKE ABORTED: a variant refused this host — see hooks.log lines above")
-    env = dict(os.environ, WORKSPACES_DIR=str(SMOKE_WORKSPACES), MODEL="ref",
+    env = dict(os.environ, WORKSPACES_DIR=str(SMOKE_WORKSPACES), AGENT="ref",
                SMOKE="1", REFERENCE="1",
                PYTHONPATH=str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH", ""))
     env.setdefault("EFFORT", "high")
@@ -579,13 +579,13 @@ def init(args):
 
 
 def prepare(args):
-    """Seed the whole matrix's workspaces for MODEL (--reps reps) and launch
+    """Seed the whole matrix's workspaces for AGENT (--reps reps) and launch
     nothing — fae/cell/prepare.py's prepare(), the same call the driver
     makes at every start. FRESH=1 in the environment moves an existing
     workspace aside first (safe_wipe; never a delete)."""
-    model = args.model or os.environ.get("MODEL")
-    if not model:
-        sys.exit("prepare: --model MODEL (or MODEL in the environment) is required")
+    agent = args.agent or os.environ.get("AGENT")
+    if not agent:
+        sys.exit("prepare: --agent AGENT (or AGENT in the environment) is required")
     sys.path.insert(0, str(ROOT))
     from fae.cell import prepare as _prepare
     from fae.cell import config as _config
@@ -594,12 +594,12 @@ def prepare(args):
     n = 0
     for rep in range(1, args.reps + 1):
         for vid in common.definition().active:
-            cid = cell_id(model, vid, rep, args.task)
+            cid = cell_id(agent, vid, rep, args.task)
             ws = _prepare.prepare(cid, args.task, vid, rep,
                                   workspaces=common.WS, root=ROOT,
                                   fresh=bool(os.environ.get("FRESH")),
                                   impl=_Cell.IMPL,
-                                  model_version=cfg.get("AGENT_MODEL") or model,
+                                  agent_model=cfg.get("AGENT_MODEL") or agent,
                                   cfg=cfg)
             print(f"  prepared {ws}")
             n += 1

@@ -23,14 +23,14 @@ code.
        repeat until green, at most 10 attempts; every step goes in the ledger
 ```
 
-One run of that loop is a **cell**: one model, one variant (one approach,
+One run of that loop is a **cell**: one agent, one variant (one approach,
 with one set of docs), one repetition. An experiment is many cells, and its
 result is a table, one row per model and variant. This one is from the calculator example below:
 Claude Sonnet writing it in Zig, and a scripted agent that fails once on
 purpose:
 
 ```
-MODEL            | VARIANT                  | REPS | E2E   | GREEN | ITG mn/avg/mx  | MIN mn/avg/mx     | MIN/ATT | SLoC avg -mn/+mx
+AGENT            | VARIANT                  | REPS | E2E   | GREEN | ITG mn/avg/mx  | MIN mn/avg/mx     | MIN/ATT | SLoC avg -mn/+mx
 sonnet-5         | zig                      | 1    | -     | 100%  | 1 / 1.0 / 1    | 6 / 6.3 / 6       | 6.3     |   47   -0/+0
 testagent        | python                   | 1    | -     | 100%  | 2 / 2.0 / 2    | 0 / 0.0 / 0       | 0.0     |   12   -0/+0
 ```

@@ -51,9 +51,9 @@ def experiment_dir():
     from fae.cell import config as _config
     return _config.experiment_dir(ROOT)
 
-# One live cell per model, everywhere: conduct enforces it at admission and
+# One live cell per agent, everywhere: conduct enforces it at admission and
 # resume defers respawns past it (--force overrides).
-PER_MODEL_CAP = int(os.environ.get("PER_MODEL_CAP", 1))
+PER_AGENT_CAP = int(os.environ.get("PER_AGENT_CAP", 1))
 
 # Attempts-to-green is the dependent variable, so the budget is a CONSTANT and
 # not a knob: two cells run at different budgets are not comparable, and a
@@ -155,24 +155,24 @@ def mem_pressure():
             "swap_used_mb": su, "swap_total_mb": su + sf}
 
 
-def cell_id(model, variant, rep, task="T1", effort="high", smoke=False):
+def cell_id(agent, variant, rep, task="T1", effort="high", smoke=False):
     # effort="" (not just unset) disables the suffix. THE one implementation:
     # fae/cell/__main__.py and fae/cell/prepare.py import this rather than
     # re-encoding the format.
-    prefix = model + (f"_{effort}" if effort else "") + ("_smoke" if smoke else "")
+    prefix = agent + (f"_{effort}" if effort else "") + ("_smoke" if smoke else "")
     return f"{prefix}_{variant}_{task}_r{rep}"
 
 
-_MODEL_RE = re.compile(r"^[a-zA-Z0-9-]+$")
+_AGENT_RE = re.compile(r"^[a-zA-Z0-9-]+$")
 _TASK_RE = re.compile(r"^T\d$")
 _REP_RE = re.compile(r"^r(\d+)$")
 
 
 def parse_cell_id(cid):
-    """<model>_<effort>[_smoke]_<variant>_<task>_r<rep> as (model, variant,
+    """<agent>_<effort>[_smoke]_<variant>_<task>_r<rep> as (agent, variant,
     task, rep), or None.
 
-    Model and effort carry no underscore; the variant may, so it is whatever
+    Agent and effort carry no underscore; the variant may, so it is whatever
     lies between the effort and the last two tokens — and it must be one of
     the experiment's variants: a name from another experiment is not a cell
     of this one."""
@@ -180,7 +180,7 @@ def parse_cell_id(cid):
     if len(t) < 5:
         return None
     rep = _REP_RE.match(t[-1])
-    if not rep or not _TASK_RE.match(t[-2]) or not _MODEL_RE.match(t[0]):
+    if not rep or not _TASK_RE.match(t[-2]) or not _AGENT_RE.match(t[0]):
         return None
     i = 3 if t[2] == "smoke" else 2
     variant = "_".join(t[i:-2])
@@ -234,7 +234,7 @@ def _emit_transition(action, cid, extra=""):
 
 
 def _ledger_intent(cid):
-    """The MODEL's intent for this cell, replayed from the current ledger: the
+    """The AGENT's intent for this cell, replayed from the current ledger: the
     last of EPOCH/Pause/Resume/Kill wins. Resume must answer a ledger Pause, or
     it is an illegal transition the model never admits."""
     intent = "run"

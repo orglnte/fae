@@ -153,7 +153,7 @@ def runs_module(root=None):
 
 
 def prepare(cid, task, vid, rep, workspaces, root=ROOT, fresh=False, reference=False,
-            impl="bash", model_version="?", cfg=None):
+            impl="bash", agent_model="?", cfg=None):
     """The cell's workspace, seeded from variant `vid`; with `reference` the
     variant's known answer is laid over the template (a smoke cell)."""
     workspaces = Path(workspaces)
@@ -182,7 +182,7 @@ def prepare(cid, task, vid, rep, workspaces, root=ROOT, fresh=False, reference=F
         f"CELL_ID={cid}\nTASK={task}\nVARIANT={vid}\nREPEAT={rep}\n"
         + ("REFERENCE=1\n" if reference else "")
         + f"ATTEMPT_BUDGET={cfg.get('ATTEMPT_BUDGET', 10)}\nIMPL={impl}\n"
-        f"MODEL_VERSION={model_version}\n")
+        f"AGENT_MODEL={agent_model}\n")
 
     ledger = ws / "iterations.log"
     if fresh or not ledger.exists():
@@ -202,7 +202,7 @@ def main(argv=None):
     root = _paths.root()
     cfg = _config.load(root)
     common = runs_module(root)
-    cid = common.cell_id(os.environ.get("MODEL", "?"), vid, rep,
+    cid = common.cell_id(os.environ.get("AGENT", "?"), vid, rep,
                          task, effort=os.environ.get("EFFORT", "high"),
                          smoke=bool(os.environ.get("SMOKE")))
     ws = prepare(cid, task, vid, rep,
@@ -213,8 +213,8 @@ def main(argv=None):
                  # AGENT_MODEL is config, not exported env: the environment
                  # alone yields the lane name ("opus") rather than the pinned
                  # version ("claude-opus-5") this field records.
-                 model_version=cfg.get("AGENT_MODEL")
-                 or os.environ.get("MODEL", "?"), cfg=cfg)
+                 agent_model=cfg.get("AGENT_MODEL")
+                 or os.environ.get("AGENT", "?"), cfg=cfg)
     print(ws)
     return 0
 

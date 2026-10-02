@@ -4,7 +4,7 @@
 
 An FAE experiment runs coding agents against a task, judges every attempt
 with a verifier you write, and records how many attempts each agent needed.
-The unit of work is a **cell**: one `(model, variant, task, rep)`
+The unit of work is a **cell**: one `(agent, variant, task, rep)`
 run with its own workspace, its own attempt budget (10) and its own ledger.
 A fleet of cells under one scheduler is an experiment.
 
@@ -457,12 +457,12 @@ correctly. `--stub DIR` replaces the agent with "copy DIR over the
 artifacts", one attempt, the full gate:
 
 ```sh
-EXPERIMENT_DIR=shout MODEL=stub WORKSPACES_DIR=/tmp/shout-ws \
+EXPERIMENT_DIR=shout AGENT=stub WORKSPACES_DIR=/tmp/shout-ws \
   python3 -m fae.cell T1 python 1 \
   --stub shout/variants/python/seed/reference/overlay
 ```
 
-The positional arguments are `TASK VARIANT [REP]`; `MODEL` and `EFFORT`
+The positional arguments are `TASK VARIANT [REP]`; `AGENT` and `EFFORT`
 come from the environment and name the cell: `stub_high_python_T1_r1`. `WORKSPACES_DIR` keeps this dry run out
 of the real workspace root (default `workspaces.nosync/`).
 
@@ -497,7 +497,7 @@ Now prove a wrong answer is a **charged** fail, not a rig fault:
 
 ```sh
 mkdir -p /tmp/broken && printf 'print(input())\n' > /tmp/broken/shout.py
-EXPERIMENT_DIR=shout MODEL=stub WORKSPACES_DIR=/tmp/shout-ws2 \
+EXPERIMENT_DIR=shout AGENT=stub WORKSPACES_DIR=/tmp/shout-ws2 \
   python3 -m fae.cell T1 python 1 --stub /tmp/broken
 ```
 
@@ -524,7 +524,7 @@ bash fae/agent-container/build.sh
 Then run a cell whose agent fails twice and solves on the third attempt:
 
 ```sh
-EXPERIMENT_DIR=shout MODEL=testagent TESTAGENT_PLAN=fail,fail,green \
+EXPERIMENT_DIR=shout AGENT=testagent TESTAGENT_PLAN=fail,fail,green \
   WORKSPACES_DIR=/tmp/shout-ws3 \
   python3 -m fae.cell T1 python 1
 ```
@@ -576,16 +576,16 @@ the one supervisor: you fill a backlog, it admits cells under its caps,
 repairs crashed ones, validates finished ones.
 
 ```sh
-# three reps of every active variant, for two models
+# three reps of every active variant, for two agents
 EXPERIMENT_DIR=shout python3 cli.py conduct queue-add sonnet --matrix --reps 3
 EXPERIMENT_DIR=shout python3 cli.py conduct queue-add haiku  --matrix --reps 3
 
 # the scheduler, in the foreground; Ctrl-C detaches, cells keep running
-EXPERIMENT_DIR=shout python3 cli.py conduct run -n 2 --per-model 1
+EXPERIMENT_DIR=shout python3 cli.py conduct run -n 2 --per-agent 1
 ```
 
-`-n` is the global cap and should equal the number of lanes; `--per-model`
-keeps one live cell per model so lanes are comparable. In another
+`-n` is the global cap and should equal the number of lanes; `--per-agent`
+keeps one live cell per agent so lanes are comparable. In another
 terminal:
 
 ```sh
@@ -734,7 +734,7 @@ unknown keys refused):
 `cid`, `task`, `variant`, `arrangement`, `expected_fp`, `mode`
 (`cell` | `reverify` | `exp1`).
 
-**Cell id**: `<model>_<effort>[_smoke]_<variant>_<task>_r<rep>`, encoded in
+**Cell id**: `<agent>_<effort>[_smoke]_<variant>_<task>_r<rep>`, encoded in
 one place (`fae/driver/common.py`).
 
 ---

@@ -49,7 +49,7 @@ CSV_COLUMNS = [
 
 
 def short_model(name: str) -> str:
-    """Compact a MODEL_VERSION for DISPLAY only.
+    """Compact a AGENT_MODEL for DISPLAY only.
 
         Gemini 3.1 Pro (High)     -> gemini-3.1p
         claude-haiku-4-5-20251001 -> haiku-4.5
@@ -556,7 +556,7 @@ def format_agent_time(m: dict) -> tuple[str, str]:
 def table_columns(vs: str | None) -> list[tuple[str, int]]:
     """(header, width) per column, in print order. The LoC column must fit
     format_loc's widest value or the columns after it walk left."""
-    return ([("MODEL", 16), ("VARIANT", 24)]
+    return ([("AGENT", 16), ("VARIANT", 24)]
             + [("REPS", 4), ("E2E", 5), ("GREEN", 5), ("ITG mn/avg/mx", 14),
                ("MIN mn/avg/mx", 17), ("MIN/ATT", 7),
                ("SLoC avg -mn/+mx", LOC_MEAN_W + len("   -9999/+9999"))]
@@ -597,7 +597,7 @@ def pooled_model(model_id):
 def group_and_rank(cells: list[dict]) -> dict:
     """cells -> {"<model> / <variant>": metrics}, ranked.
 
-    Grouped by MODEL, then BEST FIRST within that model: green rate
+    Grouped by AGENT, then BEST FIRST within that model: green rate
     descending, then mean iterations-to-green ascending, so the contrast the
     experiment is about is the first row under each model. A variant with NO
     green cell has mean_itg None and sorts LAST within its model; treating

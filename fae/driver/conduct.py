@@ -28,13 +28,13 @@ from fae.driver import supervise
 from fae.driver import weekly
 from fae.driver import zombies
 
-def _next_admissible(model, boxes):
+def _next_admissible(agent, boxes):
     """The lane's first spec that may start now, with the ones it skipped
     accounted for. Returns (path, cid) or (None, reason).
 
     Nothing is moved while deciding — a spec only leaves the queue when it is
     claimed, so an interrupted decision costs nothing."""
-    for p in queue.lane_specs(model):
+    for p in queue.lane_specs(agent):
         cid = queue.spec_cid(p)
         ws = common.WS / cid
         if ws.is_dir():
@@ -45,7 +45,7 @@ def _next_admissible(model, boxes):
                 continue
             st = state.cell_state(ws, {}, boxes)
             if st and st["state"] == "DONE":
-                queue.finish(model, p)
+                queue.finish(agent, p)
                 continue
         if state.pause_lock(cid) or state.loop_parents().get(cid):
             continue
@@ -79,8 +79,8 @@ STANDDOWN_COOL_S = int(os.environ.get("STANDDOWN_COOL_S", 300))
 CONDUCT_LIFTED = ("arm-stuck", "verify-wedged", "silent-hang", "phase-stalled-")
 
 
-def _lift_conduct_standdowns(models, now_t):
-    for m in models:
+def _lift_conduct_standdowns(agents, now_t):
+    for m in agents:
         for cid in ops.select_cells(m):
             meta = state.pause_meta(cid)
             if not meta:
@@ -119,19 +119,19 @@ def _converge_running(frozen):
     live = state.loop_parents()
     boxes = state.containers()
     for p in queue.running_specs():
-        model, cid = p.parent.name, queue.spec_cid(p)
+        agent, cid = p.parent.name, queue.spec_cid(p)
         if live.get(cid):
             continue
         st = state.cell_state(common.WS / cid, {}, boxes)
         if st and st["state"] == "DONE":
-            queue.finish(model, p)
+            queue.finish(agent, p)
             continue
         if state.pause_lock(cid):
             # operator (or a wall stand-down) owns this cell: hand the spec
             # back so the lane can serve the rest of its backlog
-            queue.release(model, p)
+            queue.release(agent, p)
             continue
-        if weekly._cooldown_until(model) > time.time():
+        if weekly._cooldown_until(agent) > time.time():
             continue                      # lane is walled: restarting its cell
                                           # only walls again
         n = ops._respawn_count(cid)
@@ -140,7 +140,7 @@ def _converge_running(frozen):
                                       # nowhere to carry the flag; the spec
                                       # going back to the queue is the record
                 (common.WS / cid / "reconcile.flagged").touch()
-            queue.release(model, p)
+            queue.release(agent, p)
             print(f"  [{common._hhmm()}] FLAGGED  {cid}: {n} repairs — human needed, "
                   f"spec held in the queue until you resume it", flush=True)
             continue
@@ -149,7 +149,7 @@ def _converge_running(frozen):
         except (OSError, json.JSONDecodeError):
             queue.shelve(p, "unreadable")
             continue
-        rc = ops._spawn_spec(model, spec, cid, "repair")
+        rc = ops._spawn_spec(agent, spec, cid, "repair")
         if rc is None:
             ops._respawn_count(cid, bump=True)
             print(f"  [{common._hhmm()}] repaired {cid} (attempt {n + 1} of "
@@ -165,8 +165,8 @@ def _converge_running(frozen):
             print(f"  [{common._hhmm()}] {kind} on repair of {cid} "
                   f"(repair {n + 1} of {ops.MAX_RESPAWNS})", flush=True)
         elif rc in common.SYSTEMIC_EXITS:
-            frozen.add(model)
-            print(f"  [{common._hhmm()}] lane {model} FROZEN: repair spawn died "
+            frozen.add(agent)
+            print(f"  [{common._hhmm()}] lane {agent} FROZEN: repair spawn died "
                   f"rc={rc} — fix the cause, then restart conduct", flush=True)
 
 
@@ -235,7 +235,7 @@ def conduct(args):
     Ctrl-C detaches: live cells keep running (they are setsid-detached) and
     nothing new starts until conduct is run again.
 
-    ONE LIVE CELL PER NON-EMPTY LANE is the invariant. `--per-model` (1) is
+    ONE LIVE CELL PER NON-EMPTY LANE is the invariant. `--per-agent` (1) is
     what enforces it; `-n` is the global ceiling and should equal the lane
     count — conduct warns when it does not, because a lower cap silently
     starves lanes. Lanes admit starved-first, round-robin.
@@ -317,9 +317,9 @@ def conduct(args):
     zombie_seen: set[str] = set()   # 2nd-consecutive-sighting reap (watch's rule)
     poll_i = 0                      # liveness tick cadence
     warned_lanes = None             # re-warn only when the lane count moves
-    per_model_override = getattr(args, "per_model_override", None) or {}
-    override_txt = (f", override {per_model_override}" if per_model_override else "")
-    print(f"conduct: global cap {n}, {args.per_model}/model{override_txt}, "
+    per_agent_override = getattr(args, "per_agent_override", None) or {}
+    override_txt = (f", override {per_agent_override}" if per_agent_override else "")
+    print(f"conduct: global cap {n}, {args.per_agent}/agent{override_txt}, "
           f"round-robin, poll {args.interval}s"
           + (f", supervision every {sup_interval}s" if sup_interval else
              ", supervision OFF") +
@@ -340,9 +340,9 @@ def conduct(args):
                     print(f"  [{common._hhmm()}] zombie: {line}", flush=True)
                 zombie_seen = {z[1] for z in zs}
             _converge_running(frozen)
-            models = [queue.lane_model(d) for d in queue.lane_dirs()]
-            pending = {m: len(queue.lane_specs(m)) for m in models}
-            active = [m for m in models if pending[m]]
+            agents = [queue.lane_agent(d) for d in queue.lane_dirs()]
+            pending = {m: len(queue.lane_specs(m)) for m in agents}
+            active = [m for m in agents if pending[m]]
             if warned_lanes != len(active) and active and len(active) != n:
                 print(f"  [{common._hhmm()}] WARNING: global cap {n} != {len(active)} "
                       f"non-empty lane(s) — "
@@ -412,7 +412,7 @@ def conduct(args):
             # the round entirely. If the wall persists, the retried cell
             # walls again and the next sweep re-arms the cooldown.
             now_t = time.time()
-            for m in models:
+            for m in agents:
                 cu = weekly._cooldown_until(m)
                 if cu and cu <= now_t:
                     weekly._cooldown_file(m).unlink(missing_ok=True)
@@ -422,14 +422,14 @@ def conduct(args):
                             state._unpause(c2); lifted += 1
                     print(f"  [{common._hhmm()}] lane {m}: limit cooldown expired — "
                           f"{lifted} lock(s) lifted, retrying", flush=True)
-            _lift_conduct_standdowns(models, now_t)
+            _lift_conduct_standdowns(agents, now_t)
             weekly.weekly_budget_apply(weekly.weekly_cap_observe(now=now_t), now_t)
-            models = [queue.lane_model(d) for d in queue.lane_dirs()]   # a hold changes the lanes
-            pending = {m: len(queue.lane_specs(m)) for m in models}
-            order = [m for m in models if pending.get(m) and m not in frozen
+            agents = [queue.lane_agent(d) for d in queue.lane_dirs()]   # a hold changes the lanes
+            pending = {m: len(queue.lane_specs(m)) for m in agents}
+            order = [m for m in agents if pending.get(m) and m not in frozen
                      and weekly._cooldown_until(m) <= now_t]
             # Starvation guard: lanes with no live cell admit first, so the lane
-            # left out by the cap rotates instead of sticking to one model.
+            # left out by the cap rotates instead of sticking to one agent.
             lane_live = {m: sum(1 for c in live if c.startswith(m + "_")) for m in order}
             order.sort(key=lambda m: lane_live[m])
             idle_sweep = 0
@@ -439,7 +439,7 @@ def conduct(args):
                     break
                 m = order[rr % len(order)]
                 rr += 1
-                if len(queue.running_specs(m)) >= per_model_override.get(m, args.per_model):
+                if len(queue.running_specs(m)) >= per_agent_override.get(m, args.per_agent):
                     idle_sweep += 1
                     continue
                 p, cid = _next_admissible(m, boxes)
@@ -482,14 +482,14 @@ def conduct(args):
                     idle_sweep += 1
                     print(f"  [{common._hhmm()}] {cid} spawn died rc={rc} — spec "
                           f"back at the head, lane NOT frozen", flush=True)
-            if frozen and set(m for m in models if pending.get(m)) <= frozen:
+            if frozen and set(m for m in agents if pending.get(m)) <= frozen:
                 print(f"  [{common._hhmm()}] every pending lane is frozen ({sorted(frozen)}) "
                       f"— exiting", flush=True)
                 pidfile.unlink(missing_ok=True)
                 return
             poll_i += 1
             if poll_i % 10 == 0:      # sign of life on a quiet fleet
-                cool = sorted(m for m in models
+                cool = sorted(m for m in agents
                               if weekly._cooldown_until(m) > time.time())
                 print(f"  [{common._hhmm()}] alive — {len(state.loop_parents())}/{n} live, "
                       f"{sum(pending.values())} pending"
@@ -542,9 +542,9 @@ def _spec_of(st):
     return dict(task=st["task"], variant=st["variant"], rep=int(st["rep"]), fresh=False)
 
 
-def _known_models():
-    """Every model with a lane (live or parked) or a workspace."""
-    known = {queue.lane_model(d) for d in queue.lane_dirs(include_parked=True)}
+def _known_agents():
+    """Every agent with a lane (live or parked) or a workspace."""
+    known = {queue.lane_agent(d) for d in queue.lane_dirs(include_parked=True)}
     known |= {d.name.split("_", 1)[0] for d in common.WS.iterdir()
               if d.is_dir() and common.parse_cell_id(d.name)}
     return known
@@ -557,24 +557,24 @@ def conduct_resume(args):
 
     This is the burst-race fix (2026-08-12): the old `resume all` respawned
     directly, and each spawn raced the stale loop_parents() view of the ones
-    before it — ~15 loops started against a 1/model cap. At bulk scale
+    before it — ~15 loops started against a 1/agent cap. At bulk scale
     conduct is the only spawner; `cell resume CID` keeps the direct path
     because n=1 cannot burst.
 
     Blanket (`all`): standing operator decisions survive — roster/manual
     pauses and cancelled cells are skipped, exactly the old `resume all`
-    guard (the 2026-07-24 resurrection incident). Naming models lifts
-    roster/manual for those models."""
+    guard (the 2026-07-24 resurrection incident). Naming agents lifts
+    roster/manual for those agents."""
     scope = list(args.scope)
     blanket = ops._is_blanket(scope)
     if not blanket:
-        known = _known_models()
+        known = _known_agents()
         bad = [m for m in scope if m not in known]
         if bad:
-            sys.exit(f"unknown model(s): {', '.join(bad)} — conduct-resume "
-                     f"takes MODEL names or `all` (lanes present: "
+            sys.exit(f"unknown agent(s): {', '.join(bad)} — conduct-resume "
+                     f"takes AGENT names or `all` (lanes present: "
                      f"{', '.join(sorted(known)) or 'none'})")
-    lanes = sorted(queue.lane_model(d) for d in queue._parked_queues()) if blanket \
+    lanes = sorted(queue.lane_agent(d) for d in queue._parked_queues()) if blanket \
         else scope
     for m in lanes:
         r = queue.unpark_lane(m)
@@ -615,8 +615,8 @@ def conduct_resume(args):
                 print(f"  {cid}: {', '.join(acted)} (no requeue — "
                       f"{'done' if st['state'] == 'DONE' else 'loop alive'})")
             continue
-        model = cid.split("_", 1)[0]
-        if queue.enqueue(model, _spec_of(st), front=True) is None:
+        agent = cid.split("_", 1)[0]
+        if queue.enqueue(agent, _spec_of(st), front=True) is None:
             acted.append("already queued")
         else:
             acted.append("requeued at FRONT")
@@ -655,7 +655,7 @@ def conduct_pause(args):
     `conduct-resume all` and restart conduct deliberately (it does NOT come
     back on its own).
 
-    MODEL names (partial): park those lanes, pause those models' running
+    AGENT names (partial): park those lanes, pause those agents' running
     cells, return immediately; conduct keeps serving the other lanes.
     `--admission-only` parks the lanes and leaves the running cells to
     finish (the old queue-pause). Release with `conduct-resume M...`.
@@ -664,30 +664,30 @@ def conduct_pause(args):
     cooperative exit — no separate mechanism and no separate state."""
     scope = list(args.scope)
     blanket = ops._is_blanket(scope)
-    models = [] if blanket else scope
+    agents = [] if blanket else scope
     admission_only = getattr(args, "admission_only", False)
     if blanket and admission_only:
         sys.exit("--admission-only is per-lane; the fleet-wide admission stop "
                  "is stopping conduct itself (Ctrl-C, or conduct-pause all)")
-    if models:
-        known = _known_models()
-        bad = [m for m in models if m not in known]
+    if agents:
+        known = _known_agents()
+        bad = [m for m in agents if m not in known]
         if bad:
-            sys.exit(f"unknown model(s): {', '.join(bad)} — conduct-pause "
-                     f"takes MODEL names or `all` (lanes present: "
+            sys.exit(f"unknown agent(s): {', '.join(bad)} — conduct-pause "
+                     f"takes AGENT names or `all` (lanes present: "
                      f"{', '.join(sorted(known)) or 'none'})")
-    cids = ops.select_cells_many(models or ["all"])
+    cids = ops.select_cells_many(agents or ["all"])
     if args.dry_run:
         parents = {c: p for c, p in state.loop_parents().items() if p > 1}
-        if models:
+        if agents:
             parents = {c: p for c, p in parents.items()
-                       if c.split("_", 1)[0] in set(models)}
+                       if c.split("_", 1)[0] in set(agents)}
         for cid in sorted(parents):
             st = state.cell_state(common.WS / cid, state.loop_pids(), state.containers())
             print(f"would pause {cid} ({st['state']}·{st['why']})" if st
                   else f"would pause {cid}")
-        if models:
-            for m in models:
+        if agents:
+            for m in agents:
                 if not queue.lane_dir(m, parked=True).is_dir():
                     print(f"would park queue[{m}]")
             if admission_only:
@@ -701,30 +701,30 @@ def conduct_pause(args):
                 print(f"would leave {len(queued)} queued spec(s) in place — "
                       f"conduct, the only thing that admits them, is stopped")
         return
-    if models:
+    if agents:
         # PARTIAL: park the lanes (stops admission for their backlog) and,
         # unless --admission-only, pause their running cells. Returns
         # immediately — the pause is cooperative and the FP window needs a
         # FULL pause anyway (any live loop pins the fingerprint).
-        for m in models:
+        for m in agents:
             if queue.park_lane(m) == "parked":
                 print(f"  queue[{m}]: parked — conduct stops admitting from it")
         if admission_only:
-            print(f"admission stopped for {', '.join(models)} — running cells "
+            print(f"admission stopped for {', '.join(agents)} — running cells "
                   f"finish undisturbed. Release with: conduct-resume "
-                  f"{' '.join(models)}")
+                  f"{' '.join(agents)}")
             return
         ops.request_pause(cids, "drain")
         print(f"pause requested [drain] for {len(cids)} cell(s) of "
-              f"{', '.join(models)} — each loop stops at its next safe point. "
-              f"Release with: conduct-resume {' '.join(models)}")
+              f"{', '.join(agents)} — each loop stops at its next safe point. "
+              f"Release with: conduct-resume {' '.join(agents)}")
         return
     # FULL drain. STOP CONDUCT FIRST. Pausing only covers cells that already
     # have a workspace; the scheduler is free to pop a spec that has none, and
     # pause_lock on a nonexistent workspace returns None, so the new cell
     # starts and the window is not a window. On 2026-07-30 a drain leaked five
     # cells this way — the queue went 20 -> 15 while it was "draining" (via
-    # the old per-model workers; conduct inherited the same hazard and drain
+    # the old per-agent workers; conduct inherited the same hazard and drain
     # never stopped it). Conduct is the only thing that starts a cell from
     # the queue, so stopping it is what closes the window. It does NOT come
     # back with `resume all`; restart it deliberately.
@@ -768,14 +768,14 @@ def conduct_pause(args):
           "(then restart the scheduler: python3 cli.py conduct run)")
 
 
-def _confirm_stop(blanket, models, loops, pending, assume_yes):
+def _confirm_stop(blanket, agents, loops, pending, assume_yes):
     """Ask before a hard stop. Returns True to proceed.
 
     The warning quantifies the blast radius instead of describing it: a scope
     word alone does not tell the operator how many attempts are about to be
     thrown away.
     """
-    what = "ALL lanes" if blanket else ", ".join(models)
+    what = "ALL lanes" if blanket else ", ".join(agents)
     print(f"WARNING: hard stop of {what}.")
     if loops:
         print(f"  * {len(loops)} loop(s) TERMed MID-ATTEMPT — that work is "
@@ -811,20 +811,20 @@ def conduct_stop(args):
     lives elsewhere (`cell stop --cancel`). Confirms before acting."""
     scope = list(args.scope)
     blanket = ops._is_blanket(scope)
-    models = None if blanket else scope
-    if models:
-        known = _known_models()
-        bad = [m for m in models if m not in known]
+    agents = None if blanket else scope
+    if agents:
+        known = _known_agents()
+        bad = [m for m in agents if m not in known]
         if bad:
-            sys.exit(f"unknown model(s): {', '.join(bad)} — conduct-stop "
-                     f"takes MODEL names or `all` (lanes present: "
+            sys.exit(f"unknown agent(s): {', '.join(bad)} — conduct-stop "
+                     f"takes AGENT names or `all` (lanes present: "
                      f"{', '.join(sorted(known)) or 'none'})")
     def _in_scope(cid):
-        return blanket or cid.split("_", 1)[0] in set(models)
+        return blanket or cid.split("_", 1)[0] in set(agents)
     _loops_now = sorted(c for c in state.loop_parents() if _in_scope(c))
     _pending = sum(len(queue._dir_specs(d)) for d in queue.lane_dirs(include_parked=True)
-                   if not models or queue.lane_model(d) in set(models))
-    if not _confirm_stop(blanket, models, _loops_now, _pending,
+                   if not agents or queue.lane_agent(d) in set(agents))
+    if not _confirm_stop(blanket, agents, _loops_now, _pending,
                          getattr(args, "yes", False)):
         print("aborted — nothing stopped")
         return
@@ -850,8 +850,8 @@ def conduct_stop(args):
         # must not silently un-pause a roster somebody parked on purpose
         print(f"note: {len(_held)} cell(s) stay paused ({', '.join(_held[:3])}"
               f"{'...' if len(_held) > 3 else ''}) — release with: "
-              f"cli.py conduct resume {' '.join(models) if models else 'all'}")
-    print(f"stopped [{'all' if blanket else ', '.join(models)}]: "
+              f"cli.py conduct resume {' '.join(agents) if agents else 'all'}")
+    print(f"stopped [{'all' if blanket else ', '.join(agents)}]: "
           f"{'conduct stopped, ' if blanket else ''}"
           f"{len(loops)} loop(s) TERMed, containers removed "
           f"(workspaces and queues preserved)")

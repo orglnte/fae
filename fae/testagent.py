@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The test agent: a scripted coding agent that also audits its own invocation.
 
-Runs as MODEL=testagent, in the same container, with the same mounts, started
-the same way as every other model — so a bug in how the harness starts an agent
+Runs as AGENT=testagent, in the same container, with the same mounts, started
+the same way as every other agent — so a bug in how the harness starts an agent
 surfaces here instead of after burning real tokens on a real one.
 
 WHAT IT SEES, and why that is the point. A real agent's container has exactly

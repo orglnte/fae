@@ -133,9 +133,9 @@ def render_default_toml(definition, experiment_dir=None):
            "# authenticates through its own creds home, never a value here.",
            "",
            "[run]",
-           "# The agent a spawn without MODEL= runs (a tag of the experiment's",
+           "# The agent a spawn without AGENT= runs (a tag of the experiment's",
            "# agents.toml).",
-           'model = "opus"',
+           'agent = "opus"',
            "# true -> the agent runs with stream-json + --verbose so its turn-by-turn",
            "# tool trace lands in the per-attempt log.",
            "stream_agent = true",
@@ -218,7 +218,7 @@ def _fp_extra_files(root, trees):
 # Every env var _build consults; the cache key includes all of them, so a
 # changed override (a test's, or a spawn's) never reads a stale config.
 _KEY_ENV = (
-    "MODEL", "EFFORT", "SMOKE", "SHAPE_GATE", "STREAM_AGENT",
+    "AGENT", "EFFORT", "SMOKE", "SHAPE_GATE", "STREAM_AGENT",
     "WORK_SLOTS", "AGENT_HOME", "AGENT_IMAGE", "RESULTS_DIR",
     "RIG_LOCK_DIR", "VERIFY_LOCK_DIR", "WORKSPACES_DIR", "SMOKE_WORKSPACES_DIR",
     "EXPERIMENT_DIR",
@@ -256,9 +256,9 @@ def _build(root, env, toml, definition=None):
     def path(rel):
         return rel if os.path.isabs(rel) else f"{root}/{rel}"
 
-    model = env.get("MODEL") or run.get("model", "opus")
+    agent = env.get("AGENT") or run.get("agent", "opus")
     smoke = env.get("SMOKE", "")
-    cli, model_id, agent_effort, agent_home = agent_for(model, definition, toml)
+    cli, model_id, agent_effort, agent_home = agent_for(agent, definition, toml)
     effort = env["EFFORT"] if "EFFORT" in env else (agent_effort if agent_effort is not None else "high")
 
     v = dict(_ENGINE_DEFAULTS)
@@ -272,12 +272,12 @@ def _build(root, env, toml, definition=None):
                          "only a smoke cell (SMOKE=1) may set it")
     v["STREAM_AGENT"] = env["STREAM_AGENT"] if "STREAM_AGENT" in env \
         else ("1" if run.get("stream_agent", True) else "")
-    v["MODEL"] = model
+    v["AGENT"] = agent
     v["EFFORT"] = effort
     v["AGENT_CLI"] = cli
     v["AGENT_MODEL"] = model_id
     v["AGENT_TEMPERATURE"] = "0"
-    v["CELL_PREFIX"] = f"{model}{'_' + effort if effort else ''}{'_smoke' if smoke else ''}"
+    v["CELL_PREFIX"] = f"{agent}{'_' + effort if effort else ''}{'_smoke' if smoke else ''}"
 
     v["WORK_SLOTS"] = str(env.get("WORK_SLOTS") or slots.get("work", 8))
     # ARM_SLOTS_<LOCK>: [slots] arm_<lock> in the config, the environment on
@@ -404,7 +404,7 @@ def stage_agent(conf, cli, dest, root):
     dest = str(dest)
     home = Path(conf.get("AGENT_HOME", ""))
     if not cli:
-        raise RuntimeError(f"no agent {conf.get('MODEL', '')!r} in the experiment's agents.toml")
+        raise RuntimeError(f"no agent {conf.get('AGENT', '')!r} in the experiment's agents.toml")
     if cli == "agy":
         _refuse(dest, "/.agent-gemini")
         src = home

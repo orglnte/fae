@@ -42,7 +42,7 @@ class TestCellCommands(unittest.TestCase):
     def test_spawn(self):
         (ns,), _ = invoke("spawn", ["cell", "spawn", "sonnet", "beta_apidocs",
                                     "-r", "2", "--fresh"], mod=cli.ops)
-        self.assertEqual(vars(ns), dict(model="sonnet", variant="beta_apidocs", rep="2", task="T1",
+        self.assertEqual(vars(ns), dict(agent="sonnet", variant="beta_apidocs", rep="2", task="T1",
                                         fresh=True))
 
     def test_pause_takes_several_selectors(self):
@@ -90,15 +90,15 @@ class TestRetiredCommands(unittest.TestCase):
 class TestConductCommands(unittest.TestCase):
     def test_run(self):
         (ns,), _ = invoke("conduct", ["conduct", "run", "-n", "5",
-                                      "--per-model", "2", "--interval", "10"], mod=cli.conduct)
-        self.assertEqual(vars(ns), dict(limit=5, per_model=2, per_model_override={},
+                                      "--per-agent", "2", "--interval", "10"], mod=cli.conduct)
+        self.assertEqual(vars(ns), dict(limit=5, per_agent=2, per_agent_override={},
                                         interval=10, supervise_interval=300))
 
     def test_run_per_model_override(self):
         (ns,), _ = invoke("conduct", ["conduct", "run",
-                                      "--per-model-override", "haiku=3,opus=2"],
+                                      "--per-agent-override", "haiku=3,opus=2"],
                           mod=cli.conduct)
-        self.assertEqual(ns.per_model_override, {"haiku": 3, "opus": 2})
+        self.assertEqual(ns.per_agent_override, {"haiku": 3, "opus": 2})
 
     def test_run_supervision_off(self):
         (ns,), _ = invoke("conduct", ["conduct", "run",
@@ -112,14 +112,14 @@ class TestConductCommands(unittest.TestCase):
     def test_queue_add_matrix(self):
         (ns,), _ = invoke("spawn_matrix", ["conduct", "queue-add", "opus",
                                            "--matrix", "--reps", "5"], mod=cli.ops)
-        self.assertEqual(vars(ns), dict(model="opus", reps=5, task="T1",
+        self.assertEqual(vars(ns), dict(agent="opus", reps=5, task="T1",
                                         fresh=False))
 
     def test_queue_add_to_rep(self):
         (ns,), _ = invoke("top_up", ["conduct", "queue-add", "opus",
                                      "--to-rep", "10",
                                      "--variant", "beta_apidocs", "--dry-run"], mod=cli.ops)
-        self.assertEqual(vars(ns), dict(model="opus", to_rep=10, variants=["beta_apidocs"],
+        self.assertEqual(vars(ns), dict(agent="opus", to_rep=10, variants=["beta_apidocs"],
                                         task="T1", dry_run=True))
 
     def test_pause_full(self):
@@ -207,9 +207,9 @@ class TestRigCommands(unittest.TestCase):
     def test_prepare(self):
         (ns,), _ = invoke("prepare", ["experiment", "prepare", "--reps", "2", "--task", "T2"],
                           mod=cli.rig)
-        self.assertEqual(vars(ns), dict(model="", reps=2, task="T2"))
-        (ns,), _ = invoke("prepare", ["experiment", "prepare", "--model", "sonnet"], mod=cli.rig)
-        self.assertEqual(ns.model, "sonnet")
+        self.assertEqual(vars(ns), dict(agent="", reps=2, task="T2"))
+        (ns,), _ = invoke("prepare", ["experiment", "prepare", "--agent", "sonnet"], mod=cli.rig)
+        self.assertEqual(ns.agent, "sonnet")
 
     def _verb(self, argv):
         with mock.patch.object(cli.rig, "verb_cmd", return_value=0) as m:
