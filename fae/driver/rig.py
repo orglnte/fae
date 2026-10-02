@@ -19,6 +19,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import ujson as json
 
@@ -581,9 +582,14 @@ def init(args):
         # the file is rendered for THAT experiment: its locks, its CONFIG keys
         os.environ["EXPERIMENT_DIR"] = experiment
     target.write_text(_config.render_default_toml(common.definition(), experiment))
-    print(f"wrote {target} — edit [paths] if the siblings are elsewhere; next: "
-          "`cli.py experiment smoke` (the pipeline, no agent), or first `cli.py experiment substrate` "
-          "(what each arm needs from this host)")
+    print(f"wrote {target} — edit [paths] if the siblings are elsewhere")
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print("next: `python3 cli.py experiment check --walk`, step by step through "
+              "what the experiment needs before a cell runs")
+        return
+    if input("Walk through the readiness check now? [Y/n] ").strip().lower() in ("", "y", "yes"):
+        from fae.driver import check
+        check.main(SimpleNamespace(walk=True, static=False, smoke=False, arms="", task="T1"))
 
 
 def prepare(args):
