@@ -34,7 +34,7 @@ workspace tree.
 
 Not covered (needs docker, live processes, or a real workspace tree):
 `cell_state`, `render`, `find_zombies`, `reconcile`, `worker`, the `exp1`
-shape gate. Those are exercised by `cli.py rig selftest` instead.
+shape gate. Those are exercised by `cli.py experiment check` instead.
 
 ## Known failures
 
@@ -54,5 +54,5 @@ recovery calls `_recover_inflight()` directly rather than `worker()`.
 
 Patch `TRANSITIONS_LOG` too, not just `WS` and `ORCH`: `_emit_transition`
 resolves the module-level path, so an unpatched test writes fabricated
-transitions into the live conformance log that `selftest` replays against
+transitions into the live conformance log that `experiment check --trace` replays against
 `.tla/Runs.tla`.
