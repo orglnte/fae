@@ -84,7 +84,9 @@ class TestRetiredCommands(unittest.TestCase):
                      ["fleet", "reconcile"],
                      ["conduct", "run"], ["conduct", "queue-add", "opus", "--matrix"],
                      ["conduct", "pause", "all"], ["conduct", "reconcile"],
-                     ["fleet-status"], ["status"]):
+                     ["fleet-status"], ["status"],
+                     ["rig", "selftest"], ["rig", "zombies"], ["rig", "agent-image"],
+                     ["tools", "run", "law"]):
             result = runner.invoke(cli.app, argv)
             self.assertNotEqual(result.exit_code, 0, argv)
 

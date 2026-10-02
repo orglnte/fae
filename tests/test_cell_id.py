@@ -108,7 +108,7 @@ class TestParseCellId(unittest.TestCase):
         Not fixed by changing the derivation: that would touch every cid
         the orchestrator computes (conduct, spawn, queued_summary,
         _scrub_queues) in the middle of a live study. Operator decision
-        2026-07-30 — fail LOUDLY instead, which `cli.py rig selftest` now
+        2026-07-30 — fail LOUDLY instead, which `cli.py experiment check` now
         does whenever EFFORT is not "high" or SMOKE is set. This test pins
         the asymmetry so it stays a
         known, guarded property rather than a surprise.
@@ -116,15 +116,16 @@ class TestParseCellId(unittest.TestCase):
         cid = runs.cell_id("sonnet", "beta_apidocs", 1, effort="")
         self.assertIsNone(runs.parse_cell_id(cid))
 
-    def test_selftest_refuses_a_non_high_effort(self):
+    def test_the_check_refuses_a_non_high_effort(self):
         """The loud guard chosen instead of changing cid derivation."""
         import os
-        import subprocess
-        out = subprocess.run(
-            ["python3", str(runs.ROOT / "fae" / "cli.py"), "rig", "selftest"],
-            capture_output=True, text=True,
-            env=dict(os.environ, EFFORT="medium"))
-        self.assertIn("EFFORT/SMOKE mismatch", out.stdout + out.stderr)
+        from unittest import mock
+        from fae.driver import check
+        ctx = check.Ctx(root=runs.ROOT, static=True)
+        with mock.patch.dict(os.environ, {"EFFORT": "medium"}):
+            found = check._invariants(ctx)
+        bad = [f for f in found if not f.ok]
+        self.assertTrue(any("EFFORT='medium'" in f.text for f in bad), [f.text for f in found])
 
 
 class TestOneImplementation(unittest.TestCase):

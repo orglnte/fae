@@ -290,7 +290,7 @@ def watch(args):
 
     Supervision belongs to `experiment run`: it holds the schedule and knows what
     it started. A console open in a terminal is not a controller, and one that
-    acts is a second controller racing the first. `cli.py rig zombies --reap`
+    acts is a second controller racing the first. `cli.py experiment repair`
     is the operator's deliberate path."""
     try:
         while True:
@@ -299,7 +299,7 @@ def watch(args):
             print(render(args.flat, getattr(args, "running_only", False)))
             if zs:
                 print("\nZOMBIES (listed only — `experiment run` reaps, "
-                      "or `cli.py rig zombies --reap`):")
+                      "or `cli.py experiment repair`):")
                 for kind, ident, owner, note in zs:
                     print(f"  {kind:<10} {ident}  owner={owner}  {note}")
             time.sleep(args.interval)

@@ -622,6 +622,12 @@ def reconcile(args):
     2026-08-12 so a second controller cannot be started (the 2026-07-18
     two-controllers stall, now impossible by construction)."""
     _supervise_pass(dry=args.dry_run, only=args.only or "")
+    if args.dry_run:
+        for kind, ident, owner, note in zombies.find_zombies():
+            print(f"would reap {kind:<10} {ident}  owner={owner}  {note}")
+        return
+    for line in zombies.reap_sweep():
+        print(line)
 
 
 def conduct_diagnose(_args):
