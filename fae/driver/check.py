@@ -227,6 +227,121 @@ def _infra(ctx):
                     "python3 cli.py experiment infra")]
 
 
+def _invariants(ctx):
+    from fae import ledger, mutex
+    from fae.cell import config as _config, prepare as _prep, rig as _rig, verify as _verify
+    from fae.cell.variants import files as _files
+    from fae.driver import state
+    out = []
+    missing = [f"{mod.__name__}.{name}"
+               for mod, names in ((_rig, ("fp", "free_port_from")),
+                                  (_verify, ("run_verifier", "call", "run_in_thread")),
+                                  (mutex, ("pause_requested", "open_lock", "try_fd", "wait_fds")),
+                                  (_prep, ("prepare", "seed", "safe_wipe")),
+                                  (_config, ("load", "opencode_key_file", "stage_agent")))
+               for name in names if not callable(getattr(mod, name, None))]
+    out.append(Finding(not missing, "the engine's own functions are all there" if not missing
+                       else "engine functions missing: " + ", ".join(missing),
+                       "restore them: every verify depends on them"))
+    effort, smoke = os.environ.get("EFFORT", "high"), os.environ.get("SMOKE")
+    out.append(Finding(effort == "high" and not smoke,
+                       f"EFFORT={effort!r} SMOKE={smoke!r} in this shell",
+                       "unset EFFORT and SMOKE: the scheduler names cells as effort 'high' and "
+                       "not smoke, a cell started from this shell would name itself otherwise"))
+    d = ctx.definition()
+    hook = d.verbs.get("selftest")
+    problems = list(hook(common.WS)) if hook else []
+    out += [Finding(False, f"the experiment's own check: {p}",
+                    "what it names (the experiment's selftest hook)") for p in problems]
+    if not problems:
+        out.append(Finding(True, "the experiment's own checks" + ("" if hook else ": it declares none")))
+    for vid, cls in sorted(d.variants.items()):
+        where = cls.SOURCE.name if cls.SOURCE else vid
+        out += [Finding(False, f"variant {vid}: {p}", f"fix {where}") for p in _files.problems(cls)]
+    disagree = []
+    if common.WS.is_dir():
+        for ws in sorted(common.WS.iterdir()):
+            if not ws.is_dir() or not common.parse_cell_id(ws.name):
+                continue
+            st = state.cell_state(ws, {}, set())
+            if st and st["state"] == "DONE" and st["why"] in ("green", "failed", "revoked"):
+                if ledger.parse(ws)["verdict"] != st["why"]:
+                    disagree.append(ws.name)
+    out.append(Finding(not disagree, "every finished cell's ledger agrees with its state" if not disagree
+                       else f"ledger and state disagree: {', '.join(disagree[:5])}",
+                       "read those cells' iterations.log; a cell's record is never edited"))
+    return out
+
+
+def _agent_images(ctx):
+    from fae.cell import config as _config, image as _image
+    from fae.driver import image as _agents
+    out, base = [], _agents.image_name()
+    if not _image.present(base):
+        rc = _agents.rebuild({}, base)
+        out.append(Finding(rc == 0, f"agents' base image {base}: " + ("built" if rc == 0
+                                                                          else f"build failed (rc={rc})"),
+                           "read the build output above; the base is the experiment root's "
+                           "Dockerfile.agent-base, else the engine's"))
+        if rc != 0:
+            return out
+    else:
+        out.append(Finding(True, f"agents' base image {base}"))
+    try:
+        behind = _agents.stale(_agents.installed(base), _agents.upstream_cached(_agents.image_arch(base)))
+    except (OSError, ValueError, RuntimeError):
+        behind = []
+    out += [Finding(True, f"{tool} {have} in the base, {want} upstream: the next `experiment run` "
+                          f"rebuilds it before admitting a cell") for tool, have, want in behind]
+    conf = _config.load(ctx.root)
+    for tag, cls in _agents.variant_layers().items():
+        try:
+            _image.for_agent(ctx.definition(), conf, cls, ctx.root, log=lambda m: None)
+            out.append(Finding(True, f"agent layer {tag}"))
+        except RuntimeError as e:
+            out.append(Finding(False, f"agent layer {tag}: {_last_line(e)}",
+                               "fix the layer's Dockerfile; its build output names the step"))
+    return out
+
+
+def _leftovers(ctx):
+    from fae.driver import zombies
+    found = zombies.find_zombies()
+    if not found:
+        return [Finding(True, "no leftovers of dead cells")]
+    return [Finding(False, f"{kind} {ident} (owner {owner}): {note}",
+                    "python3 cli.py experiment repair (it reaps them)")
+            for kind, ident, owner, note in found]
+
+
+def _trace(ctx):
+    from fae.cell import config as _config
+    from fae.driver import rig
+    tool = rig.tla_verify_path()
+    if tool is None:
+        return [Finding(False, "no TLA+ trace checker",
+                        "set FAE_TLA_VERIFY to tla_verify, or put tla_verify on PATH")]
+    log = common.TRANSITIONS_LOG
+    if not (log.exists() and log.stat().st_size):
+        return [Finding(True, "no transitions recorded yet: nothing to replay")]
+    spec = sorted(rig.TLA_DIR.glob("*.tla"))
+    # the checker's constants are the fleet's, not this shell's
+    slots = str(_config.load(ctx.root).values.get("WORK_SLOTS") or 8)
+    r = subprocess.run(["python3", tool, "--live-trace", str(log)]
+                       + ([str(spec[0])] if spec else []) + rig.conformance_since(),
+                       cwd=ctx.root, capture_output=True, text=True,
+                       env=dict(os.environ, WORK_SLOTS=slots))
+    judged = [l for l in r.stdout.splitlines()
+              if "judging" in l or l.startswith("tla_verify --live-trace OK")]
+    if r.returncode != 0:
+        return [Finding(False, "the transitions break the model: "
+                        + _last_line(RuntimeError(r.stdout + r.stderr)),
+                        f"read `python3 {tool} --live-trace {log}`; "
+                        "`python3 cli.py rig trace-reset` only at a moment the fleet is idle")]
+    return [Finding(True, "the transitions replay against the model"
+                    + (f" ({judged[0].strip()})" if judged else ""))]
+
+
 def _pipeline(ctx):
     from fae.driver import rig
     try:
@@ -261,6 +376,10 @@ STEPS = (
          "Prepares each variant, and its reference, into a throwaway\n"
          "workspace root: the same prepare() a real cell runs.",
          "§4, §5", _seeds, needs=("definition",)),
+    Step("invariants", "The engine's and the corpus's invariants",
+         "The engine's own functions, a shell that names cells as the scheduler\n"
+         "does, the experiment's own checks, and every finished cell's record.",
+         "§12", _invariants, needs=("definition",)),
     Step("docker", "The docker daemon",
          "Every agent, verifier and program under test runs in a container of\n"
          "this daemon.",
@@ -269,6 +388,18 @@ STEPS = (
          "Each variant's own preflight (its infra's ok()) and the verify image,\n"
          "built now if missing, so no cell pays for the build.",
          "§7", _infra, needs=("seeds", "docker"), docker=True),
+    Step("agents", "The agents' images",
+         "The agents' base image (their CLIs) and each variant's tools layer\n"
+         "over it, built now if missing; a CLI behind upstream is reported.",
+         "§10", _agent_images, needs=("definition", "docker"), docker=True),
+    Step("leftovers", "No leftovers of dead cells",
+         "Containers, clusters and heartbeats whose cell is gone hold host\n"
+         "capacity the next measurement needs.",
+         "§11", _leftovers, needs=("docker",), docker=True),
+    Step("trace", "The fleet's transitions replay against the model",
+         "Every recorded transition of every cell is replayed against the\n"
+         "TLA+ model of the cell lifecycle.",
+         "§11", _trace, needs=("config",), opt_in="--trace"),
     Step("pipeline", "The reference passes the gate",
          "One reference cell per way of judging, no agent, one arrangement:\n"
          "proves the verifier judges the known answer green before any agent runs.",
@@ -296,11 +427,12 @@ def _show(findings, out, failed_only=False):
             out(f"       fix: {f.fix}")
 
 
-def run(ctx, steps=STEPS, walk=False, smoke=False, ask=input, out=print):
+def run(ctx, steps=STEPS, walk=False, smoke=False, trace=False, ask=input, out=print):
     """Run `steps` in order; returns 0 when none failed, 1 otherwise.
     `walk` pauses before each step and after a failure (`ask` reads the answer)."""
     status = {}
-    active = [s for s in steps if not (s.opt_in and not smoke)]
+    enabled = {"--smoke": smoke, "--trace": trace}
+    active = [s for s in steps if not s.opt_in or enabled.get(s.opt_in)]
     for n, step in enumerate(active, 1):
         head = f"[{n}/{len(active)}] {step.title}"
         blocked = [k for k in step.needs if status.get(k) != "ok"]
@@ -369,4 +501,4 @@ def main(args):
                  "run without --walk for the checklist")
     ctx = Ctx(root=common.ROOT, variants=tuple(v for v in (args.variants or "").split(",") if v),
               task=args.task, static=args.static)
-    sys.exit(run(ctx, walk=args.walk, smoke=args.smoke))
+    sys.exit(run(ctx, walk=args.walk, smoke=args.smoke, trace=getattr(args, "trace", False)))

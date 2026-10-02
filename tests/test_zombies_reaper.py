@@ -5,6 +5,7 @@ name.py owns _cksum/_cluster_for; test_reconcile_safety.py owns
 _leaked_lock_holders/_VERIFY_HOLDER_ARGV. This file is everything else:
 the OS-facing helpers and the zombie classes find_zombies enumerates.
 """
+import argparse
 import io
 import os
 import subprocess
@@ -349,10 +350,6 @@ class TestReapZombies(unittest.TestCase):
         self.assertIn("FAILED reaping container x: boom", done)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestClusterMapAsksTheCellsVariant(unittest.TestCase):
     """A cell owns the cluster its own variant names."""
 
@@ -368,3 +365,35 @@ class TestClusterMapAsksTheCellsVariant(unittest.TestCase):
                                       classmethod(lambda cls, c: [("cluster", f"cl-{c}")])), \
                     mock.patch.dict(zombies._CLMAP, {"key": None, "map": {}}):
                 self.assertEqual(zombies._cluster_map(), {cid: f"cl-{cid}"})
+
+
+class TestTheRepairReaps(unittest.TestCase):
+    """`experiment repair` reaps leftovers (its docs always said so); a dry
+    run lists them; the sweep itself is a singleton with a cooldown."""
+
+    def test_repair_reaps_and_a_dry_run_only_lists(self):
+        from fae.driver import supervise, zombies
+        with mock.patch.object(supervise, "_supervise_pass"), \
+                mock.patch.object(zombies, "reap_sweep", return_value=["reaped x"]) as sweep, \
+                mock.patch.object(zombies, "find_zombies",
+                                  return_value=[("container", "fae-dind-x", "x", "gone")]):
+            supervise.reconcile(argparse.Namespace(dry_run=False, only=""))
+            sweep.assert_called_once()
+            sweep.reset_mock()
+            supervise.reconcile(argparse.Namespace(dry_run=True, only=""))
+            sweep.assert_not_called()
+
+    def test_a_sweep_within_the_cooldown_does_nothing(self):
+        from fae.driver import common, zombies
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(common, "ORCH", Path(d)), \
+                mock.patch.object(zombies, "find_zombies", return_value=[("c", "x", "o", "n")]), \
+                mock.patch.object(zombies, "reap_zombies", return_value=["reaped x"]) as reap:
+            self.assertEqual(zombies.reap_sweep(), ["reaped x"])
+            self.assertEqual(zombies.reap_sweep(), [])
+            reap.assert_called_once()
+            self.assertFalse((Path(d) / ".zombie-reap.lock").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

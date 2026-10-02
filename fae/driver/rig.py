@@ -1,12 +1,8 @@
-"""The rig's own health and maintenance verbs — not experiment semantics.
-
-selftest (cross-language invariants + TLA+ live-trace conformance), the
-zombie-reap CLI wrapper, trace-reset (transitions.log archive/reseed),
-infra (per-variant preflight), smoke (pipeline check through the driver,
-no agent) and prepare (seed the matrix's workspaces, launch nothing) — the
-verbs the plan's Milestone 2 clusters left in runs.py because none of them
-are entangled with the scheduler/backlog/scoring clusters; each is a
-standalone diagnostic or maintenance action an operator runs by hand.
+"""The verbs an operator runs by hand that are not scheduling: trace-reset
+(transitions.log archived and reseeded), infra (each variant's preflight),
+smoke (the reference through the driver, no agent), prepare (the matrix's
+workspaces seeded, nothing launched), init, and an experiment's own
+commands. The TLA+ helpers here serve `experiment check --trace`.
 """
 from __future__ import annotations
 
@@ -26,9 +22,8 @@ import ujson as json
 from fae.driver import common
 from fae.driver import ops
 from fae.driver import state
-from fae.driver import zombies
 from fae.driver.common import (
-    ROOT, cell_id, ledger, mutex,
+    ROOT, cell_id, ledger,
     parse_cell_id,
 )
 
@@ -73,152 +68,7 @@ def conformance_since():
     return ["--since", since]
 
 
-def selftest(args):
-    """Cheap invariants that guard the cross-language seams: bash and python
-    must produce identical cell ids, and the ledger library must agree with a
-    fresh parse on every terminal workspace."""
-    fails = 0
-    # The one cell_id: the driver's entry points import it rather than
-    # re-encoding the format (tests/test_cell_id.py pins the wiring).
-    # critical harness functions: a bad edit that deletes one turns every
-    # verify into recorded attempt failures (2026-07-25, twice) — cheaper to
-    # catch here than in burned budget. All Python now; the rig has no bash
-    # left except the frozen bring-up scripts, which are not importable.
-    sys.path.insert(0, str(ROOT))
-    from fae.cell import rig as _rig, verify as _verify, variants as _tr
-    from fae.cell import prepare as _prep, config as _config
-    for mod, names in ((_rig, ("fp", "free_port_from")),
-                       (_verify, ("run_verifier", "call", "run_in_thread")),
-                       (mutex, ("pause_requested", "open_lock", "try_fd", "wait_fds")),
-                       (_prep, ("prepare", "seed", "safe_wipe")),
-                       (_config, ("load", "opencode_key_file", "stage_agent"))):
-        for name in names:
-            if not callable(getattr(mod, name, None)):
-                print(f"FAIL critical harness function missing: "
-                      f"{getattr(mod, '__name__', mod)}.{name}"); fails += 1
-    # EFFORT/SMOKE: fae/driver/common.py's cell_id() defaults to effort="high",
-    # smoke=False, and every internal caller (ops.spawn, queue.enqueue,
-    # render.queued_summary) leaves those defaults alone, while the driver
-    # (fae/cell/__main__.py) derives the prefix from the INHERITED
-    # environment. Run anything with EFFORT=medium or SMOKE=1 and the two
-    # disagree, so every doneness / pause / duplicate-loop check inspects a
-    # workspace that does not exist. Changing the derivation mid-study is the
-    # riskier move (it touches every cid the orchestrator computes), so this
-    # fails LOUDLY instead — operator decision 2026-07-30.
-    _eff = os.environ.get("EFFORT", "high")
-    if _eff != "high" or os.environ.get("SMOKE"):
-        print(f"FAIL EFFORT/SMOKE mismatch: EFFORT={_eff!r} "
-              f"SMOKE={os.environ.get('SMOKE')!r} — the orchestrator computes "
-              f"cids as 'high'/non-smoke while the driver honours the "
-              f"environment, so "
-              f"the two disagree about every workspace name. Unset them, or fix "
-              f"cell_id's callers first.")
-        fails += 1
-    # The experiment's own pins on its rules (the mount oracle, the corpus
-    # consistency of its greens) — through its declared selftest verb.
-    _selftest = common.definition().verbs.get("selftest")
-    for f in (_selftest(common.WS) if _selftest else []):
-        print(f"FAIL {f}"); fails += 1
-    # What a variant hands the agent is the independent variable: a missing
-    # template directory or input file, or an input the template also
-    # provides, changes it.
-    from fae.cell.variants import files as _files
-    for vid, cls in sorted(_tr.registry().items()):
-        for problem in _files.problems(cls):
-            print(f"FAIL variant {vid}: {problem}"); fails += 1
-    for ws in sorted(common.WS.iterdir()):
-        if not ws.is_dir() or not parse_cell_id(ws.name):
-            continue
-        st = state.cell_state(ws, {}, set())
-        if st and st["state"] == "DONE" and st["why"] != "cancelled":
-            L = ledger.parse(ws)
-            want = {"green": "green", "failed": "failed", "revoked": "revoked"}[st["why"]]
-            if L["verdict"] != want:
-                print(f"FAIL {ws.name}: cell_state={st['why']} ledger={L['verdict']}")
-                fails += 1
-    # TLA+ live-trace conformance (item 4): fleet-wide periodic check, unlike
-    # the per-attempt --trace already wired at verify-end. Absence tolerated
-    # (no events yet, or a fresh checkout with no transitions.log) — this is
-    # cheap defense-in-depth, not a required artifact.
-    tla_verify = tla_verify_path()
-    if tla_verify is None:
-        print("  live-trace conformance skipped: no tla_verify "
-              "(set FAE_TLA_VERIFY or put tla_verify on PATH)")
-    elif common.TRANSITIONS_LOG.exists() and common.TRANSITIONS_LOG.stat().st_size > 0:
-        spec = sorted(TLA_DIR.glob("*.tla"))
-        # The checker's constants must match the FLEET's configuration, not the
-        # operator shell: an unset WORK_SLOTS here would replay the fleet
-        # against a smaller slot cap and report legal holders as violations.
-        from fae.cell import config as _cellcfg
-        _slots = str(_cellcfg.load(ROOT).values.get("WORK_SLOTS") or 8)
-        r = subprocess.run(["python3", tla_verify, "--live-trace", str(common.TRANSITIONS_LOG)]
-                            + ([str(spec[0])] if spec else [])
-                            + conformance_since(),
-                            cwd=ROOT, capture_output=True, text=True,
-                            env=dict(os.environ, WORK_SLOTS=_slots))
-        if r.returncode != 0:
-            print(f"FAIL live-trace conformance:\n{r.stdout}{r.stderr}")
-            fails += 1
-        else:
-            # A green check that judged a narrow window is not the same claim
-            # as a green check over the whole trace — say which one it was.
-            for line in r.stdout.splitlines():
-                if "judging" in line or line.startswith("tla_verify --live-trace OK"):
-                    print(f"  {line}")
-    print(f"selftest: {'FAIL' if fails else 'OK'} ({fails} failures)")
-    sys.exit(1 if fails else 0)
-
-
-# --- zombie tracking ------------------------------------------------------
-# A ZOMBIE is a rig resource whose owning loop is gone: agent/dind containers,
-# per-cell or per-verify kind clusters, orphan tee loggers, stale heartbeat
-# files. They accumulate through force-kills and crashes (2026-07-24: nine
-# dead control planes were quietly eating half the host's CPU and depressing
-# every measured ceiling). Detection is conservative: anything whose owner
-# cannot be established gets a long grace period instead of a reap.
-
-
-def zombies_cmd(args):
-    zs_needed = not args.reap
-    if zs_needed:
-        zs = zombies.find_zombies()
-        if not zs:
-            print("no zombies")
-        for kind, ident, owner, note in zs:
-            print(f"{kind:<10} {ident}  owner={owner}  {note}")
-        return
-    # SINGLETON + rate limit: a mass respawn fires one detached reap per
-    # spawned cell — 29 concurrent docker/kind sweeps racing to delete the
-    # same targets is itself host contention. One reaper at a time (atomic
-    # mkdir; stale if its pid died), and if any reap finished within
-    # ZOMBIE_REAP_COOLDOWN_S the new one just exits.
-    cooldown = int(os.environ.get("ZOMBIE_REAP_COOLDOWN_S", 120))
-    stamp = common.ORCH / ".zombie-reap.done"
-    lock = common.ORCH / ".zombie-reap.lock"
-    try:
-        if time.time() - stamp.stat().st_mtime < cooldown:
-            return
-    except OSError:
-        pass
-    common.ORCH.mkdir(parents=True, exist_ok=True)
-    try:
-        lock.mkdir()
-    except FileExistsError:
-        try:
-            holder = int((lock / "pid").read_text())
-            os.kill(holder, 0)
-            return                      # a live reaper is already sweeping
-        except (OSError, ValueError):
-            pass                        # stale lock: dead reaper — take over
-    (lock / "pid").write_text(str(os.getpid()))
-    try:
-        for line in zombies.reap_zombies(zombies.find_zombies()):
-            if not args.quiet:
-                print(line)
-        stamp.touch()
-    finally:
-        subprocess.run(["rm", "-rf", str(lock)], capture_output=True)
-
+# --- the fleet's state, recorded for trace-reset ----------------------------
 
 def _holder_of(lock_dir):
     """cid named in a mutex's holder file, or ''."""

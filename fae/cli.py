@@ -5,7 +5,8 @@ DESIGN: this is a CLI LAYER, not the orchestrator. Every command builds the
 namespace the target fae/driver/*.py function already expects and calls it
 directly — fae/driver/ is the library, this is its one client. That includes
 fae/driver/rig.py (the experiment's verbs: init, infra, smoke, prepare,
-verb; the rig's own: selftest, trace-reset, zombies) and the tail/log pair folded into fae/driver/ops.py.
+verb; the rig's own: trace-reset), fae/driver/check.py (experiment check)
+and the tail/log pair folded into fae/driver/ops.py.
 No orchestration logic is duplicated here.
 
 GROUPS
@@ -17,12 +18,9 @@ GROUPS
            seal, reverify
   results  what the experiment produced, and whether to trust it: score,
            grade, validate, aggregate
-  rig      the harness itself, not the experiment: selftest, trace-reset,
-           agent-image, zombies
-  tools    instruments/*.py scripts, run standalone for debugging — the
-           harness path-loads and calls them in-process (verify.py); this
-           is a separate, human-facing subprocess invocation, not a second
-           way the harness reaches them
+  rig      the harness itself, not the experiment: trace-reset, and tool
+           (an instrument run standalone for debugging; the harness calls
+           them in-process, verify.py, never through here)
 
 OPTIONS
   experiment status  --watch N, --walls (the fleet table, live, or its walls)
@@ -74,16 +72,12 @@ experiment_app = typer.Typer(no_args_is_help=True,
                              help="The experiment this root runs: set it up, check it, "
                                   "run it, watch it.")
 rig_app = typer.Typer(no_args_is_help=True, help="The harness itself, not the experiment.")
-tools_app = typer.Typer(no_args_is_help=True,
-                        help="instruments/*.py, run standalone for debugging — "
-                             "the harness calls them in-process, not through here.")
 
 app.add_typer(experiment_app, name="experiment")
 app.add_typer(cell_app, name="cell")
 app.add_typer(queue_app, name="queue")
 app.add_typer(results_app, name="results")
 app.add_typer(rig_app, name="rig")
-app.add_typer(tools_app, name="tools")
 
 # A passthrough command hands every argument, --help included, to what it runs.
 _PASSTHROUGH = {"allow_extra_args": True, "ignore_unknown_options": True,
@@ -482,18 +476,17 @@ def experiment_check(walk: bool = typer.Option(False, "--walk",
                                                      "the gate (experiment smoke)"),
                      variants: str = typer.Option("", "--variants",
                                                   help="comma-separated (default: every active variant)"),
+                     trace: bool = typer.Option(False, "--trace",
+                                                help="also replay the fleet's transitions against "
+                                                     "the TLA+ model of the cell lifecycle"),
                      task: str = typer.Option("T1", "--task", help="the task the seeds are checked for")):
     """Whether this root's experiment is ready to run: the host, the config,
-    the definition, each variant, every cell's seed, the infra. Exit 1 on
-    any failure; each names its fix."""
+    the definition, each variant, every cell's seed, the invariants, the
+    infra, the agents' images, no leftovers. Exit 1 on any failure; each
+    names its fix."""
     from fae.driver import check
-    check.main(_ns(walk=walk, static=static, smoke=smoke, variants=variants, task=task))
-
-
-@rig_app.command("selftest")
-def rig_selftest():
-    """Invariants of the rig itself, incl. TLA+ live-trace conformance."""
-    rig.selftest(_ns())
+    check.main(_ns(walk=walk, static=static, smoke=smoke, trace=trace, variants=variants,
+                   task=task))
 
 
 @rig_app.command("trace-reset")
@@ -509,19 +502,6 @@ def experiment_infra():
     of stale per-verify kind clusters. Creates nothing: each verify provisions
     its own infra."""
     rig.infra(_ns())
-
-
-@rig_app.command("agent-image")
-def rig_agent_image(rebuild: bool = typer.Option(False, "--rebuild",
-                                                 help="build what is missing or behind: the base, then each variant's layer")):
-    """The agent images: the base's clients (claude, opencode, agy) installed
-    vs latest upstream, and each variant's layer over it. --rebuild builds the
-    base when missing or behind and a layer when its content moved."""
-    from fae.driver import image
-    behind = image.report()
-    if rebuild:
-        raise SystemExit(0 if image.ensure_agent() else 1)
-    raise SystemExit(1 if behind else 0)
 
 
 @experiment_app.command("smoke")
@@ -556,17 +536,7 @@ def experiment_verb(ctx: typer.Context):
     raise SystemExit(rig.verb_cmd(args[0] if args else "", args[1:]) or 0)
 
 
-@rig_app.command("zombies")
-def rig_zombies(reap: bool = typer.Option(False, "--reap",
-                                          help="run one manual reap sweep"),
-                quiet: bool = typer.Option(False, "--quiet",
-                                           help="suppress the reaped-line log during --reap")):
-    """List orphaned rig resources (containers, kind clusters, stale
-    heartbeats) whose owning loop is gone. --reap sweeps them."""
-    rig.zombies_cmd(_ns(reap=reap, quiet=quiet))
-
-
-# --- tools: instruments, run standalone (debug/one-off) ----------------------
+# --- rig tool: an instrument, run standalone (debug/one-off) ----------------
 
 def _instrument_dirs():
     """Where an instrument name resolves, in order: the engine's own, the
@@ -578,13 +548,13 @@ def _instrument_dirs():
             common.experiment_dir() / "instruments"]
 
 
-@tools_app.command("run", context_settings=_PASSTHROUGH)
-def tools_run(ctx: typer.Context):
-    """run NAME [ARGS...] — one instrument by name (e.g. resource_sampler, law,
+@rig_app.command("tool", context_settings=_PASSTHROUGH)
+def rig_tool(ctx: typer.Context):
+    """tool NAME [ARGS...] — one instrument by name (e.g. resource_sampler, law,
     trace, k6, load_shape), forwarding ARGS untouched; the script owns its
     own argument parsing."""
     if not ctx.args:
-        raise typer.BadParameter("tools run NAME [ARGS...]")
+        raise typer.BadParameter("rig tool NAME [ARGS...]")
     name, argv = ctx.args[0], ctx.args[1:]
     for base in _instrument_dirs():
         if (base / f"{name}.py").is_file():

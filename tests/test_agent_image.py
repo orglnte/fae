@@ -174,7 +174,7 @@ class TheLayer(unittest.TestCase):
         with mock.patch.object(cimage, "image_id", return_value=""):
             with self.assertRaises(RuntimeError) as e:
                 cimage.for_agent(self._def(), None, self._variant(True), Path(tempfile.mkdtemp()))
-        self.assertIn("agent-image", str(e.exception))
+        self.assertIn("experiment check", str(e.exception))
 
     def test_ensure_agent_builds_the_missing_base_then_checks_clients_then_every_arm_layer(self):
         order = []

@@ -1644,8 +1644,8 @@ class Cell:
                     raise Halt(f"HALT[agent]: docker could not start the agent "
                                f"container at {self.cid} attempt {attempt} "
                                f"(agent.attempt-{attempt}.log) — nothing charged; "
-                               f"build the agent image (`cli.py rig agent-image "
-                               f"--rebuild`) and re-run (cell resumes here)", 42)
+                               f"build the agent images (`cli.py experiment check`) "
+                               f"and re-run (cell resumes here)", 42)
                 if outcome is not True:
                     self.apply(T.CRASH, "agent-fault")
                     raise Halt(f"HALT[agent]: no agent output after "

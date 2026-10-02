@@ -379,6 +379,43 @@ def reap_zombies(zs):
     return done
 
 
+def reap_sweep():
+    """One deliberate reap of every leftover, the lines it reaped. One reaper
+    at a time (an atomic mkdir; stale when its pid is dead), and a sweep
+    that finished within ZOMBIE_REAP_COOLDOWN_S makes this one a no-op: many
+    concurrent docker and kind sweeps racing on the same targets are host
+    contention of their own."""
+    cooldown = int(os.environ.get("ZOMBIE_REAP_COOLDOWN_S", 120))
+    stamp = common.ORCH / ".zombie-reap.done"
+    lock = common.ORCH / ".zombie-reap.lock"
+    try:
+        if time.time() - stamp.stat().st_mtime < cooldown:
+            return []
+    except OSError:
+        pass
+    common.ORCH.mkdir(parents=True, exist_ok=True)
+    try:
+        lock.mkdir()
+    except FileExistsError:
+        try:
+            holder = int((lock / "pid").read_text())
+            os.kill(holder, 0)
+            return []                   # a live reaper is already sweeping
+        except (OSError, ValueError):
+            pass                        # stale lock: dead reaper, take over
+    (lock / "pid").write_text(str(os.getpid()))
+    try:
+        lines = list(reap_zombies(find_zombies()))
+        stamp.touch()
+        return lines
+    finally:
+        (lock / "pid").unlink(missing_ok=True)
+        try:
+            lock.rmdir()
+        except OSError:
+            pass
+
+
 def janitor_lines():
     """Two-stage-delete review: list .to_be_deleted entries older than 24 h.
     NEVER deletes anything — deletion happens only after the operator reviews

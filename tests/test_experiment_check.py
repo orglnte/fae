@@ -185,6 +185,107 @@ class TestTheCli(unittest.TestCase):
         for verb in ("init", "check", "infra", "smoke", "prepare", "verb"):
             self.assertIn(f'@experiment_app.command("{verb}"', src)
             self.assertNotIn(f'@rig_app.command("{verb}"', src)
+        rig_verbs = sorted(set(__import__("re").findall(r'@rig_app\.command\("([a-z-]+)"', src)))
+        self.assertEqual(rig_verbs, ["tool", "trace-reset"])
+
+
+class TestTheFoldedSteps(CheckCase):
+    """What were `rig selftest`, `rig agent-image` and `rig zombies` are steps
+    of the check: each finds its failure and names the fix; the docker ones
+    skip under --static and the trace replay runs only with --trace."""
+
+    def findings(self, step, ctx=None):
+        return step(ctx or self.ctx())
+
+    def test_a_missing_engine_function_is_named(self):
+        from fae.cell import verify as _verify
+        with mock.patch.object(_verify, "run_verifier", None):
+            bad = [f for f in self.findings(check._invariants) if not f.ok]
+        self.assertTrue(any("fae.cell.verify.run_verifier" in f.text for f in bad))
+
+    def test_the_experiments_own_checks_are_findings(self):
+        d = _experiment.current()
+        verbs = dict(d.verbs, selftest=lambda ws: ["a green with no mount"])
+        with mock.patch.object(type(d), "verbs", new_callable=mock.PropertyMock, return_value=verbs):
+            bad = [f for f in self.findings(check._invariants) if not f.ok]
+        self.assertIn("the experiment's own check: a green with no mount", [f.text for f in bad])
+
+    def test_leftovers_fail_with_the_repair_fix(self):
+        from fae.driver import zombies
+        with mock.patch.object(zombies, "find_zombies", return_value=[]):
+            self.assertTrue(all(f.ok for f in self.findings(check._leftovers)))
+        with mock.patch.object(zombies, "find_zombies",
+                               return_value=[("container", "fae-dind-x", "x", "loop gone")]):
+            (f,) = self.findings(check._leftovers)
+        self.assertFalse(f.ok)
+        self.assertIn("experiment repair", f.fix)
+
+    def test_a_missing_base_image_is_built_and_a_failed_build_stops_the_step(self):
+        from fae.cell import image as _image
+        from fae.driver import image as _agents
+        with mock.patch.object(_image, "present", return_value=False), \
+                mock.patch.object(_agents, "image_name", return_value="fae-agent:x"), \
+                mock.patch.object(_agents, "rebuild", return_value=1) as build:
+            found = self.findings(check._agent_images)
+        build.assert_called_once()
+        self.assertEqual([(f.ok, f.text) for f in found],
+                         [(False, "agents' base image fae-agent:x: build failed (rc=1)")])
+
+    def test_a_layer_that_will_not_build_is_a_failure_and_behind_upstream_is_a_note(self):
+        from fae.cell import image as _image
+        from fae.driver import image as _agents
+        with mock.patch.object(_image, "present", return_value=True), \
+                mock.patch.object(_agents, "image_name", return_value="fae-agent:x"), \
+                mock.patch.object(_agents, "installed", return_value={}), \
+                mock.patch.object(_agents, "image_arch", return_value="arm64"), \
+                mock.patch.object(_agents, "upstream_cached", return_value={}), \
+                mock.patch.object(_agents, "stale", return_value=[("claude", "1.0", "1.1")]), \
+                mock.patch.object(_agents, "variant_layers", return_value={"fae-a-layer:1": object()}), \
+                mock.patch.object(_image, "for_agent", side_effect=RuntimeError("step 3 failed")):
+            found = self.findings(check._agent_images)
+        notes = [f for f in found if f.ok and "upstream" in f.text]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("claude 1.0 in the base, 1.1 upstream", notes[0].text)
+        self.assertIn((False, "agent layer fae-a-layer:1: step 3 failed"), [(f.ok, f.text) for f in found])
+
+    def test_the_trace_names_a_missing_checker_and_an_empty_log_is_fine(self):
+        from fae.driver import rig
+        with mock.patch.object(rig, "tla_verify_path", return_value=None):
+            (f,) = self.findings(check._trace)
+        self.assertFalse(f.ok)
+        self.assertIn("FAE_TLA_VERIFY", f.fix)
+        empty = self.root / "transitions.log"
+        empty.write_text("")
+        with mock.patch.object(rig, "tla_verify_path", return_value="/x/tla_verify"), \
+                mock.patch.object(check.common, "TRANSITIONS_LOG", empty):
+            (f,) = self.findings(check._trace)
+        self.assertTrue(f.ok)
+
+    def test_a_trace_that_breaks_the_model_is_a_failure(self):
+        from fae.driver import rig
+        log = self.root / "transitions.log"
+        log.write_text("2026-10-02T00:00:00Z\tSPAWN\tc\n")
+        with mock.patch.object(rig, "tla_verify_path", return_value="/x/tla_verify"), \
+                mock.patch.object(check.common, "TRANSITIONS_LOG", log), \
+                mock.patch.object(check.subprocess, "run",
+                                  return_value=mock.Mock(returncode=1, stdout="Resume not ENABLED\n",
+                                                         stderr="")):
+            (f,) = self.findings(check._trace)
+        self.assertFalse(f.ok)
+        self.assertIn("Resume not ENABLED", f.text)
+
+    def test_static_skips_the_docker_steps_and_the_trace_is_opt_in(self):
+        self.run_check()
+        self.assertIn("  skip    The agents' images", self.lines)
+        self.assertIn("  skip    No leftovers of dead cells", self.lines)
+        self.assertNotIn("The fleet's transitions replay against the model", self.text())
+        self.lines.clear()
+        with mock.patch.object(check, "_trace", return_value=[check.Finding(True, "replayed")]):
+            steps = tuple(s if s.key != "trace" else check.Step(s.key, s.title, s.why, s.howto,
+                                                                 check._trace, s.needs, s.docker,
+                                                                 s.opt_in) for s in check.STEPS)
+            self.run_check(steps=steps, trace=True)
+        self.assertIn("  ok      The fleet's transitions replay against the model", self.lines)
 
 
 if __name__ == "__main__":
