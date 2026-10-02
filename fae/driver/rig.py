@@ -398,6 +398,15 @@ def trace_reset(args):
             print(f"  {c['cid']} (loop={c['loop']})")
 
 
+def _authorable_error(arm):
+    from fae.cell.surface import authorable
+    try:
+        authorable(arm)
+    except RuntimeError as e:
+        return str(e)
+    return ""
+
+
 def substrate(args):
     """Can this host carry each arm? Every arm's substrate preflight
     (<Variant>.substrate_ok — the check a cell makes before every attempt)
@@ -427,6 +436,8 @@ def _probe_arms(arms=None):
         ok, note = True, ""
         if not _tr.liveness_declared(type(variant)):
             ok, note = False, f"{type(variant).__name__} declares no substrate_alive probe"
+        elif (undeclared := _authorable_error(arm)):
+            ok, note = False, undeclared
         elif not variant.substrate_ok():
             ok = False
         if ok:

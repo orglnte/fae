@@ -707,7 +707,7 @@ turns a directory of scored cells into the results table.
 | Member | Purpose |
 |---|---|
 | `ARM`, `TECH`, `CONDITIONS` | identity; the tech names the seed docs |
-| `AUTHORABLE` | `(files, dir prefixes)` the agent may write |
+| `AUTHORABLE` | `(files, dir prefixes)` the agent may write; required, a cell of a variant without it is refused |
 | `LOCK`, `LOCK_SLOTS` | an exclusive lock held for the cell's life |
 | `IMAGE_DIR`, `image_context(conf)` | the variant's layer over the verifier's image |
 | `SUBSTRATE_PREFIXES`, `substrate_identities(cid)`, `stray()`, `sweep()` | what a reaper may find and remove |

@@ -335,7 +335,9 @@ The interface is `fae/cell/variants/base.py` (`Variant`); the classes are
 the experiment's, registered by arm on first use (§0). Each declares `ARM`,
 `TECH` (its skeleton overlay and api-doc name), `VARIANTS`, `LOCK` (the arm
 lock its cells hold for their lifetime, or none), `LOCK_SLOTS` and
-`AUTHORABLE` — the exact files and directory prefixes the agent may write;
+`AUTHORABLE` (required; the engine has no default, and the preflight
+refuses a variant without it) — the exact files and directory prefixes the
+agent may write;
 `fae/cell/surface.py` heals everything else before a verdict: a changed
 seeded file is restored from the seed, and a file that is neither seeded nor
 authorable is moved to `<ws>/.out-of-surface/attempt-N/` (kept, never

@@ -156,3 +156,35 @@ class TestCheck(SurfaceCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheSurfaceMustBeDeclared(unittest.TestCase):
+    """The engine carries no default surface: one would be some experiment's
+    layout deciding what another experiment's agents may write."""
+
+    def _with_variant(self, cls):
+        from unittest import mock
+        from fae.cell import experiment
+        return mock.patch.object(experiment.Definition, "variant", lambda self, arm: cls)
+
+    def test_the_base_variant_declares_none(self):
+        from fae.cell.variants.base import Variant
+        self.assertIsNone(Variant.AUTHORABLE)
+
+    def test_an_undeclared_surface_is_refused_naming_the_variant(self):
+        from fae.cell.variants.base import Variant
+
+        class Undeclared(Variant):
+            ARM = "beta"
+
+        with self._with_variant(Undeclared):
+            with self.assertRaisesRegex(RuntimeError, "Undeclared .*declares no AUTHORABLE"):
+                authorable("beta")
+
+    def test_an_arm_with_no_variant_is_refused(self):
+        with self._with_variant(None):
+            with self.assertRaisesRegex(RuntimeError, "no variant for arm 'gamma'"):
+                authorable("gamma")
+
+    def test_a_declared_surface_is_returned_as_tuples(self):
+        self.assertEqual(authorable("beta"), (("declaration.toml",), ("app/",)))
