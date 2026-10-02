@@ -169,7 +169,7 @@ class TestTheSurfaceMustBeDeclared(unittest.TestCase):
 
     def test_the_base_variant_declares_none(self):
         from fae.cell.variants.base import Variant
-        self.assertIsNone(Variant.AUTHORABLE)
+        self.assertIsNone(Variant.AUTHORING_SURFACE)
 
     def test_an_undeclared_surface_is_refused_naming_the_variant(self):
         from fae.cell.variants.base import Variant
@@ -178,7 +178,7 @@ class TestTheSurfaceMustBeDeclared(unittest.TestCase):
             ARM = "beta"
 
         with self._with_variant(Undeclared):
-            with self.assertRaisesRegex(RuntimeError, "Undeclared .*declares no AUTHORABLE"):
+            with self.assertRaisesRegex(RuntimeError, "Undeclared .*declares no AUTHORING_SURFACE"):
                 authorable("beta")
 
     def test_an_arm_with_no_variant_is_refused(self):

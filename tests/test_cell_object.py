@@ -800,7 +800,7 @@ class TestAnUndeclaredLivenessProbeHaltsAtPreflight(CellTestCase):
 
 
 class TestAnUndeclaredSurfaceHaltsAtPreflight(CellTestCase):
-    """A variant that declares no AUTHORABLE has no surface to heal or check
+    """A variant that declares no AUTHORING_SURFACE has no surface to heal or check
     against; the preflight refuses the cell before an attempt is spent."""
 
     def test_substrate_ok_is_false_and_names_the_variant(self):
@@ -819,7 +819,7 @@ class TestAnUndeclaredSurfaceHaltsAtPreflight(CellTestCase):
         with mock.patch.object(experiment.Definition, "variant",
                                lambda self, arm: Surfaceless):
             self.assertFalse(c.substrate_ok())
-        self.assertIn("HALT[definition]: Surfaceless (arm 'beta') declares no AUTHORABLE",
+        self.assertIn("HALT[definition]: Surfaceless (arm 'beta') declares no AUTHORING_SURFACE",
                       (c.ws / "hooks.log").read_text())
 
 

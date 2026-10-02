@@ -7,7 +7,7 @@ class Beta(Variant):
     LOCK = None
     LOCK_SLOTS = 2
     CONDITIONS = ("apidocs", "onlysrc")
-    AUTHORABLE = (("declaration.toml",), ("app/",))
+    AUTHORING_SURFACE = (("declaration.toml",), ("app/",))
 
     def substrate_alive(self):
         return True

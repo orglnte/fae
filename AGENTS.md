@@ -26,7 +26,7 @@ one's rules live:
 2. Write the definition, `<experiment>/__init__.py` (HOWTO §3): variants,
    matrix, seed docs, gate, config keys, fingerprint trees, verifier, verbs.
 3. Write the task, the skeleton and the prompt (HOWTO §4). What the agent
-   may write is the Variant's `AUTHORABLE`; everything else is healed before
+   may write is the Variant's `AUTHORING_SURFACE`; everything else is healed before
    a verdict (§4).
 4. Write the variants (HOWTO §5): the calls in §4's table — `author_*` on
    the host, `verify_*` inside the verify container — and their image layers.
@@ -335,7 +335,7 @@ The interface is `fae/cell/variants/base.py` (`Variant`); the classes are
 the experiment's, registered by arm on first use (§0). Each declares `ARM`,
 `TECH` (its skeleton overlay and api-doc name), `VARIANTS`, `LOCK` (the arm
 lock its cells hold for their lifetime, or none), `LOCK_SLOTS` and
-`AUTHORABLE` (required; the engine has no default, and the preflight
+`AUTHORING_SURFACE` (required; the engine has no default, and the preflight
 refuses a variant without it) — the exact files and directory prefixes the
 agent may write;
 `fae/cell/surface.py` heals everything else before a verdict: a changed

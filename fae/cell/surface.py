@@ -28,17 +28,17 @@ CACHE_DIRS = frozenset({"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_ca
 
 def authorable(treatment):
     """(exact relpaths, dir prefixes) the agent may write for this arm: the
-    variant's AUTHORABLE. An arm with no variant, or a variant that declares
+    variant's AUTHORING_SURFACE. An arm with no variant, or a variant that declares
     none, has no surface and raises: a default would let one experiment's
     layout decide what another's agents may write."""
     from . import experiment as _experiment
     s = _experiment.current().variant(treatment)
     if s is None:
         raise RuntimeError(f"no variant for arm {treatment!r}: it has no authorable surface")
-    if s.AUTHORABLE is None:
-        raise RuntimeError(f"{s.__name__} (arm {treatment!r}) declares no AUTHORABLE: "
+    if s.AUTHORING_SURFACE is None:
+        raise RuntimeError(f"{s.__name__} (arm {treatment!r}) declares no AUTHORING_SURFACE: "
                            f"the files the agent may write must be declared")
-    exact, prefixes = s.AUTHORABLE
+    exact, prefixes = s.AUTHORING_SURFACE
     return tuple(exact), tuple(prefixes)
 
 
