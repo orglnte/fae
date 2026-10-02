@@ -35,9 +35,9 @@ verdict rules: [`AGENTS.md`](AGENTS.md).
 Then let the preflight localize anything missing:
 
 ```sh
-python3 cli.py experiment check      # the definition, every seed, each arm's infra (--walk: step by step)
-python3 cli.py experiment infra  # [ok]/[MISS] per arm: its daemon, tools and images
-python3 cli.py experiment smoke      # one reference cell per arm, one arrangement (--full-gate: the whole gate)
+python3 cli.py experiment check      # the definition, every variant file, each variant's infra (--walk: step by step)
+python3 cli.py experiment infra  # [ok]/[HALT] per variant: its daemon, tools and images
+python3 cli.py experiment smoke      # one reference cell per way of being judged, one arrangement (--full-gate: the whole gate)
 ```
 
 ---
@@ -74,7 +74,7 @@ should equal the lane count (conduct warns when it does not).
 Everyday loop:
 
 ```sh
-python3 cli.py conduct queue-add MODEL --to-rep N --combo t·v  # fill backlog
+python3 cli.py conduct queue-add MODEL --to-rep N --variant V   # fill backlog
 python3 cli.py conduct run        # THE scheduler AND supervisor, FOREGROUND:
                                   # global cap 7, 1 live cell per model,
                                   # starved-lanes-first round-robin; every
@@ -104,7 +104,7 @@ controller and the one spawner (`cli.py conduct reconcile` remains as the
 one-shot engine verb; its `--watch` is gone by design).
 
 **Limit walls**: a quota-walled cell (WAITING·limit) is stood down
-cooperatively by the supervision sweep — its arm lock and work slot are
+cooperatively by the supervision sweep — its variant lock and work slot are
 freed, its spec requeued at the lane front, and the lane cools until the
 provider's reset hint (or 3h, `LIMIT_COOLDOWN_S`). Status shows
 `[LIMIT until hh:mmZ]`; conduct retries at expiry and re-arms the cooldown
