@@ -1147,7 +1147,9 @@ class TestMemoryPressureMonitor(unittest.TestCase):
              mock.patch.object(runs.render, "queued_summary", return_value=[]), \
              mock.patch.object(runs.weekly, "weekly_line", return_value=""), \
              mock.patch.object(runs.state, "containers", return_value=set()), \
-             mock.patch.object(runs.state, "loop_pids", return_value={}):
+             mock.patch.object(runs.state, "loop_pids", return_value={}), \
+             mock.patch.object(runs.state, "loop_parents", return_value={}), \
+             mock.patch.object(runs.zombies, "find_zombies", return_value=[]):
             out = runs.render.render()
         self.assertIn("pressure=WARN", out)
         self.assertIn("9.6/16.0GB used (40% avail)", out)
