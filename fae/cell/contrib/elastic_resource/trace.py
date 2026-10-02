@@ -6,9 +6,10 @@ Runs alongside k6 (k6 owns load generation; this owns observation) and writes:
   1. a per-second CSV trace  (--csv-output) — offered load, latency percentiles,
      cache/pool state, HTTP response mix;
   2. a small events JSON      (--events-output) — the load start_epoch, the
-     saturation_epoch (the first tick whose p99 reaches --sat-p99-ms: the
-     signal a policy can see, and the anchor the law measures from), the
-     substrate-gated mount_epoch, the release_epoch.
+     saturation_epoch (the run's first tick whose p99 reaches --sat-p99-ms,
+     a blip's included; the law and k6.py take each spike's own saturation
+     from the trace and the schedule), the substrate-gated mount_epoch, the
+     release_epoch.
 
 CONCURRENCY: the k6 JSONL tailer, the /health poller, and the substrate probe
 each run on their OWN thread, so a slow /health (up to 1s under saturation) or a
