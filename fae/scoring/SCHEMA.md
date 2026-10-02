@@ -11,8 +11,9 @@ makes `aggregate` refuse rather than publish a stale table.
 
 | field | type | meaning |
 |-------|------|---------|
-| `cell_id` | str | `<model>_<effort>[_smoke]_<variant>_<task>_r<rep>` |
-| `model` / `task` / `variant` / `repeat` | str/int | the cell's coordinates, from `cell.env` |
+| `cell_id` | str | `<agent>_<effort>[_smoke]_<variant>_<task>_r<rep>` |
+| `model` | str | the provider's model id the agent ran (`cell.env` `AGENT_MODEL`) |
+| `task` / `variant` / `repeat` | str/int | the cell's coordinates, from `cell.env` |
 | `factors` | obj | the factors the variant is a level of, from its file (`{}` when it declares none) |
 | `impl` | str | which cell driver ran it |
 | `attempt_budget` | int/null | the attempt budget the cell ran under (10, everywhere) |

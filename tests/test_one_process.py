@@ -526,7 +526,7 @@ class TestTheStubFlagIsTheRigDebugPath(unittest.TestCase):
                 seen["stub"] = stub_overlay
                 return "green"
         with mock.patch.object(entry, "Cell", FakeCell), \
-             mock.patch.dict(os.environ, {"MODEL": "ref", "SMOKE": "1"}):
+             mock.patch.dict(os.environ, {"AGENT": "ref", "SMOKE": "1"}):
             rc = entry.main(["T1", "alpha", "reference", "2", "--stub", "/tmp/empty"])
         self.assertEqual(rc, 0)
         self.assertEqual(seen["stub"], "/tmp/empty")

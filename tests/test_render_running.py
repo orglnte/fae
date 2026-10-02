@@ -15,7 +15,7 @@ from _ctx import runs
 
 
 def _state(cid, phase, **over):
-    s = dict(cid=cid, model=cid.split("_")[0], model_version="5", state="RUNNING",
+    s = dict(cid=cid, agent=cid.split("_")[0], agent_model="5", state="RUNNING",
              why="", att=2, budget=10, live="-", shape="1/6", hist="scaling gate=BSB",
              detail="", variant="alpha_apidocs", task="T1", rep=1,
              green_at=None, taint=False, alerts_open=0, alert_last="", noedit=0)

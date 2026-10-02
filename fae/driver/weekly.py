@@ -142,14 +142,14 @@ def weekly_budget_apply(st, now=None, out=print):
     return st
 
 
-def weekly_hold_clear(model, out=print):
+def weekly_hold_clear(agent, out=print):
     """An operator resume of a held lane ends the hold: conduct will not
     re-park it until the next reading crosses the threshold again."""
     st = weekly_load()
-    if model in st["hold"]:
-        st["hold"].remove(model)
+    if agent in st["hold"]:
+        st["hold"].remove(agent)
         weekly_save(st)
-        out(f"  queue[{model}]: budget hold cleared by the operator")
+        out(f"  queue[{agent}]: budget hold cleared by the operator")
 
 
 def weekly_line(now=None):
@@ -177,15 +177,15 @@ def weekly_line(now=None):
 COOLDOWN_DEFAULT_S = int(os.environ.get("LIMIT_COOLDOWN_S", 3 * 3600))
 
 
-def _cooldown_file(model):
-    return common.ORCH / f"cooldown.{model}"
+def _cooldown_file(agent):
+    return common.ORCH / f"cooldown.{agent}"
 
 
 def _is_quota_wall(text):
     """True only for provider QUOTA/RATE messages. The harness's `limit`
     phase also covers transient connection faults (refused, closed
     mid-response, timeouts), which its own retry loop heals in minutes —
-    cooling a lane hours for those idles a healthy model.
+    cooling a lane hours for those idles a healthy agent.
 
     `hit your (usage|session) limit` plus a bare `resets \\d` (clock-time
     form, "resets 7:40pm (UTC)") cover the Claude Code CLI's own wording,
@@ -212,16 +212,16 @@ def _parse_reset_hint(text):
     return faults.reset_hint_s(text, now=datetime.now(timezone.utc))
 
 
-def _set_cooldown(model, detail):
+def _set_cooldown(agent, detail):
     until = time.time() + (_parse_reset_hint(detail) or COOLDOWN_DEFAULT_S)
-    _cooldown_file(model).write_text(f"{int(until)} {detail[:state.WAIT_REASON_MAX]}\n")
+    _cooldown_file(agent).write_text(f"{int(until)} {detail[:state.WAIT_REASON_MAX]}\n")
     return int(until)
 
 
-def _cooldown_until(model):
+def _cooldown_until(agent):
     """Epoch seconds until which the lane is limit-cooling, 0 = not cooling."""
     try:
-        return int(_cooldown_file(model).read_text().split()[0])
+        return int(_cooldown_file(agent).read_text().split()[0])
     except (OSError, ValueError, IndexError):
         return 0
 

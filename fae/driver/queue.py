@@ -1,9 +1,9 @@
 """The backlog: one FILE per spec, its STATE is the directory it sits in.
 
-    queue/<model>/<seq>.<cid>.json    pending; lane order is the filename sort
-    queue/<model>.parked/             operator-paused lane (one dir rename)
-    running/<model>/<cid>.json        claimed by this lane's cell
-    done/<model>/<cid>.json           terminal
+    queue/<agent>/<seq>.<cid>.json    pending; lane order is the filename sort
+    queue/<agent>.parked/             operator-paused lane (one dir rename)
+    running/<agent>/<cid>.json        claimed by this lane's cell
+    done/<agent>/<cid>.json           terminal
     backups/<why>-<stamp>.<name>      taken out of play by an operator verb
 
 Every transition is a single rename(2), so a spec is always in exactly one
@@ -23,8 +23,8 @@ from fae.driver import common
 SEQ_START = 100000              # appends count up, front-inserts count down
 
 
-def lane_dir(model, parked=False):
-    return common.ORCH / "queue" / (f"{model}.parked" if parked else model)
+def lane_dir(agent, parked=False):
+    return common.ORCH / "queue" / (f"{agent}.parked" if parked else agent)
 
 
 def lane_dirs(include_parked=False):
@@ -48,7 +48,7 @@ def _parked_queues():
                   if d.is_dir() and d.name.endswith(".parked"))
 
 
-def lane_model(d):
+def lane_agent(d):
     n = d.name
     return n[:-len(".parked")] if n.endswith(".parked") else n
 
@@ -68,10 +68,10 @@ def _dir_specs(d):
     return sorted(d.glob("*.json"), key=_seq_key) if d.is_dir() else []
 
 
-def lane_specs(model):
+def lane_specs(agent):
     """One lane's pending specs in admission order. A parked lane offers
     none — parking is what stops admission."""
-    return _dir_specs(lane_dir(model))
+    return _dir_specs(lane_dir(agent))
 
 
 _SEQ_PREFIX = re.compile(r"^(?:\d+|tmp-\d+)\.")
@@ -119,27 +119,27 @@ def _next_seq(d, front):
     return seq
 
 
-def _writable_lane(model):
+def _writable_lane(agent):
     """Where new specs land: the parked directory when the lane is parked, so
     enqueueing cannot resurrect admission from a lane the operator paused."""
-    parked = lane_dir(model, parked=True)
-    return parked if parked.is_dir() else lane_dir(model)
+    parked = lane_dir(agent, parked=True)
+    return parked if parked.is_dir() else lane_dir(agent)
 
 
-def lane_has(model, cid):
+def lane_has(agent, cid):
     """Is this cid already pending or claimed? One glob replaces parsing every
     queued line."""
-    for d in (lane_dir(model), lane_dir(model, parked=True), rundir(model)):
+    for d in (lane_dir(agent), lane_dir(agent, parked=True), rundir(agent)):
         if d.is_dir() and any(d.glob(f"*{cid}.json")):
             return True
     return False
 
 
-def enqueue(model, spec, front=False):
+def enqueue(agent, spec, front=False):
     """Add a spec to a lane. Returns its path, or None when the lane already
     holds that cid — or when the cell is sealed and must never run again."""
-    cid = common.cell_id(model, spec["variant"], spec.get("rep", 1), spec.get("task", "T1"))
-    if lane_has(model, cid):
+    cid = common.cell_id(agent, spec["variant"], spec.get("rep", 1), spec.get("task", "T1"))
+    if lane_has(agent, cid):
         return None
     # Queueing a sealed cell would put a spec in a lane that conduct can only
     # ever refuse — a permanently stuck queue entry. Said out loud rather than
@@ -147,21 +147,21 @@ def enqueue(model, spec, front=False):
     if common.is_sealed(cid):
         print(f"skipping {cid}: SEALED — {common.seal_reason(cid)}")
         return None
-    d = _writable_lane(model)
+    d = _writable_lane(agent)
     d.mkdir(parents=True, exist_ok=True)
     p = d / f"{_next_seq(d, front):06d}.{cid}.json"
     p.write_text(json.dumps(spec) + "\n")
     return p
 
 
-def rundir(model):
-    return common.ORCH / "running" / model
+def rundir(agent):
+    return common.ORCH / "running" / agent
 
 
-def running_specs(model=None):
+def running_specs(agent=None):
     """Claimed specs — the fleet's live cells, one per lane at cap 1."""
-    if model is not None:
-        return _dir_specs(rundir(model))
+    if agent is not None:
+        return _dir_specs(rundir(agent))
     base = common.ORCH / "running"
     if not base.is_dir():
         return []
@@ -169,10 +169,10 @@ def running_specs(model=None):
                    for p in _dir_specs(d)), key=lambda p: p.name)
 
 
-def claim(model, p):
+def claim(agent, p):
     """QUEUED -> RUNNING. Refuses to overwrite an existing claim: rename would
     drop it silently, and two claims on one cid means two cells."""
-    d = rundir(model)
+    d = rundir(agent)
     d.mkdir(parents=True, exist_ok=True)
     dest = d / f"{spec_cid(p)}.json"
     if dest.exists():
@@ -181,18 +181,18 @@ def claim(model, p):
     return dest
 
 
-def release(model, p, front=True):
+def release(agent, p, front=True):
     """RUNNING -> QUEUED, keeping the spec's place at the head by default."""
-    d = _writable_lane(model)
+    d = _writable_lane(agent)
     d.mkdir(parents=True, exist_ok=True)
     dest = d / f"{_next_seq(d, front):06d}.{spec_cid(p)}.json"
     p.rename(dest)
     return dest
 
 
-def finish(model, p):
+def finish(agent, p):
     """RUNNING -> DONE."""
-    d = common.ORCH / "done" / model
+    d = common.ORCH / "done" / agent
     d.mkdir(parents=True, exist_ok=True)
     dest = d / p.name
     p.rename(dest)
@@ -210,9 +210,9 @@ def shelve(p, why):
     return dest
 
 
-def park_lane(model):
+def park_lane(agent):
     """'parked' | 'already' | 'empty'."""
-    live, parked = lane_dir(model), lane_dir(model, parked=True)
+    live, parked = lane_dir(agent), lane_dir(agent, parked=True)
     if parked.is_dir():
         return "already"
     if not live.is_dir():
@@ -221,10 +221,10 @@ def park_lane(model):
     return "parked"
 
 
-def unpark_lane(model):
+def unpark_lane(agent):
     """'resumed' | 'not-paused' | 'conflict' (both dirs exist — someone
     hand-moved things; merging silently would reorder the backlog)."""
-    live, parked = lane_dir(model), lane_dir(model, parked=True)
+    live, parked = lane_dir(agent), lane_dir(agent, parked=True)
     if not parked.is_dir():
         return "not-paused"
     if live.is_dir():

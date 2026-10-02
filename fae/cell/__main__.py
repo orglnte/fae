@@ -1,6 +1,6 @@
 """Run one cell: python3 -m fae.cell TASK VARIANT [REP] [--stub DIR]
 
-MODEL and EFFORT come from the environment; REFERENCE=1 seeds the variant's
+AGENT and EFFORT come from the environment; REFERENCE=1 seeds the variant's
 known answer (a smoke cell). --stub DIR runs the rig-debug path: no agent,
 DIR copied over the artifacts (an empty DIR verifies what prepare seeded,
 e.g. the reference), one attempt, the full gate.
@@ -30,7 +30,7 @@ def main(argv=None):
     # drift that makes a cell write to one workspace and be read from another.
     import os
     from fae.driver import common
-    cid = common.cell_id(os.environ.get("MODEL", "?"), variant, rep,
+    cid = common.cell_id(os.environ.get("AGENT", "?"), variant, rep,
                          task, effort=os.environ.get("EFFORT", "high"),
                          smoke=bool(os.environ.get("SMOKE")))
 

@@ -90,7 +90,7 @@ class TestCellStateExposesPrepared(unittest.TestCase):
             (ws / "artifacts").mkdir(parents=True)
             (ws / "iterations.log").write_text(
                 f"{TS}\tPREPARED\t{ws.name}\tby=prepare_cell\n")
-            (ws / "cell.env").write_text("ATTEMPT_BUDGET=10\nMODEL_VERSION=5\n")
+            (ws / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
             st = runs.state.cell_state(ws, {}, set())
         self.assertIsNotNone(st)
         self.assertTrue(st["prepared"])
@@ -110,7 +110,7 @@ class TestCellStateExposesPrepared(unittest.TestCase):
                 f"{TS}\tPREPARED\t{ws.name}\tby=prepare_cell\n"
                 f"{TS}\tSTART\tattempt=1\n"
                 f"{TS}\tITER\tfail\tattempt=1 stage=scaling\n")
-            (ws / "cell.env").write_text("ATTEMPT_BUDGET=10\nMODEL_VERSION=5\n")
+            (ws / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
             st = runs.state.cell_state(ws, {}, set())
         self.assertTrue(st["prepared"])
         self.assertEqual(st["att"], 1)
@@ -247,7 +247,7 @@ class TestNoEditReachesTheStatus(unittest.TestCase):
             ws = Path(d) / "sonnet_high_beta_apidocs_T1_r1"
             (ws / "artifacts").mkdir(parents=True)
             (ws / "iterations.log").write_text("".join(l + "\n" for l in lines))
-            (ws / "cell.env").write_text("ATTEMPT_BUDGET=10\nMODEL_VERSION=5\n")
+            (ws / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
             return runs.state.cell_state(ws, {}, set())
 
     def test_the_count_and_last_detail_are_exposed(self):
@@ -431,7 +431,7 @@ class TestDryRunWritesNothing(unittest.TestCase):
         self._tmp.cleanup()
 
     def st(self):
-        return dict(cid=self.cid, model="sonnet", variant="beta_apidocs", task="T1", rep=1, budget="10",
+        return dict(cid=self.cid, agent="sonnet", variant="beta_apidocs", task="T1", rep=1, budget="10",
                     state="CRASHED", why="loop", events=3, att=1,
                     prepared=True, detail="")
 
@@ -618,7 +618,7 @@ class SweepCase(unittest.TestCase):
         return val, sub, kill
 
     def st(self, state="CRASHED", why="loop", **kw):
-        d = dict(cid=self.cid, state=state, why=why, detail="", model="sonnet",
+        d = dict(cid=self.cid, state=state, why=why, detail="", agent="sonnet",
                  variant="beta_apidocs", task="T1",
                  rep="1", budget=10, shape="3/6")
         d.update(kw)
@@ -1114,7 +1114,7 @@ class TestTheGateColumnIsLiveDuringAVerify(unittest.TestCase):
             ws.mkdir()
             (ws / "cell.env").write_text(
                 "TASK=T1\nVARIANT=beta_apidocs\n"
-                "REP=1\nATTEMPT_BUDGET=10\nMODEL_VERSION=5\n")
+                "REP=1\nATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
             (ws / "iterations.log").write_text("")
             with mock.patch.object(runs.ledger, "parse", return_value=led), \
                  mock.patch.object(runs.ledger, "hist", return_value=[]), \

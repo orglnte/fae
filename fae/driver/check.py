@@ -279,9 +279,9 @@ NEXT = (
     ("the reference, every arrangement", "python3 cli.py experiment smoke --full-gate"),
     ("a scripted agent (fail, then green)",
      "TESTAGENT_PLAN=fail,green python3 cli.py cell spawn testagent <variant> --rep 1"),
-    ("one real agent", "python3 cli.py cell spawn <model> <variant> --rep 1"),
-    ("the fleet", "python3 cli.py conduct queue-add <model> --matrix --reps 3 && "
-                  "python3 cli.py conduct run -n 2 --per-model 1"),
+    ("one real agent", "python3 cli.py cell spawn <agent> <variant> --rep 1"),
+    ("the fleet", "python3 cli.py conduct queue-add <agent> --matrix --reps 3 && "
+                  "python3 cli.py conduct run -n 2 --per-agent 1"),
 )
 
 

@@ -32,7 +32,7 @@ MERGES
   conduct queue-add absorbs spawn-matrix | top-up      (--matrix, --to-rep N; every active variant by default, --variant V)
   conduct pause    absorbs  drain | queue-pause        (--admission-only)
   conduct resume   absorbs  resume-all | queue-resume  (requeues, never spawns)
-  conduct stop     absorbs  stop-all                   (scoped: all | MODEL...)
+  conduct stop     absorbs  stop-all                   (scoped: all | AGENT...)
   conduct run      absorbs  reconcile --watch | watch's zombie reap
   conduct diagnose absorbs  fleet reconcile --dry-run | fleet zombies
 
@@ -98,7 +98,7 @@ app.add_typer(tools_app, name="tools")
 _PASSTHROUGH = {"allow_extra_args": True, "ignore_unknown_options": True,
                 "help_option_names": []}
 
-SEL = "cid, model name, or a whole `_`-separated token run. Anchored: `r1` "
+SEL = "cid, agent name, or a whole `_`-separated token run. Anchored: `r1` "
 SEL += "does not match `r10`."
 
 
@@ -106,14 +106,14 @@ SEL += "does not match `r10`."
 
 @cell_app.command("spawn")
 def cell_spawn(
-    model: str, variant: str,
+    agent: str, variant: str,
     rep: str = typer.Option("1", "-r", "--rep", help="int, or comma-separated ints"),
     task: str = typer.Option("T1", "--task", help="task id: T<n>, one the experiment's task/ carries"),
     fresh: bool = typer.Option(False, "--fresh",
                               help="WIPES the workspace (safe_wipe) and restarts at attempt 1"),
 ):
     """Start one cell now, in parallel with whatever else is running."""
-    ops.spawn(_ns(model=model, variant=variant, rep=rep,
+    ops.spawn(_ns(agent=agent, variant=variant, rep=rep,
                   task=task, fresh=fresh))
 
 
@@ -129,9 +129,9 @@ def cell_pause(selectors: list[str] = typer.Argument(..., help=SEL + " Must matc
 @cell_app.command("resume")
 def cell_resume(selectors: list[str] = typer.Argument(..., help=SEL + " Must match ONE cell."),
                 force: bool = typer.Option(False, "--force",
-                                           help="respawn even past the per-model live-cell cap")):
+                                           help="respawn even past the per-agent live-cell cap")):
     """Lift ONE cell's locks, clear its reconcile flag, respawn its loop.
-    Direct spawn is safe at n=1; the respawn still defers at the per-model
+    Direct spawn is safe at n=1; the respawn still defers at the per-agent
     cap (--force pushes past it). Bulk resume is `conduct resume`."""
     ops.resume(_ns(selectors=list(selectors), force=force))
 
@@ -185,7 +185,7 @@ def cell_reverify(selectors: Optional[list[str]] = typer.Argument(None, help=SEL
 
 @conduct_app.command("queue-add")
 def conduct_queue_add(
-    model: str,
+    agent: str,
     matrix: bool = typer.Option(False, "--matrix",
                                 help="enqueue every active variant"),
     to_rep: Optional[int] = typer.Option(None, "--to-rep",
@@ -209,27 +209,27 @@ def conduct_queue_add(
     if not matrix and to_rep is None:
         raise typer.BadParameter("choose --matrix or --to-rep N")
     if to_rep is not None:
-        ops.top_up(_ns(model=model, to_rep=to_rep, variants=list(variant),
+        ops.top_up(_ns(agent=agent, to_rep=to_rep, variants=list(variant),
                        task=task, dry_run=dry_run))
         return
-    ops.spawn_matrix(_ns(model=model, reps=reps, task=task, fresh=fresh))
+    ops.spawn_matrix(_ns(agent=agent, reps=reps, task=task, fresh=fresh))
 
 
 # --- conduct ----------------------------------------------------------------
 
-SCOPE = "`all` or model lane name(s)."
+SCOPE = "`all` or agent lane name(s)."
 
 
 @conduct_app.command("run")
 def conduct_run(limit: int = typer.Option(7, "-n", "--limit",
                                           help="global cap on live cells"),
-                per_model: int = typer.Option(1, "--per-model",
-                                              help="max live cells per model"),
-                per_model_override: str = typer.Option("", "--per-model-override",
-                                                        help="MODEL=N[,MODEL=N...] — raise "
-                                                             "the per-model cap for named "
+                per_agent: int = typer.Option(1, "--per-agent",
+                                              help="max live cells per agent"),
+                per_agent_override: str = typer.Option("", "--per-agent-override",
+                                                        help="AGENT=N[,AGENT=N...] — raise "
+                                                             "the per-agent cap for named "
                                                              "lanes only; every other lane "
-                                                             "keeps --per-model"),
+                                                             "keeps --per-agent"),
                 interval: int = typer.Option(30, "--interval", help="poll seconds"),
                 supervise_interval: int = typer.Option(300, "--supervise-interval",
                                                        help="seconds between supervision "
@@ -245,22 +245,22 @@ def conduct_run(limit: int = typer.Option(7, "-n", "--limit",
     running; nothing new starts and nothing is supervised until conduct
     runs again.
 
-    Raising --per-model changes the host-load regime every lane is measured
-    under, so it applies fleet-wide; --per-model-override scopes a raise to
+    Raising --per-agent changes the host-load regime every lane is measured
+    under, so it applies fleet-wide; --per-agent-override scopes a raise to
     named lanes only, leaving the rest at the comparable baseline.
     """
     overrides = {}
-    for part in per_model_override.split(","):
+    for part in per_agent_override.split(","):
         part = part.strip()
         if not part:
             continue
-        model, _, n = part.partition("=")
-        if not model or not n.strip().isdigit():
+        agent, _, n = part.partition("=")
+        if not agent or not n.strip().isdigit():
             raise typer.BadParameter(
-                f"--per-model-override wants MODEL=N, got {part!r}")
-        overrides[model.strip()] = int(n)
-    conduct.conduct(_ns(limit=limit, per_model=per_model,
-                        per_model_override=overrides, interval=interval,
+                f"--per-agent-override wants AGENT=N, got {part!r}")
+        overrides[agent.strip()] = int(n)
+    conduct.conduct(_ns(limit=limit, per_agent=per_agent,
+                        per_agent_override=overrides, interval=interval,
                         supervise_interval=supervise_interval))
 
 
@@ -281,7 +281,7 @@ def conduct_pause(scope: list[str] = typer.Argument(..., help=SCOPE),
                   dry_run: bool = typer.Option(False, "--dry-run",
                                                help="show what would be paused/parked, do nothing")):
     """GRACEFUL bulk pause, everything preserved. `all`: stop conduct, pause
-    every cell, wait for zero loops — the FP-edit window. Model names: park
+    every cell, wait for zero loops — the FP-edit window. Agent names: park
     those lanes + pause their running cells, return immediately.
     Contrast: `conduct stop` kills NOW."""
     conduct.conduct_pause(_ns(scope=list(scope), admission_only=admission_only,
@@ -531,12 +531,12 @@ def experiment_smoke(variants: str = typer.Option("", "--variants",
 
 
 @experiment_app.command("prepare")
-def experiment_prepare(model: str = typer.Option("", "--model", help="lane name (default: $MODEL)"),
+def experiment_prepare(agent: str = typer.Option("", "--agent", help="lane name (default: $AGENT)"),
                 reps: int = typer.Option(1, "--reps", help="reps per combination"),
                 task: str = typer.Option("T1", "--task", help="task id: T<n>, one the experiment's task/ carries")):
     """Seed the matrix's workspaces WITHOUT launching anything
     (fae/cell/prepare.py, the driver's own prepare)."""
-    rig.prepare(_ns(model=model, reps=reps, task=task))
+    rig.prepare(_ns(agent=agent, reps=reps, task=task))
 
 
 @experiment_app.command("verb", context_settings=_PASSTHROUGH)

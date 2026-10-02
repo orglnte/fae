@@ -49,10 +49,10 @@ class TestParseCellId(unittest.TestCase):
 
     def test_round_trips_every_variant(self):
         for variant in runs.common.definition().ids:
-            for model in ("sonnet", "haiku", "gemini", "opus", "dsv4f", "kimi"):
-                cid = runs.cell_id(model, variant, 3)
+            for agent in ("sonnet", "haiku", "gemini", "opus", "dsv4f", "kimi"):
+                cid = runs.cell_id(agent, variant, 3)
                 with self.subTest(cid=cid):
-                    self.assertEqual(runs.parse_cell_id(cid), (model, variant, "T1", "3"))
+                    self.assertEqual(runs.parse_cell_id(cid), (agent, variant, "T1", "3"))
 
     def test_non_high_effort_still_parses(self):
         """Regression: a `_high_` hardcode once made every non-high cell
@@ -102,7 +102,7 @@ class TestParseCellId(unittest.TestCase):
 
         cell_id(effort="") yields `sonnet_beta_apidocs_T1_r1`, but the
         parse regex requires a mandatory `_(?:\\w+?)_` effort segment between
-        model and variant, so it returns None. Such a cell would run and then
+        agent and variant, so it returns None. Such a cell would run and then
         be invisible to status, pause, kill and reconcile.
 
         Not fixed by changing the derivation: that would touch every cid

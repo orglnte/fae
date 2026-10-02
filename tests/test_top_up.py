@@ -15,7 +15,7 @@ from _ctx import runs, OrchTmpCase
 
 
 def ns(**kw):
-    base = dict(model="sonnet", to_rep=3, variants=[], task="T1",
+    base = dict(agent="sonnet", to_rep=3, variants=[], task="T1",
                 budget=10, dry_run=False)
     base.update(kw)
     return SimpleNamespace(**base)
@@ -23,8 +23,8 @@ def ns(**kw):
 
 class TopUpTestCase(OrchTmpCase):
     # WS/ORCH temp-tree patching is inherited from OrchTmpCase.
-    def specs(self, model="sonnet"):
-        return [runs.queue.read_spec(p) for p in runs.queue.lane_specs(model)]
+    def specs(self, agent="sonnet"):
+        return [runs.queue.read_spec(p) for p in runs.queue.lane_specs(agent)]
 
 
 class TestSkipRules(TopUpTestCase):

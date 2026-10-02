@@ -69,7 +69,7 @@ class TestACrashIsRecordedBeforeTheRespawn(OrchTmpCase):
         self.assertNotIn("Crash", self.actions())
 
     def test_it_runs_on_the_spawn_path_itself_not_only_in_supervision(self):
-        # The grace that gates supervision (MODEL_DEAD_GRACE) is longer than a
+        # The grace that gates supervision (AGENT_DEAD_GRACE) is longer than a
         # readmission cycle, so supervision alone can never win this race.
         self.trace(("Spawn", self.CID), ("AcquireSlot", self.CID))
         (self.ws / self.CID).mkdir(parents=True)
@@ -78,7 +78,7 @@ class TestACrashIsRecordedBeforeTheRespawn(OrchTmpCase):
             popen.return_value.poll.return_value = None
             runs.ops._spawn_detached(["bash", "-c", "true"], {}, self.CID, "spawn")
         self.assertEqual(self.actions()[-1], "Crash")
-        self.assertLess(runs.supervise.MODEL_DEAD_GRACE, 3600)
+        self.assertLess(runs.supervise.AGENT_DEAD_GRACE, 3600)
 
 
 if __name__ == "__main__":

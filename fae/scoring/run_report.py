@@ -47,12 +47,12 @@ def collect(since: float | None) -> tuple[dict, list]:
         p = common.parse_cell_id(d.name)
         if not p:
             continue
-        model, variant, _task, rep = p
+        agent, variant, _task, rep = p
         sealed, loop = d / ".sealed", d / ".loop"
         if loop.exists() and not sealed.exists():
             L = ledger.parse(d, gate_n=gate_n)
             hb = state.heartbeat(d)
-            live.append((model, variant, int(rep), L["att"],
+            live.append((agent, variant, int(rep), L["att"],
                          (hb.get("phase") if hb else "") or "?"))
             continue
         if not sealed.exists():
@@ -96,7 +96,7 @@ def report(since: str | None = None) -> str:
     out.append(f"\n— IN PROGRESS ({len(live)}) —")
     lrows = [(m, t, f"r{r}", f"{a}/{common.ATTEMPT_BUDGET}", ph)
              for m, t, r, a, ph in sorted(live)]
-    out.append(_fmt(lrows, ("MODEL", "VARIANT", "REP", "ATTEMPT", "PHASE"))
+    out.append(_fmt(lrows, ("AGENT", "VARIANT", "REP", "ATTEMPT", "PHASE"))
                if lrows else "  (none)")
     return "\n".join(out)
 

@@ -190,12 +190,12 @@ class TestTheChildIsAContainer(RunnerCase):
 
     def test_the_environment_is_the_drivers_minus_the_hosts_own_and_secrets(self):
         exp = _definition(self.root, "")
-        environ = {"PATH": "/host/bin", "HOME": "/Users/x", "MODEL": "opus",
+        environ = {"PATH": "/host/bin", "HOME": "/Users/x", "AGENT": "opus",
                    "CLAUDE_CODE_OAUTH_TOKEN": "sk-1", "OPENCODE_API_KEY": "k",
                    "NAMESPACE": "ns-x"}
         argv = verify_argv(self.ctx(exp), "img:1", environ=environ)
         env = dict(a.split("=", 1) for i, a in enumerate(argv) if i and argv[i - 1] == "-e")
-        self.assertEqual(env["MODEL"], "opus")
+        self.assertEqual(env["AGENT"], "opus")
         self.assertEqual(env["NAMESPACE"], "ns-x")
         self.assertEqual(env["REPO_ROOT"], str(ROOT))
         self.assertEqual(env["FAE_VERIFY_CONTAINER"], "fae-verify-cell-x")

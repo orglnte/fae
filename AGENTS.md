@@ -75,7 +75,7 @@ package then), `GATE`, `CONFIG`, `fingerprint_trees`, `verifier_class()`,
 `report_summary`. A variant file's unknown key is refused, and so is an
 input the template also provides. `tests/test_experiment_definition.py`
 pins that no module under `cli.py` or `fae/` names the package. The engine
-keeps no variant, stage or model name of any experiment.
+keeps no variant, stage or agent name of any experiment.
 
 **What the agent wrote never executes on the host, and neither does the
 verifier.** The verifier builds and runs the artifacts inside the variant's
@@ -98,7 +98,7 @@ like in an experiment's evidence is its `taint_rules`, run by
 
 ## 1. The unit of work is a cell
 
-A **cell** is one `(model, variant, task, rep)` run, identified by
+A **cell** is one `(agent, variant, task, rep)` run, identified by
 a `cell_id` and owning one workspace under `<root>/workspaces.nosync/<cell_id>/`
 — or under another WORKSPACE ROOT named by `WORKSPACES_DIR`
 (`ws-test.nosync` holds harness-validation and smoke cells). Only cell
@@ -113,13 +113,13 @@ ends green, failed, or revoked.
 the driver's entry point and the prepare import it — two implementations
 kept in sync by hand drift, and a drifted id writes to one workspace and is
 read from another. `parse_cell_id` is positional
-(`<model>_<effort>[_smoke]_<variant>_<task>_r<rep>`: the variant is
+(`<agent>_<effort>[_smoke]_<variant>_<task>_r<rep>`: the variant is
 whatever lies between the effort and the last two tokens, since it may
 carry an underscore) and accepts only a variant the loaded experiment
 declares. `tests/test_cell_id.py` pins the wiring.
 
 **One name.** The variant is `variant` everywhere a cell is addressed: the
-CLI (`cell spawn MODEL VARIANT`), queue specs, `cell.env`'s `VARIANT=`, the
+CLI (`cell spawn AGENT VARIANT`), queue specs, `cell.env`'s `VARIANT=`, the
 cell id, `metrics.json` and `score.json`, the aggregate (by variant and by
 each of its file's `factors`). A reference cell is `REFERENCE=1` in
 `cell.env`, its variant's `[verify] reference` laid over the template.
@@ -247,7 +247,7 @@ writes an `ALERT SETUP-FAILED` ledger line.
 - **Admission is `conduct`'s job; `WORK_SLOTS` is the backstop.**
   `cli.py conduct run` (`fae/driver/conduct.py`) is the ONE scheduler and
   the ONE controller: it admits queued specs up to a global cap (`-n`) and
-  `--per-model`, round-robin with starved lanes first, and every
+  `--per-agent`, round-robin with starved lanes first, and every
   `--supervise-interval` it repairs crashed or hung cells by requeuing them at
   the lane front (its own admission respawns them — one spawner), validates
   DONE cells, and reaps zombies on a second consecutive sighting. A cell whose
@@ -271,7 +271,7 @@ writes an `ALERT SETUP-FAILED` ledger line.
   variant's infra, a network only past the long grace.
 - **Walls and stand-downs.** A cell waiting on a provider limit is stood
   down (pause `limit-wall`, by=conduct), requeued at the front, and its lane
-  cools (`.orch/cooldown.<model>`: the provider's reset hint, or 3 h);
+  cools (`.orch/cooldown.<agent>`: the provider's reset hint, or 3 h);
   expiry lifts the wall and retries. The other stand-downs conduct writes
   (arm-stuck, phase-stalled-*, verify-wedged, silent-hang) are lifted after
   `STANDDOWN_COOL_S`, each lift spending one `MAX_RESPAWNS` repair, flagged
@@ -287,11 +287,11 @@ writes an `ALERT SETUP-FAILED` ledger line.
   tags, default `fable,opus`) once utilization reaches `BUDGET_HOLD_AT`
   (0.75) with an ALERT line, and releases them within `BUDGET_RELEASE_H`
   (24 h) of the reset. A lane tag is covered only when it is listed.
-  `conduct-pause <model> --admission-only` parks a lane by hand;
+  `conduct-pause <agent> --admission-only` parks a lane by hand;
   `conduct-resume` reverses it.
 - **A spec is a FILE and its state is the directory it sits in.**
-  `.orch/queue/<model>/<seq>.<cid>.json` pending (lane order is the sequence
-  number), `.orch/running/<model>/` claimed, `.orch/done/<model>/` terminal,
+  `.orch/queue/<agent>/<seq>.<cid>.json` pending (lane order is the sequence
+  number), `.orch/running/<agent>/` claimed, `.orch/done/<agent>/` terminal,
   `.orch/backups/` taken out of play by an operator verb. Every transition is
   one `rename(2)`, so a conduct killed at any instant can neither lose nor
   duplicate a spec. Conduct manages exactly the CLAIMED set — supervision
@@ -304,18 +304,18 @@ writes an `ALERT SETUP-FAILED` ledger line.
   loop-lock refusal raises `Halt(msg, LOCK_EXIT)` explicitly, so a
   deterministic host fault never shares the benign race's number and
   respawns forever uncounted.
-- **One live cell per non-empty lane.** `--per-model` (1) enforces it; `-n`
+- **One live cell per non-empty lane.** `--per-agent` (1) enforces it; `-n`
   is the global ceiling and should equal the lane count (conduct warns). A
-  lane that needs more concurrency takes `--per-model-override MODEL=N`,
+  lane that needs more concurrency takes `--per-agent-override AGENT=N`,
   scoped to that lane. Lock serialization is not an admission concern: a
   cell parks on its variant's lock in-cell and takes it as soon as it frees.
 - **The exactly-1 rule: a cell verb acts directly iff it matches ONE cell;
   bulk goes through conduct.** `cell resume CID` lifts locks and respawns
   directly, cap-deferred (`--force` overrides). `conduct-resume
-  {all|MODEL…}` never spawns: it unparks lanes, lifts pause locks and
+  {all|AGENT…}` never spawns: it unparks lanes, lifts pause locks and
   requeues interrupted cells at the front for conduct to admit under its
   caps. A blanket resume leaves roster/manual pauses and cancelled cells
-  alone; naming the model lifts them.
+  alone; naming the agent lifts them.
 - **Every lock that can block declares a heartbeat phase** (`hb_phase`), or
   a queued cell displays whatever phase preceded it. `WAIT_PHASES` in
   `fae/driver/state.py` is the set rendered as `WAITING`.
@@ -500,7 +500,7 @@ cell resolves its image from its variant (`Cell.agent_image`); env
 clients follow upstream: conduct runs `fae/driver/image.py:ensure_agent` at
 preflight and before every admission (upstream versions cached 1 h in
 `.orch/agent_image.json`), because a provider gates new models on a minimum
-client and a stale client fails every cell of that model. A failed update at
+client and a stale client fails every cell of that agent. A failed update at
 preflight stops conduct; before an admission it is logged and the cell
 starts on the image there is. An update pulls the base image through
 Docker's credential helper, so a helper that hangs blocks every update.
@@ -658,7 +658,7 @@ every prior agent's memory — cross-run leakage invisible in the results.
   those lanes. Conduct does not come back with `conduct-resume` — restart it
   deliberately.
 - **Stopping never destroys the backlog.** `conduct-stop` backs the queues
-  (parked lanes included) up to `queue.<model>.stopped-<ts>.jsonl` before it
+  (parked lanes included) up to `queue.<agent>.stopped-<ts>.jsonl` before it
   clears them, and on `all` it stops conduct before touching them.
 - **Selectors are anchored at token boundaries**, and a cell verb that
   matches more than one cell is an error (the exactly-1 rule, §3); `stop`

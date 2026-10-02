@@ -69,7 +69,7 @@ def _pending_kind(cid, live_loops):
 
 
 def queued_summary():
-    """Pending specs per model, newest queue state. Returns display lines.
+    """Pending specs per agent, newest queue state. Returns display lines.
 
     The headline counts every pending spec and breaks it down by what
     admission will find when it reaches it — see _pending_kind. Only `fresh`
@@ -84,7 +84,7 @@ def queued_summary():
     # vanishing from the fleet picture.
     for d in queue.lane_dirs(include_parked=True):
         is_parked = d.name.endswith(".parked")
-        model = queue.lane_model(d)
+        agent = queue.lane_agent(d)
         paths = queue._dir_specs(d)
         if not paths:
             continue
@@ -95,9 +95,9 @@ def queued_summary():
             nxt = queue.read_spec(paths[0])
         except (OSError, json.JSONDecodeError):
             continue
-        tags = (["[BUDGET-HOLD]" if model in weekly.weekly_load()["hold"] else "[PAUSED]"]
+        tags = (["[BUDGET-HOLD]" if agent in weekly.weekly_load()["hold"] else "[PAUSED]"]
                 if is_parked else [])
-        _cu = weekly._cooldown_until(model)
+        _cu = weekly._cooldown_until(agent)
         if _cu > time.time():
             tags.append(f"[LIMIT until "
                         f"{datetime.fromtimestamp(_cu, timezone.utc):%m-%d %H:%M}Z]")
@@ -115,7 +115,7 @@ def queued_summary():
         # The tags are the reason a lane is not moving, so they line up in
         # their own column instead of trailing a variable-length spec name.
         nxt_txt = f"{nxt['variant']} r{nxt['rep']}"
-        rows.append(f"  {model:8} {len(paths):3} pending  next: "
+        rows.append(f"  {agent:8} {len(paths):3} pending  next: "
                     f"{nxt_txt:<28}{'  '.join(tags)}")
     if not rows:
         return []
@@ -145,7 +145,7 @@ def render(flat=False, running_only=False):
     out = []
     if flat:
         rows = [(s["cid"],
-                 s["model_version"][:24],
+                 s["agent_model"][:24],
                  s["state"] + (f"·{s['why']}" if s["why"] else "")
                  + (" ⚠" if s.get("taint") else "")
                  + (f" @{s['green_at']}" if s["green_at"] else
@@ -153,18 +153,18 @@ def render(flat=False, running_only=False):
                     f" {s['att']}/{s['budget']}"),
                  s["live"], s["shape"],
                  s["hist"][:48], s["detail"]) for s in states]
-        out.append(fmt_table(rows, ("CELL", "MODEL VERSION", "STATE", "LIVE", "GATE", "LAST REP", "LAST ERR / BLOCK")))
+        out.append(fmt_table(rows, ("CELL", "AGENT VERSION", "STATE", "LIVE", "GATE", "LAST REP", "LAST ERR / BLOCK")))
     else:
         # Two tables (operator request 2026-07-25): everything WORKING in one
-        # table up top; everything else in one table ordered label > model.
+        # table up top; everything else in one table ordered label > agent.
         # Derived from the definition, not a copy of its mapping.
         variants = common.definition().variants
         label_of = {vid: cls.LABEL for vid, cls in variants.items()}
 
-        def vshort(model, version):
-            # version only — the model name is its own column/id already
+        def vshort(agent, version):
+            # version only — the agent name is its own column/id already
             v = version.replace("claude-", "")
-            for pfx in (model + "-", model + " ", model.capitalize() + " "):
+            for pfx in (agent + "-", agent + " ", agent.capitalize() + " "):
                 if v.startswith(pfx):
                     v = v[len(pfx):]
             return v[:18]
@@ -180,7 +180,7 @@ def render(flat=False, running_only=False):
             hb = state.heartbeat(common.WS / s["cid"])
             phase = hb.get("phase") if hb else ""
             if s["state"] == "RUNNING" or (s["state"] == "WAITING" and phase not in ("", None)):
-                running_raw.append((s["cid"], vshort(s["model"], s["model_version"]),
+                running_raw.append((s["cid"], vshort(s["agent"], s["agent_model"]),
                                     phase or s["why"],
                                     state._dur(hb.get("phase_age") if hb else None),
                                     f"{s['att']}/{s['budget']}", s["shape"],
@@ -191,7 +191,7 @@ def render(flat=False, running_only=False):
                 att_txt = (f"@{s['green_at']}" if s["green_at"]
                            else str(s["att"]) if s["state"] == "DONE"
                            else f"{s['att']}/{s['budget']}")
-                other.append((label, s["model"], vshort(s["model"], s["model_version"]),
+                other.append((label, s["agent"], vshort(s["agent"], s["agent_model"]),
                               f"{s['variant']} {s['task']} r{s['rep']}",
                               st_txt, att_txt, s["live"], s["shape"],
                               _tail_hist(s["hist"], 34), s["detail"][:44]))
@@ -236,10 +236,10 @@ def render(flat=False, running_only=False):
         other.sort(key=lambda r: (r[0], r[1], r[2]))
         greens.sort(key=lambda r: (r[0], r[1], r[2]))
         # bottom-up visibility order: what scrolls away first matters least
-        hdr9 = ("LABEL", "MODEL", "VER", "VARIANT·TASK·REP", "STATE",
+        hdr9 = ("LABEL", "AGENT", "VER", "VARIANT·TASK·REP", "STATE",
                 "ATTEMPT", "LIVE", "GATE", "LAST REP", "DETAIL")
         if not running_only:
-            out.append(f"— OTHER ({len(other)}) — by label · model " + "—" * 34)
+            out.append(f"— OTHER ({len(other)}) — by label · agent " + "—" * 34)
             out.append(fmt_table(other, hdr9) if other else "  (none)")
             out.append(f"\n— GREEN ({len(greens)}) " + "—" * 48)
             out.append(fmt_table(greens, hdr9) if greens else "  (none)")
@@ -253,7 +253,7 @@ def render(flat=False, running_only=False):
         if triage:
             out.append("\n— TRIAGE (attention + zombies) " + "—" * 34)
             out.extend(triage)
-        # QUEUED: work that exists only as a spec in .orch/queue/<model>/.
+        # QUEUED: work that exists only as a spec in .orch/queue/<agent>/.
         # Every other section renders WORKSPACES, so pending cells were
         # invisible to the console entirely — a 100+ cell backlog could sit
         # there with nothing in `status` acknowledging it.
@@ -319,8 +319,8 @@ def monitor(args):
     leaves all runs alive.
 
     It no longer SIGSTOPs anything. Freezing a loop is not a pause — a frozen
-    loop still holds the per-arm lock, so auto-pausing one model on a usage
-    limit would deadlock that arm for every other model. And it was redundant:
+    loop still holds the per-arm lock, so auto-pausing one agent on a usage
+    limit would deadlock that arm for every other agent. And it was redundant:
     run_cell already retries the SAME attempt every LIMIT_RETRY_S on a
     limit/5xx fault, burning no budget, so a usage wall self-heals when the
     window rolls. What still needs a human is an AUTH wall, which never lifts

@@ -175,13 +175,13 @@ class TestTheRunArgv(unittest.TestCase):
         self.assertEqual(image.mounts_for("/a/b", "/a", "/c", "/a/b/d", ""), ["/a", "/c"])
 
     def test_child_env_drops_the_hosts_own_and_secrets(self):
-        env = image.child_env({"PATH": "x", "HOME": "y", "MODEL": "m", "MY_TOKEN": "t",
+        env = image.child_env({"PATH": "x", "HOME": "y", "AGENT": "m", "MY_TOKEN": "t",
                                "X_API_KEY": "k", "DOCKER_HOST": "tcp://x",
                                "SSL_CERT_FILE": "/opt/local/etc/cert.pem",
                                "REQUESTS_CA_BUNDLE": "/etc/x", "VIRTUAL_ENV": "/v",
                                "DEFAULT_CA_BUNDLE_PATH": "/etc/y"},
                               HOME="/h", K=None)
-        self.assertEqual(env, {"MODEL": "m", "HOME": "/h"})
+        self.assertEqual(env, {"AGENT": "m", "HOME": "/h"})
 
     def test_run_argv_shape(self):
         argv = image.run_argv("img:1", "fae-verify-c", ["python3", "-m", "x"],

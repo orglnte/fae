@@ -12,7 +12,7 @@ def _variant(vid, label=""):
 
 
 def _state(cid, variant):
-    return dict(cid=cid, model=cid.split("_")[0], model_version="5", state="DONE",
+    return dict(cid=cid, agent=cid.split("_")[0], agent_model="5", state="DONE",
                 why="green", att=2, budget=10, live="-", shape="6/6", hist="green",
                 detail="", variant=variant, task="T1", rep=1,
                 green_at=2, taint=False, alerts_open=0, alert_last="", noedit=0)

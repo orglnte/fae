@@ -35,7 +35,7 @@ class ConductCase(OrchTmpCase):
             p.start()
             self.addCleanup(p.stop)
         self.spawn_rc = None            # None = alive
-        self.per_model = 8              # off unless a test lowers it
+        self.per_agent = 8              # off unless a test lowers it
         self.rounds = 0
         self.max_rounds = 4
 
@@ -57,16 +57,16 @@ class ConductCase(OrchTmpCase):
         if self.rounds >= self.max_rounds:
             raise KeyboardInterrupt     # end the test run
 
-    def q(self, model, specs):
+    def q(self, agent, specs):
         for spec in specs:
-            runs.queue.enqueue(model, spec)
+            runs.queue.enqueue(agent, spec)
 
-    def pending(self, model):
+    def pending(self, agent):
         """The lane's pending specs, in admission order."""
-        return [runs.queue.read_spec(p) for p in runs.queue.lane_specs(model)]
+        return [runs.queue.read_spec(p) for p in runs.queue.lane_specs(agent)]
 
-    def claimed(self, model):
-        return [runs.queue.spec_cid(p) for p in runs.queue.running_specs(model)]
+    def claimed(self, agent):
+        return [runs.queue.spec_cid(p) for p in runs.queue.running_specs(agent)]
 
     def spec(self, variant="beta_apidocs", rep=1):
         return {"task": "T1", "variant": variant,
@@ -81,7 +81,7 @@ class ConductCase(OrchTmpCase):
                 contextlib.suppress(KeyboardInterrupt), \
                 mock.patch.object(runs.conduct, "_conduct_preflight", return_value=True):
             runs.conduct.conduct(SimpleNamespace(limit=n, interval=self.CADENCE,
-                                         per_model=self.per_model,
+                                         per_agent=self.per_agent,
                                          supervise_interval=supervise))
         return out.getvalue()
 
@@ -91,9 +91,9 @@ class TestFairness(ConductCase):
         self.q("aaa", [self.spec(rep=r) for r in (1, 2)])
         self.q("bbb", [self.spec(rep=r) for r in (1, 2)])
         self.run_conduct(n=4)
-        models = [c.split("_")[0] for c in self.spawned]
-        self.assertEqual(sorted(models[:2]), ["aaa", "bbb"],
-                         f"first two admissions came from one lane: {models}")
+        agents = [c.split("_")[0] for c in self.spawned]
+        self.assertEqual(sorted(agents[:2]), ["aaa", "bbb"],
+                         f"first two admissions came from one lane: {agents}")
 
     def test_global_cap_is_respected(self):
         self.q("aaa", [self.spec(rep=r) for r in range(1, 9)])
@@ -119,14 +119,14 @@ class TestStarvationGuard(ConductCase):
 
 class TestPerModelCap(ConductCase):
     def test_default_one_cell_per_model(self):
-        self.per_model = 1
+        self.per_agent = 1
         self.q("aaa", [self.spec(rep=r) for r in (1, 2, 3)])
         self.run_conduct(n=5)
         self.assertEqual(len(self.spawned), 1,
                          f"one lane must hold one live cell: {self.spawned}")
 
     def test_every_non_empty_lane_gets_exactly_one(self):
-        self.per_model = 1
+        self.per_agent = 1
         for lane in ("aaa", "bbb", "ccc"):
             self.q(lane, [self.spec(rep=r) for r in (1, 2, 3)])
         self.run_conduct(n=3)
@@ -136,14 +136,14 @@ class TestPerModelCap(ConductCase):
             self.assertEqual(len(self.claimed(lane)), 1)
 
     def test_cap_mismatch_warns(self):
-        self.per_model = 1
+        self.per_agent = 1
         self.q("aaa", [self.spec()])
         self.q("bbb", [self.spec()])
         out = self.run_conduct(n=5)
         self.assertIn("WARNING: global cap 5 != 2", out)
 
     def test_no_warning_when_the_cap_is_the_lane_count(self):
-        self.per_model = 1
+        self.per_agent = 1
         self.q("aaa", [self.spec()])
         self.q("bbb", [self.spec()])
         out = self.run_conduct(n=2)
@@ -152,7 +152,7 @@ class TestPerModelCap(ConductCase):
 
 class TestFinishedSpecsAreRetired(ConductCase):
     """Admission retires a terminal cell's spec, but only for a lane it is
-    about to admit from — a lane at its per-model cap is never scanned, and a
+    about to admit from — a lane at its per-agent cap is never scanned, and a
     cell resumed by hand finishes while its spec is still in the queue."""
 
     def _done_cell(self, cid):
@@ -161,7 +161,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         (d / "iterations.log").write_text(
             "2026-08-15T09:00:00Z\tITER\tgreen\tattempt=1 shapes=all\n"
             "2026-08-15T09:00:00Z\tEND\tcid\tgreen=true\n")
-        (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nMODEL_VERSION=5\n")
+        (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
 
     def test_a_done_cells_spec_leaves_the_lane(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
@@ -183,7 +183,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         (d / "artifacts").mkdir(parents=True, exist_ok=True)
         (d / "iterations.log").write_text(
             "2026-08-15T09:00:00Z\tITER\tfail\tattempt=1 stage=scaling\n")
-        (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nMODEL_VERSION=5\n")
+        (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
         with mock.patch.object(runs.state, "containers", return_value=set()):
             runs.supervise._retire_finished_specs()
         self.assertEqual(len(runs.queue.lane_specs(m)), 1)
@@ -216,7 +216,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         (d / "artifacts").mkdir(parents=True, exist_ok=True)
         (d / "iterations.log").write_text(
             "2026-08-15T09:00:00Z\tITER\tfail\tattempt=1 stage=scaling\n")
-        (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nMODEL_VERSION=5\n")
+        (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
         with contextlib.redirect_stdout(io.StringIO()), \
                 mock.patch.object(runs.state, "loop_parents", return_value={}), \
                 mock.patch.object(runs.state, "containers", return_value=set()), \
@@ -236,7 +236,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         (d / "artifacts").mkdir(parents=True, exist_ok=True)
         (d / "iterations.log").write_text(
             "2026-08-15T09:00:00Z\tITER\tfail\tattempt=1 stage=scaling\n")
-        (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nMODEL_VERSION=5\n")
+        (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
         with contextlib.redirect_stdout(io.StringIO()), \
                 mock.patch.object(runs.state, "loop_parents", return_value={}), \
                 mock.patch.object(runs.state, "containers", return_value=set()), \
@@ -348,7 +348,7 @@ class TestClaims(ConductCase):
         crashed workspace on disk, ignoring caps and lane cooldowns."""
         cid = "aaa_high_beta_apidocs_T1_r7"
         (self.ws / cid).mkdir(parents=True)
-        st = {"cid": cid, "state": "CRASHED", "why": "loop", "model": "aaa",
+        st = {"cid": cid, "state": "CRASHED", "why": "loop", "agent": "aaa",
               "variant": "beta_apidocs", "task": "T1",
               "rep": "7", "budget": 10}
         with mock.patch.object(runs.common, "RECONCILE_LOG", self.orch / "rec.log"):
@@ -357,7 +357,7 @@ class TestClaims(ConductCase):
         self.assertEqual(self.pending("aaa"), [])
 
     def _reclaim_log(self, cid):
-        st = {"cid": cid, "state": "CRASHED", "why": "loop", "model": "aaa"}
+        st = {"cid": cid, "state": "CRASHED", "why": "loop", "agent": "aaa"}
         log = self.orch / "rec.log"
         with mock.patch.object(runs.common, "RECONCILE_LOG", log):
             runs.supervise._reclaim(st, dry=False)
@@ -403,11 +403,11 @@ class TestClaims(ConductCase):
         cid = "aaa_high_beta_apidocs_T1_r9"
         (self.ws / cid).mkdir(parents=True)
         self.live[cid] = 4242
-        self.per_model = 1
+        self.per_agent = 1
         self.q("aaa", [self.spec()])
         with mock.patch.object(runs.state, "cell_state",
                                return_value={"cid": cid, "state": "RUNNING",
-                                             "why": "agent", "model": "aaa",
+                                             "why": "agent", "agent": "aaa",
                                              "variant": "beta_apidocs", "task": "T1",
                                              "rep": "9", "budget": 10}):
             out = self.run_conduct()
@@ -991,8 +991,8 @@ class TestWeeklyBudgetLanes(ConductCase):
             runs.os.utime(p, (mtime, mtime))
         return p
 
-    def lanes(self, *models):
-        for m in models:
+    def lanes(self, *agents):
+        for m in agents:
             self.q(m, [self.spec()])
 
     def test_the_newest_seven_day_event_is_the_reading(self):

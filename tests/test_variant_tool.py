@@ -38,7 +38,7 @@ class TestTheToolContainer(unittest.TestCase):
         def fake_run(argv, **k):
             seen["argv"] = argv
             return subprocess.CompletedProcess(argv, 0, "out", "")
-        with mock.patch.dict("os.environ", {"SSL_CERT_FILE": "/host/ca.pem", "MODEL": "m"}), \
+        with mock.patch.dict("os.environ", {"SSL_CERT_FILE": "/host/ca.pem", "AGENT": "m"}), \
                 mock.patch.object(base.subprocess, "run", fake_run):
             r = self.v.tool(["kind", "get", "clusters"], **kw)
         return r, seen["argv"]
@@ -61,7 +61,7 @@ class TestTheToolContainer(unittest.TestCase):
         self.assertEqual(env["REPO_ROOT"], str(ROOT))
         self.assertEqual(env["USER"], _image.CONTAINER_USER)
         self.assertEqual(env["HOME"], str(self.ws / ".tool-home"))
-        self.assertEqual(env["MODEL"], "m")
+        self.assertEqual(env["AGENT"], "m")
         self.assertNotIn("SSL_CERT_FILE", env)
         self.assertEqual(argv[-4:], ["fae-x-imaged:abc", "kind", "get", "clusters"])
 

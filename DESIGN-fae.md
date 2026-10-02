@@ -13,7 +13,7 @@ runbook, and [`HOWTO.md`](HOWTO.md) builds an experiment from nothing.
 
 ## 1. What is measured
 
-The unit is a **cell**: one model, one variant, one task and one
+The unit is a **cell**: one agent, one variant, one task and one
 repetition, run in a workspace of its own. A cell is a sequence of attempts
 under a fixed budget. Each attempt has three steps:
 
@@ -30,7 +30,7 @@ or **revoked** (the operator withdrew it).
 A cell yields:
 
 1. **Attempts to green**, the primary measure. Across repetitions it is a
-   distribution per (model, variant), read as a reliability curve.
+   distribution per (agent, variant), read as a reliability curve.
 2. **The authored surface**: the lines, files and languages the agent wrote,
    counted from content, not from file names.
 3. **Graded defects**, when a grading pass is run: codes from the
@@ -163,8 +163,9 @@ an agent of a variant reads is therefore named in that variant's file.
    carries.
 2. **Verifier** (`verifier_class()`, §6).
 3. **Configuration** (`CONFIG`): the machine-local keys it reads from
-   `fae.toml`, with their defaults. Host paths, caps, load tuning and model
-   tags are machine-local and stay out of version control; the defaults do
+   `fae.toml`, with their defaults. Host paths, caps, load tuning and the
+   agents' credentials homes are machine-local and stay out of version
+   control; the defaults, the variants and the agents (`agents.toml`) do
    not.
 4. **Fingerprint trees** (`fingerprint_trees`): source outside the
    experiment directory that a verdict depends on, such as an SDK.
@@ -221,9 +222,10 @@ resume all`); a resumed cell pins the new fingerprint.
 
 An agent is a command-line client run in the sealed container — `claude`,
 `opencode` or `agy` — plus a scripted `testagent` that exercises a cell
-without a model. `fae.toml` maps each lane tag to a client and the model id
-it receives; the tag is part of every cell id, so lanes write to disjoint
-workspaces. Credentials are restaged from the configured agent home before
+without a model. The experiment's `agents.toml` maps each agent's tag to a
+client and the model id it receives; the tag is part of every cell id, so
+lanes write to disjoint workspaces. Credentials are restaged from the
+agent's credentials home (machine-local, `fae.toml`) before
 every attempt. The vocabulary of provider faults (rate and quota walls with
 their reset hints, authentication walls, transient errors) decides whether a
 failed run is retried, refunded, or stood down with its lane cooled.
@@ -237,7 +239,7 @@ is rebuilt whenever its content or the base changes.
 
 `conduct` is the only scheduler and the only supervisor. The backlog is a
 directory tree with one file per spec, moved from queue to running to done
-by atomic renames. Conduct admits specs round-robin across model lanes under
+by atomic renames. Conduct admits specs round-robin across agent lanes under
 a global cap and a per-lane cap; stands cells down on provider walls and
 cools their lane; holds budget lanes near a weekly usage cap; repairs
 crashed or hung cells by requeuing them; validates finished cells; and reaps

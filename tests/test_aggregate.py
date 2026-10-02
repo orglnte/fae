@@ -207,7 +207,7 @@ class TestTableColumns(unittest.TestCase):
                          ["MIN mn/avg/mx", "MIN/ATT"])
 
     def test_a_row_is_a_model_and_a_variant(self):
-        self.assertEqual([h for h, _ in aggregate.table_columns(None)][:2], ["MODEL", "VARIANT"])
+        self.assertEqual([h for h, _ in aggregate.table_columns(None)][:2], ["AGENT", "VARIANT"])
 
     def test_the_baseline_comparison_is_two_columns(self):
         hdrs = [h for h, _ in aggregate.table_columns("bash")]
@@ -362,9 +362,9 @@ class TestScoreboardCuts(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
             ws = Path(d)
-            (ws / "cell.env").write_text("MODEL=x\nIMPL=py\n")
+            (ws / "cell.env").write_text("AGENT=x\nIMPL=py\n")
             self.assertEqual(aggregate.impl_of(ws), "py")
-            (ws / "cell.env").write_text("MODEL=x\n")
+            (ws / "cell.env").write_text("AGENT=x\n")
             self.assertEqual(aggregate.impl_of(ws), "bash")
             self.assertEqual(aggregate.impl_of(ws / "nope"), "bash")
 

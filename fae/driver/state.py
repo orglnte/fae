@@ -70,7 +70,7 @@ def loop_parents():
     The ps fallback matches `-m fae.cell` followed by its 3 positionals
     (task variant rep) — not merely anywhere in the line: children
     (deploy, the agent) carry the driver's path in their env and would
-    otherwise shadow the real loop pid. MODEL/EFFORT come from the exec-time
+    otherwise shadow the real loop pid. AGENT/EFFORT come from the exec-time
     env (spawn sets them); CELL_ID is set inside the driver and invisible to
     ps, so the cid is rebuilt.
     The env text is scanned for those keys only and never printed — it also
@@ -90,11 +90,11 @@ def loop_parents():
         if not m:
             continue
         pid, task, variant, rep = m.groups()
-        model = re.search(r"\bMODEL=(\S+)", line)
-        if not model:
+        agent = re.search(r"\bAGENT=(\S+)", line)
+        if not agent:
             continue
         eff = re.search(r"\bEFFORT=(\S+)", line)
-        prefix = f"{model.group(1)}{'_' + eff.group(1) if eff else '_high'}"
+        prefix = f"{agent.group(1)}{'_' + eff.group(1) if eff else '_high'}"
         if re.search(r"\bSMOKE=1", line):
             prefix += "_smoke"
         out.setdefault(f"{prefix}_{variant}_{task}_r{rep}", int(pid))
@@ -392,7 +392,7 @@ def _cell_state(ws, loops, boxes):
     parsed = parse_cell_id(ws.name)
     if not parsed or not (ws / "iterations.log").exists():
         return None
-    model, variant, task, rep = parsed
+    agent, variant, task, rep = parsed
     L = ledger.parse(ws, gate_n=common.definition().gate.arity)
     budget, mver = "?", "-"
     envf = ws / "cell.env"
@@ -400,11 +400,11 @@ def _cell_state(ws, loops, boxes):
         _envtxt = envf.read_text()
         m = re.search(r"ATTEMPT_BUDGET=(\d+)", _envtxt)
         budget = m.group(1) if m else "?"
-        m = re.search(r"^MODEL_VERSION=(.+)$", _envtxt, re.M)
+        m = re.search(r"^AGENT_MODEL=(.+)$", _envtxt, re.M)
         mver = m.group(1).strip() if m else "-"
-    st = dict(cid=ws.name, model=model, variant=variant,
+    st = dict(cid=ws.name, agent=agent, variant=variant,
               task=task, rep=int(rep), att=L["att"], budget=budget,
-              hist=ledger.hist(L), events=L["events"], model_version=mver,
+              hist=ledger.hist(L), events=L["events"], agent_model=mver,
               # `prepared` is read by never_started: with the v2 PREPARED birth
               # event, events==0 no longer identifies a workspace that was
               # prepared but never launched, and reconcile must not respawn one.
