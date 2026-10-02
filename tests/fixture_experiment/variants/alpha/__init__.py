@@ -1,12 +1,12 @@
-from fae.cell.variants.base import Variant
+from fae.cell.infra.base import Infra
 
 
-class Alpha(Variant):
-    INFRA_PREFIXES = {"container": "fae-dind-", "cluster": "fx-cluster-"}
+class Alpha(Infra):
+    PREFIXES = {"container": "fae-dind-", "cluster": "fx-cluster-"}
 
     @classmethod
-    def infra_identities(cls, cid):
+    def identities(cls, cid):
         return [("container", f"fae-dind-{cid}")]
 
-    def infra_alive(self):
+    def alive(self):
         return True

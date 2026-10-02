@@ -287,13 +287,14 @@ class Verifier(ABC):
     # The stages at which the verifier never ran to its end (no image, a
     # crash, a timeout): its outputs are not expected there.
     NOT_RUN_STAGES = frozenset({"verifier", "verifier-timeout", "verifier-image"})
-    INFRA_PREFIXES = {}   # {kind: name prefix} of what a verify provisions, for the reaper
+    PREFIXES = {}   # {kind: name prefix} of what a verify provisions, for the reaper
+    RUN_LOG = "run.log"   # under the verify's out: what the variant's program printed
     # A charged fail at one of these stages is voided when the variant's
     # infra is found dead afterwards; None: any charged fail.
     MEASURED_STAGES = None
 
     @classmethod
-    def infra_identities(cls, cid):
+    def identities(cls, cid):
         """[(kind, name)] this verifier provisions for a cell, named as it
         names them — what a reaper may look for after the cell is gone."""
         return []
@@ -436,8 +437,9 @@ def teardown_argv(ctx, image, conf=None, environ=None):
                            labels=(("fae-cell", ctx.cid),), extra=HOST_ALIAS)
 
 
-def run_teardown(ctx, variant, timeout_s=900, log_dir=None):
-    """Run the variant's `verify_teardown` for `ctx` in a fresh container of
+def run_teardown(ctx, infra, timeout_s=900, log_dir=None):
+    """Run the variant's teardown for `ctx` — the artifacts' runner
+    stopped, then its infra's `verify_teardown` — in a fresh container of
     its image (see `teardown_argv`); returns the child's exit code, or None
     when no container could run (no image, no daemon). Best effort: the
     reaper covers what this leaves. `log_dir` holds verifier.log (the host's
@@ -448,9 +450,9 @@ def run_teardown(ctx, variant, timeout_s=900, log_dir=None):
     out = Path(log_dir or ctx.out)
     (work / "home").mkdir(parents=True, exist_ok=True)
     (work / "teardown.ctx.json").write_text(ctx.to_json())
-    conf = getattr(variant, "conf", None)
+    conf = getattr(infra, "conf", None)
     try:
-        image = _image.for_variant(type(variant), _experiment.current(), conf,
+        image = _image.for_variant(infra.variant, _experiment.current(), conf,
                                    log=lambda m: _log_line(out, m))
     except RuntimeError as e:
         _log_line(out, f"teardown image: {e}")
@@ -470,9 +472,9 @@ def run_teardown(ctx, variant, timeout_s=900, log_dir=None):
             _end(p, name)
 
 
-def run_verifier(ctx, variant, timeout_s=7200, log_dir=None):
-    """Run the experiment's verifier on `ctx` inside a container of
-    `variant`'s image and return its Verdict. A verifier that hangs past
+def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
+    """Run the experiment's verifier on `ctx` inside a container of the
+    image of `infra`'s variant and return its Verdict. A verifier that hangs past
     `timeout_s`, crashes, or exits without writing a verdict is a rig
     fault: `charge=False`, the attempt is retried. The container is removed
     on every path, so nothing the verifier started outlives it. `log_dir`
@@ -485,9 +487,9 @@ def run_verifier(ctx, variant, timeout_s=7200, log_dir=None):
     ctx_path, verdict_path = work / "ctx.json", work / "verdict.json"
     verdict_path.unlink(missing_ok=True)
     ctx_path.write_text(ctx.to_json())
-    conf = getattr(variant, "conf", None)
+    conf = getattr(infra, "conf", None)
     try:
-        image = _image.for_variant(type(variant), _experiment.current(), conf,
+        image = _image.for_variant(infra.variant, _experiment.current(), conf,
                                    log=lambda m: _log_line(out, m))
     except RuntimeError as e:
         _log_line(out, f"verifier image: {e}")
@@ -546,7 +548,8 @@ def main(argv=None):
     ap.add_argument("--ctx", required=True)
     ap.add_argument("--out", help="where the Verdict lands (a verify)")
     ap.add_argument("--teardown", action="store_true",
-                    help="run the variant's verify_teardown for the ctx instead of a verify")
+                    help="stop the artifacts' runner and run the infra's verify_teardown "
+                         "for the ctx instead of a verify")
     a = ap.parse_args(argv)
     if not (a.out or a.teardown):
         ap.error("--out is required for a verify")
@@ -562,7 +565,10 @@ def main(argv=None):
             return 2
         cell = _ShimCell(ctx.cid, ctx.workspace, ctx.root)
         cell.variant = ctx.variant
-        vcls(cell).verify_teardown(ctx, dict(os.environ))
+        from .infra import secrunner
+        secrunner.stop_by_name(ctx.cid, ctx.out,
+                               log=Path(ctx.out) / definition.verifier_class().RUN_LOG)
+        vcls.INFRA(vcls, cell).verify_teardown(ctx, dict(os.environ))
         return 0
     cls = definition.verifier_class()
     verdict = cls().verify(ctx)

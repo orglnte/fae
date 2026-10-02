@@ -94,9 +94,9 @@ def agent_container(cid):
 
 
 def infra_containers(variant, cid):
-    """The containers a cell of this variant provisions, as its variant names them."""
+    """The containers a cell of this variant provisions, as its infra class names them."""
     s = definition().variant(variant)
-    return [i for k, i in (s.infra_identities(cid) if s else []) if k == "container"]
+    return [i for k, i in (s.INFRA.identities(cid) if s else []) if k == "container"]
 
 
 def __getattr__(name):

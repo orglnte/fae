@@ -377,21 +377,21 @@ def _authorable_error(vid):
 
 def infra(args):
     """Can this host carry each variant? Every active variant's infra
-    preflight (<Variant>.infra_ok — the check a cell makes before every
+    preflight (its infra class's ok() — the check a cell makes before every
     attempt) and its verify image (built when missing), then a sweep of
     stale infra. Nothing per cell is created here. Exit 1 if any variant is
     refused."""
     bad = _probe_variants()
     sys.path.insert(0, str(ROOT))
     from fae.cell import variants as _tr
-    for cls in _tr.registry().values():
-        cls.sweep()
+    for infra in {cls.INFRA for cls in _tr.registry().values()}:
+        infra.sweep()
     if bad:
         sys.exit(f"infra: {bad} variant(s) refused — see hooks.log lines above")
 
 
 def _probe_variants(variants=None):
-    """Every variant's own preflight (its infra_ok: the daemon, the tools)
+    """Every variant's own preflight (its infra's ok(): the daemon, the tools)
     and the image its cells are verified in, built here when missing —
     printed one per line; the count refused."""
     sys.path.insert(0, str(ROOT))
@@ -400,17 +400,17 @@ def _probe_variants(variants=None):
     for vid in sorted(variants or common.definition().active):
         cell = _tr._ShimCell(f"infra-probe-{vid}", "/nonexistent", ROOT)
         cell.variant = vid
-        variant = _tr.for_cell(cell)
+        infra = _tr.for_cell(cell)
         ok, note = True, ""
-        if not _tr.liveness_declared(type(variant)):
-            ok, note = False, f"{type(variant).__name__} declares no infra_alive probe"
+        if not _tr.liveness_declared(infra.variant):
+            ok, note = False, f"{type(infra).__name__} declares no alive() probe"
         elif (undeclared := _authorable_error(vid)):
             ok, note = False, undeclared
-        elif not variant.infra_ok():
+        elif not infra.ok():
             ok = False
         if ok:
             try:
-                note = variant.image()
+                note = infra.image()
             except RuntimeError as e:
                 ok, note = False, f"verify image: {str(e).splitlines()[0]}"
         print(f"  [{'ok' if ok else 'HALT'}] {vid}  {note}")

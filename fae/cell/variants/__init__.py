@@ -1,8 +1,6 @@
 """The experiment's variants: the registry (read from the variant files,
-fae/cell/variants/files.py) and the infra a cell of one gets.
-
-`base.Variant` is what the driver calls — setup / teardown / infra_ok — and
-what every variant answers.
+fae/cell/variants/files.py) and the infra a cell of one gets — its file's
+`[infra] class` (fae/cell/infra/base.py), instantiated with the variant.
 
 Slots are NOT taken here: the driver holds the work slot and the lock slot on
 its own fds for the cell's whole life (Cell.acquire_slots), so provisioning
@@ -18,8 +16,8 @@ import os
 import sys
 from pathlib import Path
 
-from .base import (HARNESS, ROOT, HookFailure, NoopVariant, Variant, liveness_declared,  # noqa: F401
-                   _ok, _run, cksum, write_env)
+from ..infra.base import HookFailure, NoopInfra, liveness_declared  # noqa: F401
+from .base import HARNESS, ROOT, Variant  # noqa: F401
 # --- registry + CLI -----------------------------------------------------------
 
 NOOP_ENV = "FAE_VARIANT_NOOP"
@@ -32,20 +30,18 @@ def registry():
 
 
 def for_cell(cell):
-    """The cell's variant, as its infra. FAE_VARIANT_NOOP=1 in the
-    environment is the fixture seam: a root with no infra provisions
-    nothing."""
-    if os.environ.get(NOOP_ENV) == "1":
-        return NoopVariant(cell)
+    """The cell's infra: its variant's infra class, with the variant.
+    FAE_VARIANT_NOOP=1 in the environment is the fixture seam: a root with
+    no infra provisions nothing."""
     cls = registry().get(cell.variant)
-    if cls is None:
-        return NoopVariant(cell)
-    return cls(cell)
+    if os.environ.get(NOOP_ENV) == "1" or cls is None:
+        return NoopInfra(cls or Variant, cell)
+    return cls.INFRA(cls, cell)
 
 
 class _ShimCell:
     """What the operator's infra preflight (`cli.py experiment infra`) hands
-    a variant: the cell as the hooks knew it — cid, workspace, root, config,
+    an infra class: the cell as the hooks knew it — cid, workspace, root, config,
     variant."""
 
     def __init__(self, cid, ws, root):
@@ -76,7 +72,7 @@ def main(argv=None):
     if hook == "infra":
         cell = _ShimCell(a[2] if len(a) > 2 else "", a[3] if len(a) > 3 else "/nonexistent", root)
         cell.variant = vid
-        return 0 if for_cell(cell).infra_ok() else 1
+        return 0 if for_cell(cell).ok() else 1
     if len(a) < 4:
         print(main.__doc__, file=sys.stderr)
         return 2
@@ -85,14 +81,14 @@ def main(argv=None):
     t = for_cell(cell)
     if hook == "setup":
         try:
-            env = t.author_setup()
+            env = t.cell_setup()
         except HookFailure:
             return 1
         for k, v in env.items():
             print(f"{k}='{v}'")
         return 0
     if hook == "teardown":
-        t.author_teardown()
+        t.cell_teardown()
         return 0
     print(main.__doc__, file=sys.stderr)
     return 2

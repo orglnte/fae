@@ -594,7 +594,7 @@ class Cell:
         self._mark_inflight(out, shape)
         # an infra already dead voids fast, before a deploy and a load
         # are spent on a corpse
-        if not self.infra.infra_alive():
+        if not self.infra.alive():
             v = Verdict(ok=False, stage="infra", charge=False,
                         why="the arm's infra was dead before the arrangement",
                         arrangement=shape)
@@ -640,7 +640,7 @@ class Cell:
                         arrangement=v.arrangement, seconds=v.seconds, files=v.files)
         measured = definition.verifier_class().MEASURED_STAGES
         if (not v.ok and v.charge and (measured is None or v.stage in measured)
-                and not self.infra.infra_alive()):
+                and not self.infra.alive()):
             # died under the measurement: what it measured is not the build's
             v = Verdict(ok=False, stage="infra", charge=False,
                         why=f"the arm's infra died during the arrangement (was: {v.stage})",
@@ -1077,7 +1077,8 @@ class Cell:
 
     @property
     def infra(self):
-        """The variant's infra for this cell (fae/cell/variants)."""
+        """The variant's infra for this cell: its infra class, with the
+        variant (fae/cell/infra/base.py)."""
         if getattr(self, "_infra", None) is None:
             self._infra = _variants.for_cell(self)
         return self._infra
@@ -1092,14 +1093,14 @@ class Cell:
             self.infra.log(f"HALT[infra]: {e}")
             return 1, {}
         try:
-            return 0, self.infra.author_setup()
+            return 0, self.infra.cell_setup()
         except _variants.HookFailure:
             return 1, {}
 
     def teardown(self):
         """The arm's, then the cell network it lived on."""
         try:
-            self.infra.author_teardown()
+            self.infra.cell_teardown()
         except Exception as e:           # best-effort by contract
             self._append("ALERT", "teardown", f"{type(e).__name__}: {e}")
         try:
@@ -1150,17 +1151,17 @@ class Cell:
         what its infra needs (a docker daemon, an image, nothing); the
         image its cells are verified in is built here, before an attempt,
         never under the verify lock."""
-        if not _variants.liveness_declared(type(self.infra)):
+        if not _variants.liveness_declared(self.infra.variant):
             self.infra.log(f"HALT[infra]: {type(self.infra).__name__} "
-                                 "declares no infra_alive probe; every "
-                                 "arrangement would be void")
+                           "declares no alive() probe; every "
+                           "arrangement would be void")
             return False
         try:
             authorable(self.variant)
         except RuntimeError as e:
             self.infra.log(f"HALT[definition]: {e}")
             return False
-        if not self.infra.infra_ok():
+        if not self.infra.ok():
             return False
         try:
             self.infra.image()

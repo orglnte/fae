@@ -10,7 +10,8 @@ from _ctx import ROOT
 
 from fae.cell import cell
 from fae.cell import experiment as _experiment
-from fae.cell.variants import base
+from fae.cell.infra import base
+from fae.cell.variants.base import Variant
 from fae.cell.verify import Verdict
 
 
@@ -40,15 +41,19 @@ class TestTheProbeClassifiesADaemon(unittest.TestCase):
 
 
 class TestTheDefaultIsNotAlive(unittest.TestCase):
-    def test_an_arm_without_a_probe_voids_rather_than_assumes(self):
-        class Bare(base.Variant):
-            ARM = "bare"
-        self.assertFalse(Bare(mock.Mock(cid="c", ws="/nonexistent", root=ROOT, conf=None,
-                                        condition="apidocs")).infra_alive())
+    def test_an_infra_without_a_probe_voids_rather_than_assumes(self):
+        class Bare(base.Infra):
+            pass
+        self.assertFalse(Bare(Variant, mock.Mock(cid="c", ws="/nonexistent", root=ROOT,
+                                                 conf=None)).alive())
+
+    def test_the_default_infra_of_a_program_in_the_verify_image_is_not_alive(self):
+        self.assertFalse(base.DefaultInfra(Variant, mock.Mock(cid="c", ws="/nonexistent",
+                                                              root=ROOT, conf=None)).alive())
 
     def test_the_fixture_seam_is_alive(self):
-        self.assertTrue(base.NoopVariant(mock.Mock(cid="c", ws="/nonexistent", root=ROOT,
-                                                     conf=None, condition="apidocs")).infra_alive())
+        self.assertTrue(base.NoopInfra(Variant, mock.Mock(cid="c", ws="/nonexistent", root=ROOT,
+                                                          conf=None)).alive())
 
 
 class TestTheTwoGates(unittest.TestCase):
@@ -64,7 +69,7 @@ class TestTheTwoGates(unittest.TestCase):
         (d / "ws" / "c" / "artifacts").mkdir(parents=True)
         self.c = cell.Cell("c", workspaces=d / "ws", root=ROOT)
         self.alive = [True]
-        self.c._infra = mock.Mock(infra_alive=lambda: self.alive[0])
+        self.c._infra = mock.Mock(alive=lambda: self.alive[0])
 
     def verify_with(self, verdict, alive_after, measured=None):
         calls = []

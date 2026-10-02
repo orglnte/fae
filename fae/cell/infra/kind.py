@@ -12,8 +12,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fae.cell.variants import base
-from fae.cell.variants.base import HookFailure
+from fae.cell.infra import base
+from fae.cell.infra.base import HookFailure
 
 
 class Cluster:

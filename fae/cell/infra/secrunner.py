@@ -206,6 +206,13 @@ class SecRunner:
             pass
 
 
+def stop_by_name(cid, workdir, log=None):
+    """Stop the cell's runner, addressed by its name alone — from any
+    container of the verify, a fresh one after a kill included — keeping
+    what it printed in `log`. Idempotent."""
+    SecRunner(image="", cid=cid, workdir=Path(workdir), argv=(), log=log).stop()
+
+
 # --- a variant's program, as its file declares it ([verify.run]) ---------------
 
 RUN_MEMORY = "256m"     # a program that runs once per case

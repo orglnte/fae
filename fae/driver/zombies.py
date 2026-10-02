@@ -8,7 +8,7 @@ smoke` in the FOREGROUND process — the regex tracks the real invoked argv,
 so moving the code that implements a verb changes nothing about what it
 matches; only a change to the invocation shape itself does. Infra names
 (the dind sidecar, the kind cluster) come from the variants that provision
-them (Variant.infra_identities, INFRA_PREFIXES for what a scan may
+them (Infra.identities, PREFIXES for what a scan may
 discover, stray() for what carries no name at all): the reaper keeps no
 formula of its own, so a live cell's cluster cannot lose its owner to a
 divergent copy and be deleted out from under an agent.
@@ -45,7 +45,7 @@ def _workspace_entries():
 
 def _cluster_map():
     """cid -> the cluster a cell of that cid owns, as its variant names it
-    (`infra_identities`), cached per cid-set: a pure function of the cid,
+    (`Infra.identities`), cached per cid-set: a pure function of the cid,
     computed in-process — an owner map that could come back empty on a
     fault would strip every live cluster of its reaper protection."""
     cids = tuple(sorted(p.name for p in _workspace_entries()
@@ -64,7 +64,7 @@ def _infra_of(variant, cid):
     variant. Unnamed infra is found by scanning instead (`_strays`)."""
     from fae.cell import variants as _tr
     cls = _tr.registry().get(variant)
-    return list(cls.infra_identities(cid)) if cls is not None else []
+    return list(cls.INFRA.identities(cid)) if cls is not None else []
 
 
 def _verifier_infra(cid):
@@ -73,7 +73,7 @@ def _verifier_infra(cid):
     the verifier's own (a store), named as they name them."""
     from fae.cell import image as _image
     out = [("container", _image.verify_container(cid)), ("network", _image.cell_network(cid))]
-    for pair in common.definition().verifier_class().infra_identities(cid):
+    for pair in common.definition().verifier_class().identities(cid):
         if pair not in out:
             out.append(pair)
     return out
@@ -100,8 +100,8 @@ def _strays(live):
     owner cid)] whose owner has no live loop (Variant.stray)."""
     from fae.cell import variants as _tr
     out = []
-    for cls in _tr.registry().values():
-        for item in cls.stray(live, common.WS):
+    for infra in {cls.INFRA for cls in _tr.registry().values()}:
+        for item in infra.stray(live, common.WS):
             if item not in out:
                 out.append(item)
     return out
@@ -109,16 +109,16 @@ def _strays(live):
 
 def _prefixes():
     """[(kind, prefix)] a reaper scans by: the engine's agent container,
-    each variant's INFRA_PREFIXES and the verifier's."""
+    each infra class's PREFIXES and the verifier's."""
     from fae.cell import image as _image
     from fae.cell import variants as _tr
     out = [("container", common.AGENT_CONTAINER_PREFIX),
            ("container", _image.VERIFY_PREFIX), ("container", _image.TOOL_PREFIX),
            ("container", _image.RUN_PREFIX),
            ("network", _image.NET_PREFIX)]
-    classes = list(_tr.registry().values()) + [common.definition().verifier_class()]
+    classes = list(dict.fromkeys(c.INFRA for c in _tr.registry().values())) + [common.definition().verifier_class()]
     for cls in classes:
-        for kind, pfxs in cls.INFRA_PREFIXES.items():
+        for kind, pfxs in cls.PREFIXES.items():
             for pfx in ((pfxs,) if isinstance(pfxs, str) else pfxs):
                 if (kind, pfx) not in out:
                     out.append((kind, pfx))

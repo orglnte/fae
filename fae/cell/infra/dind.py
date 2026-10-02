@@ -5,8 +5,8 @@ from __future__ import annotations
 import subprocess
 import time
 
-from fae.cell.variants import base
-from fae.cell.variants.base import HookFailure
+from fae.cell.infra import base
+from fae.cell.infra.base import HookFailure
 
 
 class DindSidecar:

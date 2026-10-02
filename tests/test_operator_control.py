@@ -466,7 +466,7 @@ class TestStopCells(OperatorTestCase):
                                                  why="agent", variant="beta_apidocs")), \
              mock.patch.object(runs.subprocess, "run", return_value=mock.Mock(returncode=0)), \
              mock.patch.object(_verify, "run_teardown",
-                               side_effect=lambda ctx, variant, **kw: torn.append((ctx, variant))), \
+                               side_effect=lambda ctx, infra, **kw: torn.append((ctx, infra))), \
              mock.patch.object(runs.os, "getpgid", return_value=7777), \
              mock.patch.object(runs.os, "killpg",
                                side_effect=lambda pg, sig: groups.append((pg, sig))), \
@@ -474,11 +474,12 @@ class TestStopCells(OperatorTestCase):
             runs.ops.stop_cells(mock.Mock(selectors=[cid], cancel=False, dry_run=False))
         self.assertEqual(groups, [(7777, runs.signal.SIGKILL)])
         self.assertEqual(len(torn), 1)
-        ctx, variant = torn[0]
+        ctx, infra = torn[0]
         self.assertEqual((ctx.cid, ctx.variant, ctx.artifacts, ctx.out),
                          (cid, "beta_apidocs", str(self.ws / cid / "artifacts"),
                           str(self.ws / cid / ".verify-out")))
-        self.assertEqual(type(variant).ID, "beta_apidocs")
+        self.assertEqual(infra.variant.ID, "beta_apidocs")
+        self.assertIsInstance(infra, infra.variant.INFRA)
 
     def test_plain_stop_of_a_live_loop_emits_crash_not_kill(self):
         """Trace conformance: Pause leaves the model's loop alive; the SIGKILL

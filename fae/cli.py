@@ -497,7 +497,7 @@ def rig_trace_reset(dry_run: bool = typer.Option(False, "--dry-run",
 
 @experiment_app.command("infra")
 def experiment_infra():
-    """Every variant's infra preflight (infra_ok) + a sweep
+    """Every variant's infra preflight (its infra's ok()) + a sweep
     of stale per-verify kind clusters. Creates nothing: each verify provisions
     its own infra."""
     rig.infra(_ns())

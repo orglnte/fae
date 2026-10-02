@@ -570,7 +570,8 @@ def _kill_group(pid, sig):
 
 
 def _bringup_teardown(cid):
-    """The variant's verify_teardown for the cell's last arrangement (the
+    """The variant's teardown for the cell's last arrangement: its runner
+    stopped, then its infra's verify_teardown (the
     per-verify cluster, the daemon's leases, the sidecar's inner world) —
     what the verify's own `finally` would have run had it been allowed to
     finish. The verify container died with the kill; this runs in a fresh
@@ -586,13 +587,13 @@ def _bringup_teardown(cid):
         return
     cell = _ShimCell(cid, ws, common.ROOT)
     cell.variant = p[1]
-    variant = cls(cell)
+    infra = cls.INFRA(cls, cell)
     run_out = ws / _verify.RUN_OUT
     run_out.mkdir(exist_ok=True)
     ctx = _verify.Ctx(root=str(common.ROOT), experiment_dir=str(cell.conf.get("EXPERIMENT_DIR")),
                       workspace=str(ws), artifacts=str(ws / "artifacts"), out=str(run_out),
                       cid=cid, task=p[2], variant=p[1])
-    _verify.run_teardown(ctx, variant, timeout_s=TEARDOWN_TIMEOUT_S, log_dir=ws)
+    _verify.run_teardown(ctx, infra, timeout_s=TEARDOWN_TIMEOUT_S, log_dir=ws)
 
 
 def _variant_teardown(variant, cid, timeout=None):

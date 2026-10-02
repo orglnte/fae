@@ -96,6 +96,30 @@ class TestMinimalDefinition(unittest.TestCase):
             self._run("", "d.variants\n", variants={"only": "[verify]\nrn = 1\n"})
         self.assertIn("only.toml: unknown key(s) in [verify]: rn", str(ctx.exception))
 
+    def test_the_infra_class_is_imported_from_the_experiment_package(self):
+        body = """
+            from fae.cell.infra.base import Infra
+            class Daemon(Infra):
+                def alive(self):
+                    return True
+            """
+        code = ('from fae.cell.infra.base import DefaultInfra\n'
+                'print(d.variant("own").INFRA.__name__, d.variant("bare").INFRA is DefaultInfra)\n')
+        out = self._run(body, code, variants={"own": "[infra]\nclass = \"__init__:Daemon\"\n",
+                                              "bare": "label = \"Bare\"\n"})
+        self.assertEqual(out.split(), ["Daemon", "True"])
+
+    def test_an_infra_class_that_is_not_an_Infra_is_refused(self):
+        with self.assertRaises(AssertionError) as ctx:
+            self._run("class NotInfra:\n    pass\n", "d.variants\n",
+                      variants={"only": "[infra]\nclass = \"__init__:NotInfra\"\n"})
+        self.assertIn("is not an Infra subclass", str(ctx.exception))
+
+    def test_an_infra_class_that_cannot_be_imported_is_refused(self):
+        with self.assertRaises(AssertionError) as ctx:
+            self._run("", "d.variants\n", variants={"only": "[infra]\nclass = \"nowhere:X\"\n"})
+        self.assertIn("cannot be imported", str(ctx.exception))
+
     def test_a_verifier_that_is_not_a_Verifier_is_refused(self):
         with self.assertRaises(AssertionError) as ctx:
             self._run('''
