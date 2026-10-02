@@ -507,7 +507,7 @@ class TestConductResume(OperatorTestCase):
 
     def _resume(self, scope, live=None, states=None):
         """Cells default to DONE (no requeue); a test names the ones it wants
-        interrupted via `states`. conduct-resume requeues EVERY loop-less
+        interrupted via `states`. experiment resume requeues EVERY loop-less
         non-terminal cell — crashed included, it is the bulk human act — so
         an all-CRASHED default would requeue the whole fixture."""
         st_map = states or {}
@@ -529,7 +529,7 @@ class TestConductResume(OperatorTestCase):
             self._paused(c, "drain")
         self._resume(["all"])
         self.assertEqual(self.spawned, [],
-                         "conduct-resume spawned a loop — that is conduct's job")
+                         "experiment resume spawned a loop — that is conduct's job")
 
     def test_drain_pause_is_lifted_and_requeued_at_front(self):
         cid = CIDS[0]
@@ -547,7 +547,7 @@ class TestConductResume(OperatorTestCase):
         self._paused(cid, "roster")
         self._resume(["all"])
         self.assertTrue((self.ws / cid / ".paused").exists(),
-                        "conduct-resume all resurrected a standing roster pause")
+                        "experiment resume all resurrected a standing roster pause")
 
     def test_naming_the_model_lifts_a_roster_pause(self):
         cid = CIDS[0]
@@ -561,7 +561,7 @@ class TestConductResume(OperatorTestCase):
             "contract by=driver at=2026-08-29T06:45:23Z\nteardown: the ledger survived\n")
         self._resume(["sonnet"])
         self.assertTrue((self.ws / cid / ".paused").exists(),
-                        "conduct-resume sonnet resurrected a contract stand-down")
+                        "experiment resume sonnet resurrected a contract stand-down")
 
     def test_requeue_deduplicates_against_an_existing_spec(self):
         cid = CIDS[0]
@@ -1075,7 +1075,7 @@ class TestConductPauseDryRun(OperatorTestCase):
 
 
 class TestConductPauseFullWindow(OperatorTestCase):
-    """`conduct pause all` is the FP-edit window: conduct stops FIRST, then
+    """`experiment pause all` is the FP-edit window: conduct stops FIRST, then
     every cell is asked to stop, then it waits for zero loops."""
 
     def test_stops_conduct_pauses_all_and_waits_for_quiet(self):
@@ -1196,7 +1196,7 @@ class TestVerbEdges(OperatorTestCase):
         self.assertTrue((self.ws / cid / ".paused").exists(),
                         "a cancel must survive a named resume of a DONE cell")
 
-    # --- conduct stop / resume ------------------------------------------
+    # --- experiment stop / resume ------------------------------------------
     def test_conduct_stop_refuses_an_unknown_lane(self):
         with self.assertRaises(SystemExit):
             runs.conduct.conduct_stop(mock.Mock(scope=["nosuchmodel"]))
@@ -1283,7 +1283,7 @@ class TestStandingStateSurvivesBulkVerbs(OperatorTestCase):
             runs.conduct.conduct_stop(mock.Mock(scope=["all"]))
         out = buf.getvalue()
         self.assertIn("stay paused", out)
-        self.assertIn("cli.py conduct resume all", out)
+        self.assertIn("cli.py experiment resume all", out)
 
     def test_stopping_a_cell_whose_loop_already_exited(self):
         cid = CIDS[0]

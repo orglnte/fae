@@ -202,7 +202,7 @@ sidecar.
 
 **A live holder's lock is never taken; a wedged holder is ended by
 supervision.** `ARM_HELD_ALERT_S` alerts and then stands the cell down; age
-alone never acts — overaged AND heartbeat-stalled does. Conduct is the only
+alone never acts — overaged AND heartbeat-stalled does. The run is the only
 actor that ends a cell, and `_teardown_cell` the only way it does so,
 because a kill that does not also tear down frees the variant's lock slot
 while the infra it capped still runs. A kill signals the driver's whole
@@ -212,7 +212,7 @@ name and the infra's `verify_teardown` runs for the cell's last
 arrangement: what the verify provisioned outside itself does not die with
 its container. `cli.py cell stop` does the same.
 
-**`conduct` refuses to start if `.orch`'s filesystem does not ENFORCE
+**`experiment run` refuses to start if `.orch`'s filesystem does not ENFORCE
 flock** (`mutex.fs_enforces_flock`). A filesystem can accept flock without
 enforcing it, which would turn every cap into a no-op that reports success;
 the probe proves exclusion across a real second process. Probe by hand:
@@ -232,7 +232,7 @@ reverse.
 
 **Teardown is mandatory and covers setup.** `Cell.run` tears the variant
 down on its unconditional path whether setup finished or not; `cell stop`,
-conduct's kill fallback and the zombie reaper call the same infra
+the run's kill fallback and the zombie reaper call the same infra
 `cell_teardown()` in-process. Infra classes hold no rollback of their own:
 teardown is idempotent and derivable from the cid alone. A non-zero setup
 writes an `ALERT SETUP-FAILED` ledger line.
@@ -244,8 +244,8 @@ writes an `ALERT SETUP-FAILED` ledger line.
   (`ARM_SLOTS_<LOCK>` in the environment on top); a lock the config does not
   name caps at the variant file's `lock_slots`. A verifier may refuse to judge on
   an overloaded host and say why, as a void.
-- **Admission is `conduct`'s job; `WORK_SLOTS` is the backstop.**
-  `cli.py conduct run` (`fae/driver/conduct.py`) is the ONE scheduler and
+- **Admission is `experiment run`'s job; `WORK_SLOTS` is the backstop.**
+  `cli.py experiment run` (`fae/driver/conduct.py`) is the ONE scheduler and
   the ONE controller: it admits queued specs up to a global cap (`-n`) and
   `--per-agent`, round-robin with starved lanes first, and every
   `--supervise-interval` it repairs crashed or hung cells by requeuing them at
@@ -255,8 +255,8 @@ writes an `ALERT SETUP-FAILED` ledger line.
   retried every pass: one cell's evidence never stops supervision of the
   fleet. It runs in
   the foreground; Ctrl-C stops admission and supervision while live cells
-  keep running. `conduct diagnose` is the read-only preview; `conduct
-  reconcile` the one-shot engine verb. Nothing else reaps: the fleet console
+  keep running. `experiment diagnose` is the read-only preview; `experiment
+  repair` the one-shot engine verb. Nothing else reaps: the fleet console
   lists zombies and touches none, a spawn clears only its own cid, and
   `cli.py rig zombies --reap` is the operator's deliberate verb.
 - **A reaper's predicates name every holder shape.** A cell loop, `exp1`,
@@ -270,9 +270,9 @@ writes an `ALERT SETUP-FAILED` ledger line.
   (`PREFIXES`, `identities`). All are reaped like a
   variant's infra, a network only past the long grace.
 - **Walls and stand-downs.** A cell waiting on a provider limit is stood
-  down (pause `limit-wall`, by=conduct), requeued at the front, and its lane
+  down (pause `limit-wall`, by=the run), requeued at the front, and its lane
   cools (`.orch/cooldown.<agent>`: the provider's reset hint, or 3 h);
-  expiry lifts the wall and retries. The other stand-downs conduct writes
+  expiry lifts the wall and retries. The other stand-downs the run writes
   (arm-stuck, phase-stalled-*, verify-wedged, silent-hang) are lifted after
   `STANDDOWN_COOL_S`, each lift spending one `MAX_RESPAWNS` repair, flagged
   when spent. **A repair, infra void or contract hit on a scored cell is
@@ -281,39 +281,39 @@ writes an `ALERT SETUP-FAILED` ledger line.
   driver's retry decision come from `fae/cell/faults.py` alone. Every
   supervisory age excludes host sleep (`.orch/host_sleep.json`), so a
   suspended laptop does not read as a stall.
-- **The weekly cap.** The claude lanes share one weekly cap: conduct reads
+- **The weekly cap.** The claude lanes share one weekly cap: the run reads
   the CLI's seven-day `rate_limit_event` from the attempt logs
   (`.orch/weekly.json`), parks the lanes listed in `BUDGET_LANES` (lane
   tags, default `fable,opus`) once utilization reaches `BUDGET_HOLD_AT`
   (0.75) with an ALERT line, and releases them within `BUDGET_RELEASE_H`
   (24 h) of the reset. A lane tag is covered only when it is listed.
-  `conduct-pause <agent> --admission-only` parks a lane by hand;
-  `conduct-resume` reverses it.
+  `experiment pause <agent> --admission-only` parks a lane by hand;
+  `experiment resume` reverses it.
 - **A spec is a FILE and its state is the directory it sits in.**
   `.orch/queue/<agent>/<seq>.<cid>.json` pending (lane order is the sequence
   number), `.orch/running/<agent>/` claimed, `.orch/done/<agent>/` terminal,
   `.orch/backups/` taken out of play by an operator verb. Every transition is
-  one `rename(2)`, so a conduct killed at any instant can neither lose nor
-  duplicate a spec. Conduct manages exactly the CLAIMED set — supervision
+  one `rename(2)`, so a run killed at any instant can neither lose nor
+  duplicate a spec. The run manages exactly the CLAIMED set — supervision
   never invents a claim — and ADOPTS a live cell with no claim at start, or
   its lane would read as free and run a second cell.
 - **A spawn's exit code decides whether a crash spends repair budget.**
   `LOCK_EXIT` (43: another loop owns the workspace) is never charged; the
-  claim stands for the next pass. Anything else conduct does not recognise
+  claim stands for the next pass. Anything else the run does not recognise
   is `GENERIC_CRASH_EXIT` (47) and is charged, like an infra HALT. The
   loop-lock refusal raises `Halt(msg, LOCK_EXIT)` explicitly, so a
   deterministic host fault never shares the benign race's number and
   respawns forever uncounted.
 - **One live cell per non-empty lane.** `--per-agent` (1) enforces it; `-n`
-  is the global ceiling and should equal the lane count (conduct warns). A
+  is the global ceiling and should equal the lane count (the run warns). A
   lane that needs more concurrency takes `--per-agent-override AGENT=N`,
   scoped to that lane. Lock serialization is not an admission concern: a
   cell parks on its variant's lock in-cell and takes it as soon as it frees.
 - **The exactly-1 rule: a cell verb acts directly iff it matches ONE cell;
-  bulk goes through conduct.** `cell resume CID` lifts locks and respawns
-  directly, cap-deferred (`--force` overrides). `conduct-resume
+  bulk goes through the run.** `cell resume CID` lifts locks and respawns
+  directly, cap-deferred (`--force` overrides). `experiment resume
   {all|AGENT…}` never spawns: it unparks lanes, lifts pause locks and
-  requeues interrupted cells at the front for conduct to admit under its
+  requeues interrupted cells at the front for the run to admit under its
   caps. A blanket resume leaves roster/manual pauses and cancelled cells
   alone; naming the agent lifts them.
 - **Every lock that can block declares a heartbeat phase** (`hb_phase`), or
@@ -497,11 +497,11 @@ its own variant's tools and SDK and no other's: a layer shared across
 variants would hand one variant's agent the other's interface to read. The
 cell resolves its image from its variant (`Cell.agent_image`); env
 `AGENT_IMAGE` forces one image on every variant and is for rig tests only. The base's
-clients follow upstream: conduct runs `fae/driver/image.py:ensure_agent` at
+clients follow upstream: the run runs `fae/driver/image.py:ensure_agent` at
 preflight and before every admission (upstream versions cached 1 h in
 `.orch/agent_image.json`), because a provider gates new models on a minimum
 client and a stale client fails every cell of that agent. A failed update at
-preflight stops conduct; before an admission it is logged and the cell
+preflight stops the run; before an admission it is logged and the cell
 starts on the image there is. An update pulls the base image through
 Docker's credential helper, so a helper that hangs blocks every update.
 Client versions are not part of the fingerprint; each attempt's AGENT ledger
@@ -556,7 +556,7 @@ every prior agent's memory — cross-run leakage invisible in the results.
   `stage_failed=deploy` (the infra came up and the agent's artifacts
   failed on it), a legitimate authoring failure that can finish in seconds.
   Anything else a bring-up raises is `nostart`, refunded. Transient API
-  faults (`fae/cell/faults.py`, the one vocabulary the driver and conduct
+  faults (`fae/cell/faults.py`, the one vocabulary the driver and the run
   share) retry the same attempt; scoring them corrupts iterations-to-green.
   A run that changed nothing and whose transcript names a wall is a wall
   whatever its exit code; an auth or config wall halts the cell (42).
@@ -566,7 +566,7 @@ every prior agent's memory — cross-run leakage invisible in the results.
   arrangement (`stage=contract`, `charge=False`); after the teardown the
   verdict stands. Either way `stand_down` names the broken promises, the
   driver writes a ledger ALERT and pauses the cell (`contract by=driver`);
-  conduct does not respawn it — the operator digs first.
+  the run does not respawn it — the operator digs first.
 - **A voided run is zeroed.** Every START restores the work tree to the one
   the last CHARGED verdict was judged on (the ledger's last `ITER … tree=`,
   or attempt 1's `pre tree`); the abandoned tree is checkpointed first and a
@@ -654,12 +654,12 @@ every prior agent's memory — cross-run leakage invisible in the results.
   and the root docs are not guarded.
 - **A drain is only a window because it stops CONDUCT.** Pausing covers
   cells that have a workspace; the scheduler is free to pop a spec that has
-  none. `conduct-pause all` stops conduct first; `conduct-pause M…` parks
-  those lanes. Conduct does not come back with `conduct-resume` — restart it
+  none. `experiment pause all` stops the run first; `experiment pause M…` parks
+  those lanes. The run does not come back with `experiment resume` — restart it
   deliberately.
-- **Stopping never destroys the backlog.** `conduct-stop` backs the queues
+- **Stopping never destroys the backlog.** `experiment stop` backs the queues
   (parked lanes included) up to `queue.<agent>.stopped-<ts>.jsonl` before it
-  clears them, and on `all` it stops conduct before touching them.
+  clears them, and on `all` it stops the run before touching them.
 - **Selectors are anchored at token boundaries**, and a cell verb that
   matches more than one cell is an error (the exactly-1 rule, §3); `stop`
   keeps `--dry-run` for the preview.

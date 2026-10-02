@@ -71,7 +71,7 @@ def _adopt_live_cells():
         (d / f"{cid}.json").write_text(json.dumps(_spec_of(st)) + "\n")
         n += 1
     if n:
-        print(f"conduct: adopted {n} live cell(s) started outside this run",
+        print(f"run: adopted {n} live cell(s) started outside this run",
               flush=True)
 
 
@@ -167,7 +167,7 @@ def _converge_running(frozen):
         elif rc in common.SYSTEMIC_EXITS:
             frozen.add(agent)
             print(f"  [{common._hhmm()}] lane {agent} FROZEN: repair spawn died "
-                  f"rc={rc} — fix the cause, then restart conduct", flush=True)
+                  f"rc={rc} — fix the cause, then restart `experiment run`", flush=True)
 
 
 def _conduct_preflight():
@@ -180,7 +180,7 @@ def _conduct_preflight():
     """
     ok, why = common.mutex.fs_enforces_flock(common.ORCH)
     if not ok:
-        print(f"conduct: STOP — filesystem locking is not enforced on\n"
+        print(f"run: STOP — filesystem locking is not enforced on\n"
               f"  {common.ORCH}\n"
               f"  detected: {why}\n"
               f"  Every arm cap, work slot and verify lock in this rig is a "
@@ -194,23 +194,23 @@ def _conduct_preflight():
               flush=True)
         return False
     if subprocess.run(["docker", "info"], capture_output=True).returncode != 0:
-        print("conduct: STOP — the docker daemon is not reachable. Start "
-              "Docker, then run conduct again.", flush=True)
+        print("run: STOP — the docker daemon is not reachable. Start "
+              "Docker, then run `experiment run` again.", flush=True)
         return False
     # the agent image every spawn uses: the base (built when missing, its
     # clients current) and the experiment's layer over it
-    if not image.ensure_agent(log=lambda t: print(f"conduct: {t}", flush=True)):
-        print("conduct: STOP — the agent image could not be built. "
+    if not image.ensure_agent(log=lambda t: print(f"run: {t}", flush=True)):
+        print("run: STOP — the agent image could not be built. "
               "Every spawn would die at preflight.", flush=True)
         return False
     # Every variant's own preflight — its daemon, its images (built here,
     # not under a cell), its tools — and a sweep of its stale infra:
     # what `cli.py experiment infra` shows, run once before admission.
     from fae.driver import rig as _rig
-    print("conduct: infra preflight", flush=True)
+    print("run: infra preflight", flush=True)
     bad = _rig._probe_variants()
     if bad:
-        print(f"conduct: NOTE — {bad} variant(s) refused their preflight; cells of "
+        print(f"run: NOTE — {bad} variant(s) refused their preflight; cells of "
               f"those variants will HALT.", flush=True)
     return True
 
@@ -247,7 +247,7 @@ def conduct(args):
     A lane whose spawn dies immediately with a systemic code (creds, empty
     AGENT_CMD, seed FATAL) is FROZEN and reported instead of drained into the
     failure; exit 43 (loop lock already held) just skips the spec. A parked
-    lane (see `conduct-pause M`) is never admitted from and never counts as
+    lane (see `experiment pause M`) is never admitted from and never counts as
     'done' — conduct idles while only parked backlog remains.
 
     Also the SUPERVISOR: every --supervise-interval it runs _supervise_pass
@@ -260,7 +260,7 @@ def conduct(args):
         # The backlog lives in the GLOBAL .orch: a scheduler running against
         # an alternative root would drain the scored queue into it. The test
         # root is spawn-by-hand only.
-        print(f"conduct refuses: WORKSPACES_DIR={common.WS} is not the scored root "
+        print(f"the run refuses: WORKSPACES_DIR={common.WS} is not the scored root "
               f"({_default_ws()}); the backlog is global and would be drained "
               f"into the wrong tree. Spawn validation cells by hand.",
               file=sys.stderr)
@@ -271,7 +271,7 @@ def conduct(args):
         try:
             _pid, _, _ = pidfile.read_text().partition(" ")
             os.kill(int(_pid), 0)
-            print(f"conduct: already running (pid {_pid}) — refusing a second "
+            print(f"run: already running (pid {_pid}) — refusing a second "
                   f"instance: two schedulers would each think they own the cap",
                   flush=True)
             return
@@ -299,7 +299,7 @@ def conduct(args):
     _old_out, _old_err = sys.stdout, sys.stderr
     sys.stdout = _Tee(_old_out, _logf)
     sys.stderr = _Tee(_old_err, _logf)
-    print(f"conduct[{os.getpid()}]: logging to {_logf.name}", flush=True)
+    print(f"run[{os.getpid()}]: logging to {_logf.name}", flush=True)
     if not _conduct_preflight():
         pidfile.unlink(missing_ok=True)
         sys.stdout, sys.stderr = _old_out, _old_err
@@ -319,7 +319,7 @@ def conduct(args):
     warned_lanes = None             # re-warn only when the lane count moves
     per_agent_override = getattr(args, "per_agent_override", None) or {}
     override_txt = (f", override {per_agent_override}" if per_agent_override else "")
-    print(f"conduct: global cap {n}, {args.per_agent}/agent{override_txt}, "
+    print(f"run: global cap {n}, {args.per_agent}/agent{override_txt}, "
           f"round-robin, poll {args.interval}s"
           + (f", supervision every {sup_interval}s" if sup_interval else
              ", supervision OFF") +
@@ -398,7 +398,7 @@ def conduct(args):
                 if parked_n:
                     if not parked_announced:
                         print(f"  [{common._hhmm()}] all live lanes empty, {parked_n} "
-                              f"spec(s) parked — idling (conduct-resume to "
+                              f"spec(s) parked — idling (experiment resume to "
                               f"reactivate)", flush=True)
                         parked_announced = True
                     time.sleep(args.interval)
@@ -473,7 +473,7 @@ def conduct(args):
                     queue.release(m, claimed)
                     frozen.add(m)
                     print(f"  [{common._hhmm()}] lane {m} FROZEN: spawn died rc={rc} — "
-                          f"fix the cause, then restart conduct", flush=True)
+                          f"fix the cause, then restart `experiment run`", flush=True)
                     break                      # order is stale; next round excludes it
                 else:
                     # unknown non-systemic death: hand the spec back to the
@@ -498,8 +498,8 @@ def conduct(args):
             time.sleep(args.interval)
     except KeyboardInterrupt:
         pidfile.unlink(missing_ok=True)
-        print(f"\nconduct: detached — {len(state.loop_parents())} loop(s) keep "
-              f"running; nothing new starts until `cli.py conduct run` runs again.")
+        print(f"\nrun: detached — {len(state.loop_parents())} loop(s) keep "
+              f"running; nothing new starts until `cli.py experiment run` runs again.")
     finally:
         sys.stdout, sys.stderr = _old_out, _old_err
         _logf.close()
@@ -509,7 +509,7 @@ def _stop_conductor():
     """TERM a live conduct and clear its pidfile. Returns True if one was
     signalled.
 
-    Shared by conduct-pause all and conduct-stop all: conduct is the ONLY thing that turns a
+    Shared by experiment pause all and experiment stop all: conduct is the ONLY thing that turns a
     queued spec into a running cell, so anything claiming to have stopped the
     fleet has to stop it. Liveness-checks the pid before signalling — a
     SIGKILLed conduct never reaches its own pidfile.unlink(), so a stale file
@@ -537,7 +537,7 @@ def _stop_conductor():
 
 def _spec_of(st):
     """The queue-spec equivalent of a cell's state — how an interrupted cell
-    re-enters the backlog (conduct-resume, supervision repair). NEVER fresh:
+    re-enters the backlog (experiment resume, supervision repair). NEVER fresh:
     attempts persist."""
     return dict(task=st["task"], variant=st["variant"], rep=int(st["rep"]), fresh=False)
 
@@ -571,7 +571,7 @@ def conduct_resume(args):
         known = _known_agents()
         bad = [m for m in scope if m not in known]
         if bad:
-            sys.exit(f"unknown agent(s): {', '.join(bad)} — conduct-resume "
+            sys.exit(f"unknown agent(s): {', '.join(bad)} — experiment resume "
                      f"takes AGENT names or `all` (lanes present: "
                      f"{', '.join(sorted(known)) or 'none'})")
     lanes = sorted(queue.lane_agent(d) for d in queue._parked_queues()) if blanket \
@@ -579,7 +579,7 @@ def conduct_resume(args):
     for m in lanes:
         r = queue.unpark_lane(m)
         if r == "resumed":
-            print(f"  queue[{m}]: unparked — conduct admits from it again")
+            print(f"  queue[{m}]: unparked — the run admits from it again")
             weekly.weekly_hold_clear(m)
         elif r == "conflict":
             print(f"  queue[{m}]: BOTH the live and the parked lane exist — "
@@ -636,11 +636,11 @@ def conduct_resume(args):
             if n_reset:
                 ops.RESPAWN_BOOK.write_text(json.dumps(book))
                 print(f"  respawn budgets reset for {n_reset} cell(s)")
-    hint = ("a running conduct admits them under its caps"
+    hint = ("a live `experiment run` admits them under its caps"
             if (common.ORCH / "conduct.pid").exists()
-            else "conduct is DOWN — nothing starts until you run: "
-                 "python3 cli.py conduct run")
-    print(f"conduct-resume: {lifted} lock(s) lifted, {requeued} cell(s) "
+            else "the run is DOWN — nothing starts until you run: "
+                 "python3 cli.py experiment run")
+    print(f"experiment resume: {lifted} lock(s) lifted, {requeued} cell(s) "
           f"requeued at front, NO loops spawned — {hint}")
 
 
@@ -652,13 +652,13 @@ def conduct_pause(args):
     then pause every non-terminal cell and wait for zero loops (plus
     FP-pinned verifiers). THE maintenance window for editing FP-guarded
     files, whose fingerprint is pinned per loop at start. Release with
-    `conduct-resume all` and restart conduct deliberately (it does NOT come
+    `experiment resume all` and restart conduct deliberately (it does NOT come
     back on its own).
 
     AGENT names (partial): park those lanes, pause those agents' running
     cells, return immediately; conduct keeps serving the other lanes.
     `--admission-only` parks the lanes and leaves the running cells to
-    finish (the old queue-pause). Release with `conduct-resume M...`.
+    finish (the old queue-pause). Release with `experiment resume M...`.
 
     Cells report PAUSED·drain. Same per-cell locks as `cell pause`, same
     cooperative exit — no separate mechanism and no separate state."""
@@ -668,12 +668,12 @@ def conduct_pause(args):
     admission_only = getattr(args, "admission_only", False)
     if blanket and admission_only:
         sys.exit("--admission-only is per-lane; the fleet-wide admission stop "
-                 "is stopping conduct itself (Ctrl-C, or conduct-pause all)")
+                 "is stopping the run itself (Ctrl-C, or experiment pause all)")
     if agents:
         known = _known_agents()
         bad = [m for m in agents if m not in known]
         if bad:
-            sys.exit(f"unknown agent(s): {', '.join(bad)} — conduct-pause "
+            sys.exit(f"unknown agent(s): {', '.join(bad)} — experiment pause "
                      f"takes AGENT names or `all` (lanes present: "
                      f"{', '.join(sorted(known)) or 'none'})")
     cids = ops.select_cells_many(agents or ["all"])
@@ -711,13 +711,13 @@ def conduct_pause(args):
                 print(f"  queue[{m}]: parked — conduct stops admitting from it")
         if admission_only:
             print(f"admission stopped for {', '.join(agents)} — running cells "
-                  f"finish undisturbed. Release with: conduct-resume "
+                  f"finish undisturbed. Release with: experiment resume "
                   f"{' '.join(agents)}")
             return
         ops.request_pause(cids, "drain")
         print(f"pause requested [drain] for {len(cids)} cell(s) of "
               f"{', '.join(agents)} — each loop stops at its next safe point. "
-              f"Release with: conduct-resume {' '.join(agents)}")
+              f"Release with: experiment resume {' '.join(agents)}")
         return
     # FULL drain. STOP CONDUCT FIRST. Pausing only covers cells that already
     # have a workspace; the scheduler is free to pop a spec that has none, and
@@ -764,8 +764,8 @@ def conduct_pause(args):
         except (ProcessLookupError, ValueError):
             pass
     print("DRAIN COMPLETE — no loops left; safe to edit FP-guarded files. "
-          "Release the window with: python3 cli.py conduct resume all  "
-          "(then restart the scheduler: python3 cli.py conduct run)")
+          "Release the window with: python3 cli.py experiment resume all  "
+          "(then restart the scheduler: python3 cli.py experiment run)")
 
 
 def _confirm_stop(blanket, agents, loops, pending, assume_yes):
@@ -786,9 +786,9 @@ def _confirm_stop(blanket, agents, loops, pending, assume_yes):
     print("  * agent containers removed; workspaces preserved")
     if blanket:
         print("  * conduct itself is TERMed — nothing starts until "
-              "`conduct run`")
+              "`experiment run`")
     print(f"  * queues are NOT touched: {pending} pending spec(s) stay queued")
-    print("  Use `conduct pause` instead for a graceful stop at the next "
+    print("  Use `experiment pause` instead for a graceful stop at the next "
           "attempt boundary.")
     if assume_yes:
         print("  Proceed? [y/N] y (--yes)")
@@ -807,7 +807,7 @@ def conduct_stop(args):
     """HARD halt NOW, scoped: TERM loops mid-attempt and remove containers.
     `all` also TERMs conduct. Queues are left alone — a stop halts what is
     RUNNING, and the backlog is not run state. RESUMABLE: cells read
-    PAUSED·stopped and come back via conduct-resume. The terminal verdict
+    PAUSED·stopped and come back via experiment resume. The terminal verdict
     lives elsewhere (`cell stop --cancel`). Confirms before acting."""
     scope = list(args.scope)
     blanket = ops._is_blanket(scope)
@@ -816,7 +816,7 @@ def conduct_stop(args):
         known = _known_agents()
         bad = [m for m in agents if m not in known]
         if bad:
-            sys.exit(f"unknown agent(s): {', '.join(bad)} — conduct-stop "
+            sys.exit(f"unknown agent(s): {', '.join(bad)} — experiment stop "
                      f"takes AGENT names or `all` (lanes present: "
                      f"{', '.join(sorted(known)) or 'none'})")
     def _in_scope(cid):
@@ -850,7 +850,7 @@ def conduct_stop(args):
         # must not silently un-pause a roster somebody parked on purpose
         print(f"note: {len(_held)} cell(s) stay paused ({', '.join(_held[:3])}"
               f"{'...' if len(_held) > 3 else ''}) — release with: "
-              f"cli.py conduct resume {' '.join(agents) if agents else 'all'}")
+              f"cli.py experiment resume {' '.join(agents) if agents else 'all'}")
     print(f"stopped [{'all' if blanket else ', '.join(agents)}]: "
           f"{'conduct stopped, ' if blanket else ''}"
           f"{len(loops)} loop(s) TERMed, containers removed "

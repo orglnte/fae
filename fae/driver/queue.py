@@ -38,9 +38,9 @@ def lane_dirs(include_parked=False):
 
 
 def _parked_queues():
-    """Operator-paused lanes (`conduct-pause M`). conduct never admits from
+    """Operator-paused lanes (`experiment pause M`). conduct never admits from
     them; they still count as backlog, so a fleet with ONLY parked work is
-    not 'done' — it is waiting for a conduct-resume."""
+    not 'done' — it is waiting for a experiment resume."""
     q = common.ORCH / "queue"
     if not q.is_dir():
         return []
@@ -231,3 +231,32 @@ def unpark_lane(agent):
         return "conflict"
     parked.rename(live)
     return "resumed"
+
+
+def pending_specs():
+    """[(agent, spec path, parked)] of every pending spec, lanes in name
+    order, each lane in its admission order."""
+    out = []
+    for d in lane_dirs(include_parked=True):
+        parked = d.name.endswith(".parked")
+        out += [(lane_agent(d), p, parked) for p in _dir_specs(d)]
+    return out
+
+
+def done_specs(agent=None):
+    """Terminal specs."""
+    base = common.ORCH / "done"
+    dirs = [base / agent] if agent else (sorted(d for d in base.iterdir() if d.is_dir())
+                                         if base.is_dir() else [])
+    return [p for d in dirs for p in _dir_specs(d)]
+
+
+def cancel(p, agent, stamp):
+    """QUEUED -> out of play, before admission: moved into the lock plane's
+    .to_be_deleted/<stamp>/queue/<agent>/, never deleted; moving it back
+    restores it."""
+    d = common.ORCH / ".to_be_deleted" / stamp / "queue" / agent
+    d.mkdir(parents=True, exist_ok=True)
+    dest = d / p.name
+    p.rename(dest)
+    return dest

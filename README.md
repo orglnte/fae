@@ -75,7 +75,7 @@ the agent image once, log Claude in inside it, and start one cell.
 bash ../fae/fae/agent-container/build.sh
 docker run -it --rm -v "$PWD/.agent-home/.claude:/home/node/.claude" fae-agent:latest claude auth login
 python3 cli.py cell spawn sonnet zig --rep 1
-python3 cli.py fleet-status   # its phase, its attempt, its verdict
+python3 cli.py experiment status   # its phase, its attempt, its verdict
 python3 cli.py results score  # the table
 ```
 
@@ -125,8 +125,8 @@ tool typically gets wrong:
 cd ../fae-terraform-vs-pulumi
 python3 cli.py experiment init && python3 cli.py experiment check
 python3 cli.py experiment smoke --full-gate                    # both tools' known answers, both scenarios
-python3 cli.py conduct queue-add sonnet --matrix --reps 5
-python3 cli.py conduct run -n 1                         # the scheduler; Ctrl-C detaches
+python3 cli.py queue add sonnet --matrix --reps 5
+python3 cli.py experiment run -n 1                         # the scheduler; Ctrl-C detaches
 python3 cli.py results score
 ```
 

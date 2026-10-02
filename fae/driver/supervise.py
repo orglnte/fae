@@ -1,7 +1,7 @@
 """The one automatic controller: judges every cell by MECHANISM (process
 alive? output growing? log advancing?) and repairs, requeues, or hands it
 back to the operator. Runs inside conduct's loop every --supervise-interval,
-and as the one-shot `reconcile` / `conduct diagnose` (dry).
+and as the one-shot `reconcile` / `experiment diagnose` (dry).
 
 Depends on fae/driver/ops.py for the one way a cell dies by conduct's hand
 (_teardown_cell/_variant_teardown/request_pause/_claimed) — one direction
@@ -281,7 +281,7 @@ def _supervise_pass(dry=False, only=""):
     MAX_RESPAWNS then human-flag; DONE cells get mandatory validation.
     Never touches workspace data. Runs inside conduct's loop every
     --supervise-interval, and as the one-shot `reconcile` /
-    `conduct diagnose` (dry)."""
+    `experiment diagnose` (dry)."""
     common.host_sleep_observe()
     _mp = common.mem_pressure()
     if _mp["level"] >= 2 and _mp["level"] != _MEM_ALERTED["level"]:
@@ -341,7 +341,7 @@ def _supervise_pass(dry=False, only=""):
             # A cell still inside verify_lock_acquire (last transition
             # AcquireVerify, no later one yet) that has held it past the
             # threshold: write an ALERT to the cell's own ledger, same shape
-            # as HOST-OVERLOADED, so it surfaces in fleet-status TRIAGE like
+            # as HOST-OVERLOADED, so it surfaces in experiment status TRIAGE like
             # any other alert — every other lane may be queued behind this
             # one global lock. Once per episode (dedup keyed on the
             # AcquireVerify ts itself, so a fresh verify re-alerts).
@@ -632,15 +632,15 @@ def conduct_diagnose(_args):
     print("— SUPERVISION (dry run) " + "—" * 36)
     _supervise_pass(dry=True)
     zs = zombies.find_zombies()
-    print(f"\n— ZOMBIES ({len(zs)}) — listed only; a running conduct reaps "
+    print(f"\n— ZOMBIES ({len(zs)}) — listed only; a live `experiment run` reaps "
           f"on the 2nd consecutive sighting")
     for kind, ident, owner, note in zs:
         print(f"  {kind:<10} {ident}  owner={owner}  {note}")
     live = state.loop_parents()
     up = (common.ORCH / "conduct.pid").exists()
     print(f"\n— ADMISSION PREVIEW — {len(live)} live loop(s), per-agent cap "
-          f"{common.PER_AGENT_CAP}, conduct {'UP' if up else 'DOWN'}"
-          + ("" if up else " (nothing admits until `conduct run`)"))
+          f"{common.PER_AGENT_CAP}, run {'UP' if up else 'DOWN'}"
+          + ("" if up else " (nothing admits until `experiment run`)"))
     for d in queue.lane_dirs(include_parked=True):
         m = queue.lane_agent(d)
         parked = d.name.endswith(".parked")
@@ -648,11 +648,11 @@ def conduct_diagnose(_args):
         claims = queue.running_specs(m)
         _cu = weekly._cooldown_until(m)
         if parked:
-            note = "parked — no admission until conduct-resume"
+            note = "parked — no admission until experiment resume"
         elif _cu > time.time():
             note = (f"limit-cooling until "
                     f"{datetime.fromtimestamp(_cu, timezone.utc):%m-%d %H:%M}Z "
-                    f"— conduct retries then")
+                    f"— the run retries then")
         elif len(claims) >= common.PER_AGENT_CAP:
             held = ", ".join(sorted(queue.spec_cid(p) for p in claims))
             note = f"HELD at {common.PER_AGENT_CAP}/lane — claimed: {held}"

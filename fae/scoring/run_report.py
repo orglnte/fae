@@ -82,7 +82,7 @@ def report(since: str | None = None) -> str:
     since_ts = _parse_since(since)
     done, live = collect(since_ts)
     when = (datetime.fromtimestamp(since_ts, timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
-            if since_ts else "all time (no conduct run found)")
+            if since_ts else "all time (no experiment run found)")
     out = [f"— COMPLETED THIS RUN (since {when}) —"]
     rows, tot_d, tot_g, tot_b = [], 0, 0, 0
     for trt in sorted(done, key=lambda t: -done[t]["done"]):

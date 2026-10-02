@@ -49,8 +49,8 @@ python3 cli.py experiment smoke      # one reference cell per way of being judge
 
 ```sh
 python3 cli.py cell spawn|pause|resume|stop|tail|log|seal|reverify …   # ONE cell
-python3 cli.py conduct run|pause|resume|stop|diagnose|reconcile|queue-add …
-python3 cli.py fleet-status                              # read-only table
+python3 cli.py experiment run|pause|resume|stop|diagnose|reconcile|queue-add …
+python3 cli.py experiment status                              # read-only table
 python3 cli.py results score|grade|validate|aggregate …
 python3 cli.py experiment init|check|infra|smoke|prepare|verb …   # the experiment this root runs; verb: its own commands
 python3 cli.py rig selftest|trace-reset|agent-image|zombies …          # the harness itself
@@ -58,10 +58,10 @@ python3 cli.py tools run <name> [args]                   # one instrument standa
 ```
 
 **The rule**: a verb acts directly iff it touches exactly one cell; anything
-matching more goes through `conduct` — one spawner, one cap owner. `cell
+matching more goes through `experiment run` — one spawner, one cap owner. `cell
 resume` respawns its one cell directly (cap-checked, `--force` overrides);
-`conduct resume {all|AGENT…}` never spawns — it unparks lanes, lifts pause
-locks and requeues interrupted cells at the FRONT, and a running conduct
+`experiment resume {all|AGENT…}` never spawns — it unparks lanes, lifts pause
+locks and requeues interrupted cells at the FRONT, and a running the run
 admits them under its caps.
 
 **The backlog is a directory tree, one file per spec** — pending in
@@ -70,13 +70,13 @@ terminal in `.orch/done/`, and shelved (never deleted) in `.orch/backups/`.
 Each transition is a single atomic rename, so an interrupted scheduler can
 neither lose nor duplicate work. **One live cell per non-empty lane** is the
 invariant: `--per-agent` (1) enforces it, `-n` is the global ceiling and
-should equal the lane count (conduct warns when it does not).
+should equal the lane count (the run warns when it does not).
 
 Everyday loop:
 
 ```sh
-python3 cli.py conduct queue-add AGENT --to-rep N --variant V   # fill backlog
-python3 cli.py conduct run        # THE scheduler AND supervisor, FOREGROUND:
+python3 cli.py queue add AGENT --to-rep N --variant V   # fill backlog
+python3 cli.py experiment run        # THE scheduler AND supervisor, FOREGROUND:
                                   # global cap 7, 1 live cell per agent,
                                   # starved-lanes-first round-robin; every
                                   # --supervise-interval (300s) it repairs
@@ -86,30 +86,30 @@ python3 cli.py conduct run        # THE scheduler AND supervisor, FOREGROUND:
                                   # detaches — live cells keep running;
                                   # admission AND supervision stop until it
                                   # is run again. The narration is the monitor.
-python3 cli.py conduct diagnose   # READ-ONLY: supervision dry run + zombies
+python3 cli.py experiment diagnose   # READ-ONLY: supervision dry run + zombies
                                   # + per-lane admission preview, no waiting
-python3 cli.py fleet-status       # fleet table; footer shows conduct: UP
+python3 cli.py experiment status       # fleet table; footer shows the run: UP
 python3 cli.py results score      # validate -> per-cell score.json -> table
 ```
 
-**conduct pause vs conduct stop**: `conduct pause all` is the graceful stop —
-stops conduct, pauses every cell cooperatively, waits (the FP-edit window);
-`conduct pause AGENT…` parks+pauses those lanes (`--admission-only` parks
-only; a parked lane shows `[PAUSED]` in status). `conduct stop {all|AGENT…}`
+**experiment pause vs experiment stop**: `experiment pause all` is the graceful stop —
+stops the run, pauses every cell cooperatively, waits (the FP-edit window);
+`experiment pause AGENT…` parks+pauses those lanes (`--admission-only` parks
+only; a parked lane shows `[PAUSED]` in status). `experiment stop {all|AGENT…}`
 is the hard stop — loops TERMed mid-attempt, containers removed, the scope's
-queues backed up then cleared; `all` also TERMs conduct. Both are resumable
-via `conduct resume`. The terminal per-cell verdict is `cell stop --cancel`
+queues backed up then cleared; `all` also TERMs the run. Both are resumable
+via `experiment resume`. The terminal per-cell verdict is `cell stop --cancel`
 (DONE·cancelled, never comes back); a plain `cell stop` is a resumable halt.
-There is no separate supervisor process any more: `conduct run` is the one
-controller and the one spawner (`cli.py conduct reconcile` remains as the
+There is no separate supervisor process any more: `experiment run` is the one
+controller and the one spawner (`cli.py experiment repair` remains as the
 one-shot engine verb; its `--watch` is gone by design).
 
 **Limit walls**: a quota-walled cell (WAITING·limit) is stood down
 cooperatively by the supervision sweep — its variant lock and work slot are
 freed, its spec requeued at the lane front, and the lane cools until the
 provider's reset hint (or 3h, `LIMIT_COOLDOWN_S`). Status shows
-`[LIMIT until hh:mmZ]`; conduct retries at expiry and re-arms the cooldown
-if the wall persists. Conduct also prints a liveness tick every ~10 polls
+`[LIMIT until hh:mmZ]`; the run retries at expiry and re-arms the cooldown
+if the wall persists. The run also prints a liveness tick every ~10 polls
 and, on a green, the attempt/gate detail (`GREEN cid (attempt 4/4, gate
 6/6)`).
 

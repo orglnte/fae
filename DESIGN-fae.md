@@ -98,7 +98,7 @@ A cell yields:
 
 1. **The engine** (`fae/`) owns everything that is not an experiment's
    choice: cells and their lifecycle, the ledger, the locks, the scheduler
-   and supervisor (`conduct`), restore-and-judge, the gate loop, the seal,
+   and supervisor (`experiment run`), restore-and-judge, the gate loop, the seal,
    the fingerprint, the image builder, the agent CLIs, grading, the taint
    framework, and conformance of the orchestration to its formal model. It
    names no experiment.
@@ -215,7 +215,7 @@ verify voids that verify. It hashes content rather than git objects, so an
 uncommitted edit changes it too, and an empty tree or a missing declared
 file is fatal rather than a quietly smaller surface. Hence the **drain
 rule**: the experiment tree and the engine's cell package change only in a
-drain window, with no cell running (`conduct pause all`, edit, `conduct
+drain window, with no cell running (`experiment pause all`, edit, `experiment
 resume all`); a resumed cell pins the new fingerprint.
 
 ## 7. Agents
@@ -237,9 +237,9 @@ is rebuilt whenever its content or the base changes.
 
 ## 8. Orchestration
 
-`conduct` is the only scheduler and the only supervisor. The backlog is a
+`experiment run` is the only scheduler and the only supervisor. The backlog is a
 directory tree with one file per spec, moved from queue to running to done
-by atomic renames. Conduct admits specs round-robin across agent lanes under
+by atomic renames. The run admits specs round-robin across agent lanes under
 a global cap and a per-lane cap; stands cells down on provider walls and
 cools their lane; holds budget lanes near a weekly usage cap; repairs
 crashed or hung cells by requeuing them; validates finished cells; and reaps

@@ -344,3 +344,45 @@ class TestShelveKeepsARestorableBackup(QueueCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCancelAndList(OrchTmpCase):
+    """`queue cancel` takes pending specs out of play, moved aside and never
+    deleted; running specs are not pending and are never touched. `queue
+    list` shows pending and running per lane."""
+
+    def spec(self, agent, cid):
+        rep = int(cid.rsplit("_r", 1)[1])
+        return runs.queue.enqueue(agent, {"variant": "beta_apidocs", "rep": rep})
+
+    def test_cancel_moves_matching_pending_specs_aside(self):
+        self.spec("aaa", "aaa_high_beta_apidocs_T1_r1")
+        self.spec("aaa", "aaa_high_beta_apidocs_T1_r2")
+        runs.ops.queue_cancel(runs.argparse.Namespace(selectors=["r1"], dry_run=False))
+        left = [runs.queue.spec_cid(p) for p in runs.queue.lane_specs("aaa")]
+        self.assertEqual(left, ["aaa_high_beta_apidocs_T1_r2"])
+        moved = list((self.orch / ".to_be_deleted").rglob("*.json"))
+        self.assertEqual([runs.queue.spec_cid(p) for p in moved], ["aaa_high_beta_apidocs_T1_r1"])
+
+    def test_dry_run_moves_nothing(self):
+        self.spec("aaa", "aaa_high_beta_apidocs_T1_r1")
+        runs.ops.queue_cancel(runs.argparse.Namespace(selectors=["all"], dry_run=True))
+        self.assertEqual(len(runs.queue.lane_specs("aaa")), 1)
+        self.assertFalse((self.orch / ".to_be_deleted").exists())
+
+    def test_a_running_spec_is_not_cancelled(self):
+        p = self.spec("aaa", "aaa_high_beta_apidocs_T1_r1")
+        runs.queue.claim("aaa", p)
+        runs.ops.queue_cancel(runs.argparse.Namespace(selectors=["all"], dry_run=False))
+        self.assertEqual(len(runs.queue.running_specs("aaa")), 1)
+
+    def test_list_shows_pending_and_running_per_lane(self):
+        runs.queue.claim("aaa", self.spec("aaa", "aaa_high_beta_apidocs_T1_r1"))
+        self.spec("aaa", "aaa_high_beta_apidocs_T1_r2")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            runs.render.queue_list(runs.argparse.Namespace(agents=[], done=False))
+        text = out.getvalue()
+        self.assertIn("aaa: 1 pending, 1 running", text)
+        self.assertIn("running  aaa_high_beta_apidocs_T1_r1", text)
+        self.assertIn("pending  aaa_high_beta_apidocs_T1_r2", text)

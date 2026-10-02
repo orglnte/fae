@@ -79,7 +79,7 @@ def queued_summary():
     rows, total = [], 0
     kinds = collections.Counter()
     live_loops = set(state.loop_parents())
-    # A parked lane is the operator's pause (`conduct-pause M`): its specs are
+    # A parked lane is the operator's pause (`experiment pause M`): its specs are
     # untouched, so they are still backlog — shown here tagged rather than
     # vanishing from the fleet picture.
     for d in queue.lane_dirs(include_parked=True):
@@ -133,7 +133,7 @@ def requeued(s):
 
 
 def display_state(s):
-    """STATE·why as fleet-status prints it; a requeued crash reads as queued."""
+    """STATE·why as experiment status prints it; a requeued crash reads as queued."""
     if requeued(s):
         return "QUEUED·interrupted"
     return s["state"] + (f"·{s['why']}" if s["why"] else "")
@@ -262,14 +262,14 @@ def render(flat=False, running_only=False):
             out.extend(qsec)
         live = sum(1 for n in boxes if n.startswith(common.AGENT_CONTAINER_PREFIX))
         _cp = common.ORCH / "conduct.pid"
-        conduct_s = "conduct: DOWN"
+        conduct_s = "run: DOWN"
         if _cp.exists():
             try:
                 _pid, _, _cap = _cp.read_text().partition(" ")
                 os.kill(int(_pid), 0)
-                conduct_s = f"conduct: UP ({_cap.strip() or '?'})"
+                conduct_s = f"run: UP ({_cap.strip() or '?'})"
             except (OSError, ValueError):
-                conduct_s = "conduct: DOWN (stale pidfile)"
+                conduct_s = "run: DOWN (stale pidfile)"
         out.append(f"\n{live} containers, {n_loops} loops, {conduct_s}, {datetime.now(timezone.utc):%H:%M:%S}Z")
         _mp = common.mem_pressure()
         if _mp["label"]:
@@ -288,7 +288,7 @@ def watch(args):
     """Live console — READ-ONLY. Zombies are listed so an operator can see
     them; nothing here acts on the fleet.
 
-    Supervision belongs to `conduct run`: it holds the schedule and knows what
+    Supervision belongs to `experiment run`: it holds the schedule and knows what
     it started. A console open in a terminal is not a controller, and one that
     acts is a second controller racing the first. `cli.py rig zombies --reap`
     is the operator's deliberate path."""
@@ -298,7 +298,7 @@ def watch(args):
             os.system("clear")
             print(render(args.flat, getattr(args, "running_only", False)))
             if zs:
-                print("\nZOMBIES (listed only — `conduct run` reaps, "
+                print("\nZOMBIES (listed only — `experiment run` reaps, "
                       "or `cli.py rig zombies --reap`):")
                 for kind, ident, owner, note in zs:
                     print(f"  {kind:<10} {ident}  owner={owner}  {note}")
@@ -359,5 +359,31 @@ def monitor(args):
             except (KeyboardInterrupt, EOFError):
                 ans = "y"
             if ans == "y":
-                print("monitor detached — runs continue (conduct-stop all to stop them)")
+                print("monitor detached — runs continue (experiment stop all to stop them)")
                 return
+
+
+def queue_list(args):
+    """The work list per agent lane: pending (in admission order, parked
+    lanes marked), running, and with --done the terminal specs."""
+    agents = set(args.agents or [])
+    pending = [(a, p, parked) for a, p, parked in queue.pending_specs()
+               if not agents or a in agents]
+    running = [p for p in queue.running_specs() if not agents or p.parent.name in agents]
+    lanes = sorted({a for a, _, _ in pending} | {p.parent.name for p in running})
+    if not lanes:
+        print("the queue is empty")
+    for lane in lanes:
+        mine = [(p, parked) for a, p, parked in pending if a == lane]
+        live = [p for p in running if p.parent.name == lane]
+        parked = any(pk for _, pk in mine)
+        print(f"{lane}{' (paused)' if parked else ''}: {len(mine)} pending, {len(live)} running")
+        for p in live:
+            print(f"  running  {queue.spec_cid(p)}")
+        for p, _ in mine:
+            print(f"  pending  {queue.spec_cid(p)}")
+    if args.done:
+        done = [p for p in queue.done_specs() if not agents or p.parent.name in agents]
+        print(f"done: {len(done)}")
+        for p in done:
+            print(f"  done     {p.parent.name:10s} {queue.spec_cid(p)}")
