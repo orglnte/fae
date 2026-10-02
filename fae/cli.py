@@ -9,35 +9,28 @@ verb; the rig's own: selftest, trace-reset, zombies) and the tail/log pair folde
 No orchestration logic is duplicated here.
 
 GROUPS
+  experiment  the experiment this root runs: set it up (init, check, infra,
+           smoke, prepare), run it (run, pause, resume, stop, status,
+           diagnose, repair), and its own commands (verb)
+  queue    the work list, pending specs only: add, list, cancel
   cell     exactly ONE named cell: spawn, pause, resume, stop, tail, log,
            seal, reverify
-  conduct  the queues' conductor — scheduler, supervisor, backlog, and every
-           bulk verb: run, pause, resume, stop, diagnose, queue-add, reconcile
   results  what the experiment produced, and whether to trust it: score,
            grade, validate, aggregate
-  experiment  the experiment this root runs: init, check, infra,
-           smoke, prepare, verb (the experiment's own commands)
   rig      the harness itself, not the experiment: selftest, trace-reset,
            agent-image, zombies
   tools    instruments/*.py scripts, run standalone for debugging — the
            harness path-loads and calls them in-process (verify.py); this
            is a separate, human-facing subprocess invocation, not a second
            way the harness reaches them
-plus top-level `fleet-status` — read-only observation is NOT conducting.
 
-MERGES
-  fleet-status     absorbs  status | watch | monitor   (--watch N, --walls)
-  results score    absorbs  score | aggregate          (--no-aggregate)
-  results grade    absorbs  grade
-  conduct queue-add absorbs spawn-matrix | top-up      (--matrix, --to-rep N; every active variant by default, --variant V)
-  conduct pause    absorbs  drain | queue-pause        (--admission-only)
-  conduct resume   absorbs  resume-all | queue-resume  (requeues, never spawns)
-  conduct stop     absorbs  stop-all                   (scoped: all | AGENT...)
-  conduct run      absorbs  reconcile --watch | watch's zombie reap
-  conduct diagnose absorbs  fleet reconcile --dry-run | fleet zombies
-
-TOP-LEVEL ALIAS: `status` stays reachable as a hidden alias of
-`fleet-status` — muscle memory and the operator's monitors.
+OPTIONS
+  experiment status  --watch N, --walls (the fleet table, live, or its walls)
+  results score      --no-aggregate
+  queue add          --matrix, --to-rep N; every active variant by default, --variant V
+  experiment pause   --admission-only
+  experiment resume  requeues, never spawns
+  experiment stop    scoped: all | AGENT...
 
 The driver (fae/cell) imports `driver.common.cell_id` and reads the
 experiment definition directly; nothing shells out to a hidden
@@ -72,16 +65,14 @@ def _ns(**kw):
 
 
 app = typer.Typer(add_completion=False, no_args_is_help=True,
-                  help="The fae orchestrator. Groups: experiment, cell, "
-                       "conduct, results, rig, tools.")
+                  help="FAE. Groups: experiment, queue, cell, results, rig, tools.")
 cell_app = typer.Typer(no_args_is_help=True, help="Act on exactly ONE named cell.")
-conduct_app = typer.Typer(no_args_is_help=True,
-                          help="The queues' conductor: scheduler, supervisor, "
-                               "backlog, and every bulk verb.")
+queue_app = typer.Typer(no_args_is_help=True,
+                        help="The work list: pending specs per agent lane.")
 results_app = typer.Typer(no_args_is_help=True, help="What the run produced, and whether to trust it.")
 experiment_app = typer.Typer(no_args_is_help=True,
                              help="The experiment this root runs: set it up, check it, "
-                                  "prove its pipeline.")
+                                  "run it, watch it.")
 rig_app = typer.Typer(no_args_is_help=True, help="The harness itself, not the experiment.")
 tools_app = typer.Typer(no_args_is_help=True,
                         help="instruments/*.py, run standalone for debugging — "
@@ -89,7 +80,7 @@ tools_app = typer.Typer(no_args_is_help=True,
 
 app.add_typer(experiment_app, name="experiment")
 app.add_typer(cell_app, name="cell")
-app.add_typer(conduct_app, name="conduct")
+app.add_typer(queue_app, name="queue")
 app.add_typer(results_app, name="results")
 app.add_typer(rig_app, name="rig")
 app.add_typer(tools_app, name="tools")
@@ -120,9 +111,9 @@ def cell_spawn(
 @cell_app.command("pause")
 def cell_pause(selectors: list[str] = typer.Argument(..., help=SEL + " Must match ONE cell."),
                reason: str = typer.Option("manual", "--reason",
-                                          help="recorded in .paused; roster/manual survive `conduct resume all`")):
+                                          help="recorded in .paused; roster/manual survive `experiment resume all`")):
     """Ask ONE cell to stop at its next safe point. Cooperative, not a signal.
-    Bulk pause is `conduct pause`."""
+    Bulk pause is `experiment pause`."""
     ops.pause(_ns(selectors=list(selectors), reason=reason))
 
 
@@ -132,7 +123,7 @@ def cell_resume(selectors: list[str] = typer.Argument(..., help=SEL + " Must mat
                                            help="respawn even past the per-agent live-cell cap")):
     """Lift ONE cell's locks, clear its reconcile flag, respawn its loop.
     Direct spawn is safe at n=1; the respawn still defers at the per-agent
-    cap (--force pushes past it). Bulk resume is `conduct resume`."""
+    cap (--force pushes past it). Bulk resume is `experiment resume`."""
     ops.resume(_ns(selectors=list(selectors), force=force))
 
 
@@ -144,7 +135,7 @@ def cell_stop(selectors: list[str] = typer.Argument(..., help=SEL + " Must match
                                            help="list what would be stopped and dropped, do nothing")):
     """Halt ONE cell NOW: loop killed, infra torn down, queued specs
     removed (backed up). Resumable — PAUSED·stopped — unless --cancel.
-    Files are never touched. Bulk stop is `conduct stop`."""
+    Files are never touched. Bulk stop is `experiment stop`."""
     ops.stop_cells(_ns(selectors=list(selectors), cancel=cancel, dry_run=dry_run))
 
 
@@ -181,10 +172,10 @@ def cell_reverify(selectors: Optional[list[str]] = typer.Argument(None, help=SEL
     ops.reverify(_ns(selectors=list(selectors) if selectors else ["all"], all=all_))
 
 
-# --- conduct: backlog -------------------------------------------------------
+# --- queue: the work list ---------------------------------------------------
 
-@conduct_app.command("queue-add")
-def conduct_queue_add(
+@queue_app.command("add")
+def queue_add(
     agent: str,
     matrix: bool = typer.Option(False, "--matrix",
                                 help="enqueue every active variant"),
@@ -200,11 +191,11 @@ def conduct_queue_add(
     dry_run: bool = typer.Option(False, "--dry-run",
                                  help="with --to-rep: print the plan, enqueue nothing"),
 ):
-    """Hand work to the conductor (was queue add / spawn-matrix / top-up).
+    """Add work to the queue.
 
     Enqueues rep-outer, so every variant advances together and a partial run
     still yields comparable n across them. Enqueue-only either way:
-    admission happens in `conduct run`.
+    admission happens in `experiment run`.
     """
     if not matrix and to_rep is None:
         raise typer.BadParameter("choose --matrix or --to-rep N")
@@ -215,13 +206,31 @@ def conduct_queue_add(
     ops.spawn_matrix(_ns(agent=agent, reps=reps, task=task, fresh=fresh))
 
 
-# --- conduct ----------------------------------------------------------------
+@queue_app.command("list")
+def queue_list(agents: Optional[list[str]] = typer.Argument(None, help="agent lane(s); default: all"),
+               done: bool = typer.Option(False, "--done", help="also list the terminal specs")):
+    """The work list per agent lane: pending in admission order (a paused
+    lane is marked), and what is running. Read-only."""
+    render.queue_list(_ns(agents=list(agents or []), done=done))
+
+
+@queue_app.command("cancel")
+def queue_cancel(selectors: list[str] = typer.Argument(..., help=SEL + " `all`: every pending spec."),
+                 dry_run: bool = typer.Option(False, "--dry-run",
+                                              help="list what would be cancelled, move nothing")):
+    """Take pending specs out of the queue before admission. They are moved
+    aside (.orch/.to_be_deleted/<ts>/queue/), never deleted; running cells
+    are not touched (that is `cell stop`)."""
+    ops.queue_cancel(_ns(selectors=list(selectors), dry_run=dry_run))
+
+
+# --- experiment: the run ----------------------------------------------------
 
 SCOPE = "`all` or agent lane name(s)."
 
 
-@conduct_app.command("run")
-def conduct_run(limit: int = typer.Option(7, "-n", "--limit",
+@experiment_app.command("run")
+def experiment_run(limit: int = typer.Option(7, "-n", "--limit",
                                           help="global cap on live cells"),
                 per_agent: int = typer.Option(1, "--per-agent",
                                               help="max live cells per agent"),
@@ -242,8 +251,8 @@ def conduct_run(limit: int = typer.Option(7, "-n", "--limit",
     zombies on a 2nd consecutive sighting.
 
     Foreground: run it and watch it. Ctrl-C detaches — live cells keep
-    running; nothing new starts and nothing is supervised until conduct
-    runs again.
+    running; nothing new starts and nothing is supervised until it runs
+    again.
 
     Raising --per-agent changes the host-load regime every lane is measured
     under, so it applies fleet-wide; --per-agent-override scopes a raise to
@@ -264,73 +273,72 @@ def conduct_run(limit: int = typer.Option(7, "-n", "--limit",
                         supervise_interval=supervise_interval))
 
 
-@conduct_app.command("diagnose")
-def conduct_diagnose():
+@experiment_app.command("diagnose")
+def experiment_diagnose():
     """READ-ONLY one-shot: what supervision would do (dry), current zombies
-    (listed, not reaped), and the admission preview per lane — the conduct
+    (listed, not reaped), and the admission preview per lane — the run
     loop's judgment without waiting for the loop."""
     supervise.conduct_diagnose(_ns())
 
 
-@conduct_app.command("pause")
-def conduct_pause(scope: list[str] = typer.Argument(..., help=SCOPE),
+@experiment_app.command("pause")
+def experiment_pause(scope: list[str] = typer.Argument(..., help=SCOPE),
                   admission_only: bool = typer.Option(False, "--admission-only",
                                                       help="park the lane(s) only; running cells finish"),
                   interval: int = typer.Option(60, "-n", "--interval",
                                                help="poll seconds while waiting (`all`)"),
                   dry_run: bool = typer.Option(False, "--dry-run",
                                                help="show what would be paused/parked, do nothing")):
-    """GRACEFUL bulk pause, everything preserved. `all`: stop conduct, pause
+    """GRACEFUL bulk pause, everything preserved. `all`: stop the run, pause
     every cell, wait for zero loops — the FP-edit window. Agent names: park
     those lanes + pause their running cells, return immediately.
-    Contrast: `conduct stop` kills NOW."""
+    Contrast: `experiment stop` kills NOW."""
     conduct.conduct_pause(_ns(scope=list(scope), admission_only=admission_only,
                               interval=interval, dry_run=dry_run))
 
 
-@conduct_app.command("resume")
-def conduct_resume(scope: list[str] = typer.Argument(..., help=SCOPE)):
+@experiment_app.command("resume")
+def experiment_resume(scope: list[str] = typer.Argument(..., help=SCOPE)):
     """Bulk resume WITHOUT spawning: unpark lanes, lift pause locks, requeue
-    interrupted cells at the FRONT of their lane. A running conduct admits
-    them under its caps — nothing starts while conduct is down. Blanket
+    interrupted cells at the FRONT of their lane. A live `experiment run`
+    admits them under its caps — nothing starts while it is down. Blanket
     `all` leaves roster/manual pauses and cancelled cells alone."""
     conduct.conduct_resume(_ns(scope=list(scope)))
 
 
-@conduct_app.command("stop")
-def conduct_stop(scope: list[str] = typer.Argument(..., help=SCOPE),
+@experiment_app.command("stop")
+def experiment_stop(scope: list[str] = typer.Argument(..., help=SCOPE),
                  yes: bool = typer.Option(False, "--yes", "-y",
                                           help="skip the confirmation")):
     """HARD halt NOW, scoped: loops TERMed mid-attempt, agent containers
-    removed; `all` also TERMs conduct. Queues are NOT touched. Warns and asks
-    to confirm first. Resumable (`conduct resume`); the terminal verdict is
-    `cell stop --cancel`. For a graceful stop use `conduct pause`."""
+    removed; `all` also TERMs the run. Queues are NOT touched. Warns and asks
+    to confirm first. Resumable (`experiment resume`); the terminal verdict is
+    `cell stop --cancel`. For a graceful stop use `experiment pause`."""
     conduct.conduct_stop(_ns(scope=list(scope), yes=yes))
 
 
-@conduct_app.command("reconcile")
-def conduct_reconcile(dry_run: bool = typer.Option(False, "--dry-run",
+@experiment_app.command("repair")
+def experiment_repair(dry_run: bool = typer.Option(False, "--dry-run",
                                                     help="preview repairs, write nothing"),
                       only: str = typer.Option("", "--only",
                                                help="restrict the sweep to this cid substring")):
     """One-shot supervision sweep — repair-requeue, DONE validation, zombie
-    reap. The engine verb `conduct run` calls the same sweep every
-    --supervise-interval; this is the one-shot equivalent."""
+    reap. `experiment run` calls the same sweep every --supervise-interval;
+    this is the one-shot equivalent."""
     supervise.reconcile(_ns(dry_run=dry_run, only=only))
 
 
-# --- fleet-status (top-level: read-only observation is NOT conducting) -------
-
-@app.command("fleet-status")
-def fleet_status(
+@experiment_app.command("status")
+def experiment_status(
     flat: bool = typer.Option(False, "--flat", help="one row per cell"),
     running_only: bool = typer.Option(False, "--running", help="only live cells"),
     watch: Optional[int] = typer.Option(None, "-w", "--watch",
-                                        help="refresh every N s (was `watch`)"),
+                                        help="refresh every N s"),
     walls: bool = typer.Option(False, "--walls",
-                               help="surface limit/AUTH walls (was `monitor`)"),
+                               help="surface limit/AUTH walls"),
 ):
-    """The fleet table. Absorbs the old status / watch / monitor."""
+    """The fleet table: every cell, its state and gate; --watch refreshes,
+    --walls surfaces limit/AUTH walls."""
     if walls:
         render.monitor(_ns(interval=watch or 60))
     elif watch:
@@ -585,10 +593,6 @@ def tools_run(ctx: typer.Context):
     raise typer.BadParameter(f"no instrument named {name!r} under "
                              + ", ".join(str(d) for d in _instrument_dirs()))
 
-
-# --- top-level alias: backward compatibility only ----------------------------
-# HIDDEN from --help on purpose: `fleet-status` is the surface to learn.
-app.command("status", hidden=True)(fleet_status)
 
 
 def main():

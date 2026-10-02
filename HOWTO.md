@@ -559,11 +559,11 @@ Start one cell in the background and watch it:
 
 ```sh
 EXPERIMENT_DIR=shout python3 cli.py cell spawn sonnet python --rep 1
-EXPERIMENT_DIR=shout python3 cli.py fleet-status
+EXPERIMENT_DIR=shout python3 cli.py experiment status
 EXPERIMENT_DIR=shout python3 cli.py cell tail sonnet_high_python_T1_r1
 ```
 
-`fleet-status` shows the cell's phase (`agent`, `verify`, a waiting phase),
+`experiment status` shows the cell's phase (`agent`, `verify`, a waiting phase),
 its attempt count against the budget and its gate progress. When it seals,
 the same files as in section 8 are under
 `workspaces.nosync/sonnet_high_python_T1_r1/`, plus one log per
@@ -571,17 +571,17 @@ attempt with the agent's full transcript.
 
 ## 11. Run the fleet
 
-An experiment is many cells, not one. `conduct` is the one scheduler and
+An experiment is many cells, not one. `experiment run` is the one scheduler and
 the one supervisor: you fill a backlog, it admits cells under its caps,
 repairs crashed ones, validates finished ones.
 
 ```sh
 # three reps of every active variant, for two agents
-EXPERIMENT_DIR=shout python3 cli.py conduct queue-add sonnet --matrix --reps 3
-EXPERIMENT_DIR=shout python3 cli.py conduct queue-add haiku  --matrix --reps 3
+EXPERIMENT_DIR=shout python3 cli.py queue add sonnet --matrix --reps 3
+EXPERIMENT_DIR=shout python3 cli.py queue add haiku  --matrix --reps 3
 
 # the scheduler, in the foreground; Ctrl-C detaches, cells keep running
-EXPERIMENT_DIR=shout python3 cli.py conduct run -n 2 --per-agent 1
+EXPERIMENT_DIR=shout python3 cli.py experiment run -n 2 --per-agent 1
 ```
 
 `-n` is the global cap and should equal the number of lanes; `--per-agent`
@@ -589,7 +589,7 @@ keeps one live cell per agent so lanes are comparable. In another
 terminal:
 
 ```sh
-EXPERIMENT_DIR=shout python3 cli.py fleet-status          # the table
+EXPERIMENT_DIR=shout python3 cli.py experiment status          # the table
 EXPERIMENT_DIR=shout python3 cli.py results run-report    # what this run produced so far
 EXPERIMENT_DIR=shout python3 cli.py results score         # validate -> score.json -> table
 ```

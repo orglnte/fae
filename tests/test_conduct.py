@@ -767,7 +767,7 @@ class TestConvergeBranches(ConductCase):
 
 
 class TestDiagnose(ConductCase):
-    """conduct diagnose is the read-only view of the same judgment: it must
+    """experiment diagnose is the read-only view of the same judgment: it must
     print the picture and change nothing."""
 
     def _diagnose(self):
@@ -788,7 +788,7 @@ class TestDiagnose(ConductCase):
         self.assertIn("SUPERVISION (dry run)", out)
         self.assertIn("fae-agent-x", out)
         self.assertIn("would admit", out)
-        self.assertIn("conduct DOWN", out)
+        self.assertIn("run DOWN", out)
 
     def test_changes_nothing(self):
         self.q("aaa", [self.spec(rep=r) for r in (1, 2)])

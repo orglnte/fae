@@ -80,71 +80,73 @@ class TestRetiredCommands(unittest.TestCase):
                      ["queue", "conduct"], ["queue", "pause", "opus"],
                      ["queue", "resume", "opus"], ["queue", "drain"],
                      ["queue", "stop-all"], ["drain"],
-                     ["queue", "add", "opus", "--matrix"],
                      ["fleet", "status"], ["fleet", "zombies"],
-                     ["fleet", "reconcile"]):
+                     ["fleet", "reconcile"],
+                     ["conduct", "run"], ["conduct", "queue-add", "opus", "--matrix"],
+                     ["conduct", "pause", "all"], ["conduct", "reconcile"],
+                     ["fleet-status"], ["status"]):
             result = runner.invoke(cli.app, argv)
             self.assertNotEqual(result.exit_code, 0, argv)
 
 
-class TestConductCommands(unittest.TestCase):
+class TestTheRunCommands(unittest.TestCase):
     def test_run(self):
-        (ns,), _ = invoke("conduct", ["conduct", "run", "-n", "5",
+        (ns,), _ = invoke("conduct", ["experiment", "run", "-n", "5",
                                       "--per-agent", "2", "--interval", "10"], mod=cli.conduct)
         self.assertEqual(vars(ns), dict(limit=5, per_agent=2, per_agent_override={},
                                         interval=10, supervise_interval=300))
 
     def test_run_per_model_override(self):
-        (ns,), _ = invoke("conduct", ["conduct", "run",
+        (ns,), _ = invoke("conduct", ["experiment", "run",
                                       "--per-agent-override", "haiku=3,opus=2"],
                           mod=cli.conduct)
         self.assertEqual(ns.per_agent_override, {"haiku": 3, "opus": 2})
 
     def test_run_supervision_off(self):
-        (ns,), _ = invoke("conduct", ["conduct", "run",
+        (ns,), _ = invoke("conduct", ["experiment", "run",
                                       "--supervise-interval", "0"], mod=cli.conduct)
         self.assertEqual(ns.supervise_interval, 0)
 
     def test_diagnose(self):
-        (ns,), _ = invoke("conduct_diagnose", ["conduct", "diagnose"], mod=cli.supervise)
+        (ns,), _ = invoke("conduct_diagnose", ["experiment", "diagnose"], mod=cli.supervise)
         self.assertEqual(vars(ns), {})
 
     def test_queue_add_matrix(self):
-        (ns,), _ = invoke("spawn_matrix", ["conduct", "queue-add", "opus",
+        (ns,), _ = invoke("spawn_matrix", ["queue", "add", "opus",
                                            "--matrix", "--reps", "5"], mod=cli.ops)
         self.assertEqual(vars(ns), dict(agent="opus", reps=5, task="T1",
                                         fresh=False))
 
     def test_queue_add_to_rep(self):
-        (ns,), _ = invoke("top_up", ["conduct", "queue-add", "opus",
+        (ns,), _ = invoke("top_up", ["queue", "add", "opus",
                                      "--to-rep", "10",
                                      "--variant", "beta_apidocs", "--dry-run"], mod=cli.ops)
         self.assertEqual(vars(ns), dict(agent="opus", to_rep=10, variants=["beta_apidocs"],
                                         task="T1", dry_run=True))
 
     def test_pause_full(self):
-        (ns,), _ = invoke("conduct_pause", ["conduct", "pause", "all",
+        (ns,), _ = invoke("conduct_pause", ["experiment", "pause", "all",
                                             "-n", "15", "--dry-run"], mod=cli.conduct)
         self.assertEqual(vars(ns), dict(scope=["all"], admission_only=False,
                                         interval=15, dry_run=True))
 
     def test_pause_partial_admission_only(self):
-        (ns,), _ = invoke("conduct_pause", ["conduct", "pause", "dsv4f",
+        (ns,), _ = invoke("conduct_pause", ["experiment", "pause", "dsv4f",
                                             "gemini", "--admission-only"], mod=cli.conduct)
         self.assertEqual(vars(ns), dict(scope=["dsv4f", "gemini"],
                                         admission_only=True, interval=60,
                                         dry_run=False))
 
     def test_resume(self):
-        (ns,), _ = invoke("conduct_resume", ["conduct", "resume", "opus", "haiku"], mod=cli.conduct)
+        (ns,), _ = invoke("conduct_resume", ["experiment", "resume", "opus", "haiku"], mod=cli.conduct)
         self.assertEqual(vars(ns), dict(scope=["opus", "haiku"]))
 
     def test_stop(self):
-        (ns,), _ = invoke("conduct_stop", ["conduct", "stop", "all"], mod=cli.conduct)
+        (ns,), _ = invoke("conduct_stop", ["experiment", "stop", "all"], mod=cli.conduct)
         self.assertEqual(vars(ns), dict(scope=["all"], yes=False))
 
     def test_stop_yes_plumbs(self):
-        (ns,), _ = invoke("conduct_stop", ["conduct", "stop", "all", "--yes"], mod=cli.conduct)
+        (ns,), _ = invoke("conduct_stop", ["experiment", "stop", "all", "--yes"], mod=cli.conduct)
         self.assertEqual(vars(ns), dict(scope=["all"], yes=True))
 
 
@@ -162,24 +164,34 @@ class TestResultsScore(unittest.TestCase):
         self.assertEqual(ns.impl, "py")
 
 
-class TestFleetStatus(unittest.TestCase):
+class TestExperimentStatus(unittest.TestCase):
     """status/watch/monitor live in fae/driver/render.py, not on a single verb
     name — the generic invoke() helper (which patches <mod>.<fn_name>
     directly) can't see the call, so these patch cli.render.status explicitly."""
 
-    def test_fleet_status_top_level(self):
+    def test_status_flat(self):
         with mock.patch.object(cli.render, "status") as m:
-            result = runner.invoke(cli.app, ["fleet-status", "--flat"])
+            result = runner.invoke(cli.app, ["experiment", "status", "--flat"])
         self.assertEqual(result.exit_code, 0, result.output)
         (ns,), _ = m.call_args
         self.assertEqual(vars(ns), dict(flat=True, running_only=False))
 
-    def test_status_alias_still_works(self):
+    def test_status_default(self):
         with mock.patch.object(cli.render, "status") as m:
-            result = runner.invoke(cli.app, ["status"])
+            result = runner.invoke(cli.app, ["experiment", "status"])
         self.assertEqual(result.exit_code, 0, result.output)
         (ns,), _ = m.call_args
         self.assertEqual(vars(ns), dict(flat=False, running_only=False))
+
+
+class TestQueueCommands(unittest.TestCase):
+    def test_list_takes_lanes_and_done(self):
+        (ns,), _ = invoke("queue_list", ["queue", "list", "opus", "--done"], mod=cli.render)
+        self.assertEqual(vars(ns), dict(agents=["opus"], done=True))
+
+    def test_cancel_takes_selectors_and_dry_run(self):
+        (ns,), _ = invoke("queue_cancel", ["queue", "cancel", "opus_r1", "--dry-run"], mod=cli.ops)
+        self.assertEqual(vars(ns), dict(selectors=["opus_r1"], dry_run=True))
 
 
 class TestRigCommands(unittest.TestCase):

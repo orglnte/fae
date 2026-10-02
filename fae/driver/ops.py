@@ -280,7 +280,7 @@ def pause(args):
     if len(cids) > 1:
         sys.exit(f"`pause` acts on exactly ONE cell; {' '.join(sels)!r} "
                  f"matches {len(cids)} — bulk pause goes through: "
-                 f"conduct-pause AGENT...|all")
+                 f"experiment pause AGENT...|all")
     request_pause(cids, args.reason)
     print(f"pause requested [{args.reason}] for {len(cids)} cell(s) — each loop "
           f"stops at its next safe point; workspaces are preserved")
@@ -393,7 +393,7 @@ def resume(args):
     if len(matches) > 1:
         sys.exit(f"`resume` acts on exactly ONE cell; {' '.join(sels)!r} "
                  f"matches {len(matches)} — bulk resume goes through: "
-                 f"conduct-resume AGENT...|all")
+                 f"experiment resume AGENT...|all")
     blanket = _is_blanket(sels)
     parents = state.loop_parents()
     touched = 0
@@ -691,7 +691,7 @@ def stop_cells(args):
     DONE·cancelled and never comes back (KilledStaysDead).
 
     Exactly ONE cell by the operator's 2026-08-12 rule: anything matching
-    more goes through conduct-stop, so there is a single bulk path and a
+    more goes through experiment stop, so there is a single bulk path and a
     single cap owner.
 
     Order matters and is the lesson of 2026-07-24: the stop request goes in
@@ -714,7 +714,7 @@ def stop_cells(args):
     if len(cids) + len(q_only) > 1:
         sys.exit(f"`stop` acts on exactly ONE cell; {' '.join(sels)!r} matches "
                  f"{len(cids)} cell(s) + {len(q_only)} queued spec(s) — bulk "
-                 f"stop goes through: conduct-stop AGENT...|all")
+                 f"stop goes through: experiment stop AGENT...|all")
     if getattr(args, "dry_run", False):
         verb = "cancel" if getattr(args, "cancel", False) else "stop"
         for cid in cids:
@@ -808,8 +808,8 @@ def spawn_matrix(args):
              for rep in range(1, args.reps + 1)
              for v in common.definition().active]
     n = sum(queue.enqueue(args.agent, s) is not None for s in specs)
-    print(f"enqueued {n} runs for {args.agent} — conduct admits them "
-          f"(start it if not running: python3 cli.py conduct run)"
+    print(f"enqueued {n} runs for {args.agent} — `experiment run` admits them "
+          f"(start it if not running: python3 cli.py experiment run)"
           + (f"; {len(specs) - n} already pending" if n < len(specs) else ""))
 
 
@@ -884,7 +884,7 @@ def spawn(args):
     if len(reps) != 1:
         sys.exit("`spawn` starts exactly ONE cell (operator rule, 2026-08-12); "
                  "for several reps enqueue them (top-up / queue add) and let "
-                 "conduct admit under its caps")
+                 "`experiment run` admit under its caps")
 
     if args.agent != "human":
         from fae.driver import image
@@ -1129,3 +1129,23 @@ def log(args):
             subprocess.run(["tail", "-n", "60", str(ws / name)])
             return
     print(f"no log under {ws}")
+
+def queue_cancel(args):
+    """Take pending specs out of the queue before admission: every pending
+    spec whose cid a selector matches (`all` matches all), moved aside by
+    queue.cancel, never deleted. Running and done specs are not pending and
+    are never touched."""
+    from datetime import datetime, timezone
+    hits = [(agent, p) for agent, p, _ in queue.pending_specs()
+            if any(s in ("all", "*") or _matches(queue.spec_cid(p), s) for s in args.selectors)]
+    if not hits:
+        print("cancel: no pending spec matches")
+        return []
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    for agent, p in hits:
+        if args.dry_run:
+            print(f"  would cancel  {agent:10s} {queue.spec_cid(p)}")
+        else:
+            dest = queue.cancel(p, agent, stamp)
+            print(f"  cancelled     {agent:10s} {queue.spec_cid(p)}  -> {dest.parent}")
+    return hits

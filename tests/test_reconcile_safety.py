@@ -1063,7 +1063,7 @@ class TestLeakedLockHolders(unittest.TestCase):
             self.assertRegex(argv, runs.zombies._VERIFY_HOLDER_ARGV)
             with mock.patch.object(runs.common, "sh", return_value=argv + "\n"):
                 self.assertTrue(runs.zombies._is_driver_pid(4242), argv)
-        for argv in ("python3 cli.py fleet-status", "python3 cli.py conduct run",
+        for argv in ("python3 cli.py experiment status", "python3 cli.py experiment run",
                      "python3 cli.py rig reverify x",    # wrong group: not a real invocation
                      "python3 cli.py experiment bench"):  # an experiment command runs only through verb
             self.assertNotRegex(argv, runs.zombies._VERIFY_HOLDER_ARGV)

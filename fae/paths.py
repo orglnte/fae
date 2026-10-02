@@ -15,7 +15,7 @@ ENGINE = Path(__file__).resolve().parent
 
 def root():
     """The experiment root: REPO_ROOT in the environment, else the working
-    directory — `fae conduct run` is run from the experiment repo's root."""
+    directory — `fae experiment run` is run from the experiment repo's root."""
     return Path(os.environ.get("REPO_ROOT") or Path.cwd()).resolve()
 
 

@@ -1,4 +1,4 @@
-"""What fleet-status and the supervisor call a cell that is only waiting:
+"""What experiment status and the supervisor call a cell that is only waiting:
 queued, or a long wait, never a crash or a stall."""
 import unittest
 from unittest import mock
