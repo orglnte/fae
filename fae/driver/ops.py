@@ -110,13 +110,13 @@ def _spawn_detached(argv, env, cid, what="spawn"):
     # exists, and refuses to lift a cancellation.
     state._unpause(cid)
     _crash_before_spawn(cid)
-    common.ORCH.mkdir(parents=True, exist_ok=True)
+    common.CONDUCT.mkdir(parents=True, exist_ok=True)
     # The driver's stderr for its whole life, not just the probe window: a
     # crash hours later must still have somewhere to land, so this is never
-    # unlinked. Under .orch rather than the workspace because a spawn precedes
+    # unlinked. Under .conduct rather than the workspace because a spawn precedes
     # prepare, and writing to <ws>/ would mint a workspace for a cell that
     # never started. Opened "w": one file per cid, so it cannot grow.
-    errf = common.ORCH / f"cell.{cid}.err"
+    errf = common.CONDUCT / f"cell.{cid}.err"
     with errf.open("w") as e:
         e.write(f"=== {datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ} "
                 f"{what} {' '.join(str(a) for a in argv)}\n")
@@ -479,8 +479,8 @@ def resume(args):
                              f"--force overrides; resume again later)")
                 print(f"  {cid}: {', '.join(acted)}")
                 continue
-        common.ORCH.mkdir(parents=True, exist_ok=True)
-        with common.fs_lock(common.ORCH / "respawn-book.lock"):
+        common.CONDUCT.mkdir(parents=True, exist_ok=True)
+        with common.fs_lock(common.CONDUCT / "respawn-book.lock"):
             book = {}
             if RESPAWN_BOOK.exists():
                 try:
@@ -529,7 +529,7 @@ def _shelve_specs(cids, why="stopped"):
                 queue.shelve(p, why)
                 n += 1
     if n:
-        print(f"  {n} spec(s) out of the backlog (restore from .orch/backups/)")
+        print(f"  {n} spec(s) out of the backlog (restore from .queues/backups/)")
     return n
 
 
@@ -937,7 +937,7 @@ def spawn(args):
 MAX_RESPAWNS = int(os.environ.get("MAX_RESPAWNS", 3))
 
 
-RESPAWN_BOOK = common.ORCH / "reconcile.respawns.json"
+RESPAWN_BOOK = common.CONDUCT / "reconcile.respawns.json"
 
 
 def _respawn_count(cid, bump=False):
@@ -949,8 +949,8 @@ def _respawn_count(cid, bump=False):
             except json.JSONDecodeError:
                 book = {}
         return book.get(cid, 0)
-    common.ORCH.mkdir(parents=True, exist_ok=True)
-    with common.fs_lock(common.ORCH / "respawn-book.lock"):
+    common.CONDUCT.mkdir(parents=True, exist_ok=True)
+    with common.fs_lock(common.CONDUCT / "respawn-book.lock"):
         book = {}
         if RESPAWN_BOOK.exists():
             try:

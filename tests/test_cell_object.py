@@ -287,38 +287,38 @@ class TestTheArena(CellTestCase):
     def test_it_places_locks_on_the_fd_numbers_the_hooks_expect(self):
         # The hooks flock /dev/fd/N by literal number; a different number is a
         # lock nobody takes.
-        a = cell.Arena(self.root / ".orch", work_slots=3).open()
+        a = cell.Arena(self.root / ".queues", work_slots=3).open()
         self.addCleanup(a.close)
         self.assertEqual(a.fds, (211, 212, 213))
 
     def test_an_arm_gets_its_own_block(self):
-        a = cell.Arena(self.root / ".orch", work_slots=2,
+        a = cell.Arena(self.root / ".queues", work_slots=2,
                        arm="beta", arm_slots=3).open()
         self.addCleanup(a.close)
         self.assertEqual(a.fds, (211, 212, 231, 232, 233))
 
     def test_the_files_are_the_ones_bash_opens(self):
-        a = cell.Arena(self.root / ".orch", work_slots=1, arm="keda",
+        a = cell.Arena(self.root / ".queues", work_slots=1, arm="keda",
                        arm_slots=1).open()
         self.addCleanup(a.close)
-        self.assertTrue((self.root / ".orch" / "work-slots" / "slot-1").exists())
-        self.assertTrue((self.root / ".orch" / "arm-keda.slots" / "slot-1").exists())
+        self.assertTrue((self.root / ".queues" / "work-slots" / "slot-1").exists())
+        self.assertTrue((self.root / ".queues" / "arm-keda.slots" / "slot-1").exists())
 
     def test_a_lock_DIRECTORY_is_refused(self):
         # mkdir locks and flock locks do not exclude each other at all, so a
         # tree holding both has no cap — refusing to start beats running
         # uncapped.
-        d = self.root / ".orch" / "work-slots" / "slot-1"
+        d = self.root / ".queues" / "work-slots" / "slot-1"
         d.mkdir(parents=True)
         with self.assertRaises(RuntimeError):
-            cell.Arena(self.root / ".orch", work_slots=1).open()
+            cell.Arena(self.root / ".queues", work_slots=1).open()
 
     def test_a_cap_over_the_reserved_block_is_refused(self):
         with self.assertRaises(RuntimeError):
-            cell.Arena(self.root / ".orch", work_slots=99).open()
+            cell.Arena(self.root / ".queues", work_slots=99).open()
 
     def test_closing_twice_is_a_no_op(self):
-        a = cell.Arena(self.root / ".orch", work_slots=1).open()
+        a = cell.Arena(self.root / ".queues", work_slots=1).open()
         a.close()
         a.close()
         self.assertEqual(a.fds, ())
@@ -955,7 +955,7 @@ class TestOneReleasePerSlot(CellTestCase):
     exactly one release however the cell ends."""
 
     def _holder(self):
-        d = self.root / "workspaces.nosync" / ".orch" / "work-slots"
+        d = self.root / "workspaces.nosync" / ".queues" / "work-slots"
         d.mkdir(parents=True, exist_ok=True)
         h = d / "slot-1.holder"
         h.write_text(f"{self.CID} 12345\n")

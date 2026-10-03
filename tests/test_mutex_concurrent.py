@@ -9,7 +9,7 @@ The invariant every test here checks is the same one: in the interleaving log
 the workers write, an IN is always followed by the matching OUT before any
 other IN appears. Two INs in a row means two holders — mutual exclusion lost.
 
-Each test locks inside a TemporaryDirectory. Nothing touches the live `.orch/`
+Each test locks inside a TemporaryDirectory. Nothing touches the live `.locks/`
 locks the fleet is using.
 """
 import os

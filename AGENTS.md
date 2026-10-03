@@ -102,9 +102,11 @@ A **cell** is one `(agent, variant, task, rep)` run, identified by
 a `cell_id` and owning one workspace under `<root>/workspaces.nosync/<cell_id>/`
 — or under another WORKSPACE ROOT named by `WORKSPACES_DIR`
 (`ws-test.nosync` holds harness-validation and smoke cells). Only cell
-PLACEMENT follows that root: the lock plane (`<root>/workspaces.nosync/.orch`
-— verify lock, slots, transitions.log, the queue) serializes the one
-physical rig and is shared by every workspace root, and each root's
+PLACEMENT follows that root: the scheduling plane under
+`<root>/workspaces.nosync/` (`fae/plane.py`: `.queues/` the queue, slots and
+agents' books, `.conduct/` the scheduler's own state, `.locks/` the verify,
+rig and loop locks, `transitions.log`) serializes the one physical rig and is
+shared by every workspace root, and each root's
 `safe_wipe` boundary stops at that root. A cell runs up to `ATTEMPT_BUDGET`
 (10) attempts; each attempt is author → restore-and-judge → verify. The cell
 ends green, failed, or revoked.
@@ -212,11 +214,11 @@ name and the infra's `verify_teardown` runs for the cell's last
 arrangement: what the verify provisioned outside itself does not die with
 its container. `cli.py cell stop` does the same.
 
-**`experiment run` refuses to start if `.orch`'s filesystem does not ENFORCE
+**`experiment run` refuses to start if the plane's filesystem does not ENFORCE
 flock** (`mutex.fs_enforces_flock`). A filesystem can accept flock without
 enforcing it, which would turn every cap into a no-op that reports success;
 the probe proves exclusion across a real second process. Probe by hand:
-`python3 fae/mutex.py fscheck <root>/workspaces.nosync/.orch`.
+`python3 fae/mutex.py fscheck <root>/workspaces.nosync/.locks`.
 
 | Lock | Scope | Held for | Protects |
 |---|---|---|---|
@@ -271,7 +273,7 @@ writes an `ALERT SETUP-FAILED` ledger line.
   variant's infra, a network only past the long grace.
 - **Walls and stand-downs.** A cell waiting on a provider limit is stood
   down (pause `limit-wall`, by=the run), requeued at the front, and its lane
-  cools (`.orch/cooldown.<agent>`: the provider's reset hint, or 3 h);
+  cools (`.queues/cooldown.<agent>`: the provider's reset hint, or 3 h);
   expiry lifts the wall and retries. The other stand-downs the run writes
   (arm-stuck, phase-stalled-*, verify-wedged, silent-hang) are lifted after
   `STANDDOWN_COOL_S`, each lift spending one `MAX_RESPAWNS` repair, flagged
@@ -279,20 +281,20 @@ writes an `ALERT SETUP-FAILED` ledger line.
   investigated at its first occurrence** — `MAX_RESPAWNS` bounds a loop, it
   is not an investigation budget. The wall wording, the reset hint and the
   driver's retry decision come from `fae/cell/faults.py` alone. Every
-  supervisory age excludes host sleep (`.orch/host_sleep.json`), so a
+  supervisory age excludes host sleep (`.conduct/host_sleep.json`), so a
   suspended laptop does not read as a stall.
 - **The weekly cap.** The claude lanes share one weekly cap: the run reads
   the CLI's seven-day `rate_limit_event` from the attempt logs
-  (`.orch/weekly.json`), parks the lanes listed in `BUDGET_LANES` (lane
+  (`.queues/weekly.json`), parks the lanes listed in `BUDGET_LANES` (lane
   tags, default `fable,opus`) once utilization reaches `BUDGET_HOLD_AT`
   (0.75) with an ALERT line, and releases them within `BUDGET_RELEASE_H`
   (24 h) of the reset. A lane tag is covered only when it is listed.
   `experiment pause <agent> --admission-only` parks a lane by hand;
   `experiment resume` reverses it.
 - **A spec is a FILE and its state is the directory it sits in.**
-  `.orch/queue/<agent>/<seq>.<cid>.json` pending (lane order is the sequence
-  number), `.orch/running/<agent>/` claimed, `.orch/done/<agent>/` terminal,
-  `.orch/backups/` taken out of play by an operator verb. Every transition is
+  `.queues/queue/<agent>/<seq>.<cid>.json` pending (lane order is the sequence
+  number), `.queues/running/<agent>/` claimed, `.queues/done/<agent>/` terminal,
+  `.queues/backups/` taken out of play by an operator verb. Every transition is
   one `rename(2)`, so a run killed at any instant can neither lose nor
   duplicate a spec. The run manages exactly the CLAIMED set — supervision
   never invents a claim — and ADOPTS a live cell with no claim at start, or
@@ -499,7 +501,7 @@ cell resolves its image from its variant (`Cell.agent_image`); env
 `AGENT_IMAGE` forces one image on every variant and is for rig tests only. The base's
 clients follow upstream: the run runs `fae/driver/image.py:ensure_agent` at
 preflight and before every admission (upstream versions cached 1 h in
-`.orch/agent_image.json`), because a provider gates new models on a minimum
+`.queues/agent_image.json`), because a provider gates new models on a minimum
 client and a stale client fails every cell of that agent. A failed update at
 preflight stops the run; before an admission it is logged and the cell
 starts on the image there is. An update pulls the base image through
@@ -507,7 +509,7 @@ Docker's credential helper, so a helper that hangs blocks every update.
 Client versions are not part of the fingerprint; each attempt's AGENT ledger
 line records the CLI that ran and its version in the image it ran in
 (`client=claude:2.1.286`, `-` when unreadable), probed once per image id
-and cached in `.orch/agent_clients.json`.
+and cached in `.queues/agent_clients.json`.
 
 `$AGENT_CLAUDE` is restaged **before every attempt**: the CLI keeps
 per-project memory and transcripts under `~/.claude/projects/<cwd>`, and
@@ -584,7 +586,7 @@ every prior agent's memory — cross-run leakage invisible in the results.
   else `tla_verify` on `PATH`; with neither, the check names the missing
   checker): `--tla-trace` replays
   one cell's ledger per attempt at verify-end; `--live-trace` replays the
-  global `.orch/transitions.log` against the spec (`cli.py experiment check
+  global `workspaces.nosync/transitions.log` against the spec (`cli.py experiment check
   --tla-trace`). A
   fresh prepare that wipes a workspace logs `Retire <cid>`: the id then names
   a NEW cell, which the replay judges from Init as `<cid>#<n>` — without it

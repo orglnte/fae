@@ -26,8 +26,8 @@ class TestACrashIsRecordedBeforeTheRespawn(OrchTmpCase):
     CID = "sonnet_high_beta_apidocs_T1_r1"
 
     def setUp(self):
-        super().setUp()   # temp tree + WS/ORCH/TRANSITIONS_LOG patched
-        self.log = self.orch / "transitions.log"
+        super().setUp()   # temp tree + WS and the scheduling plane patched
+        self.log = self.plane / "transitions.log"
 
     def trace(self, *lines):
         self.log.write_text("".join(

@@ -4,7 +4,7 @@ preview writing state.
 Money is at stake in both: an unordered respawn is a paid agent run, and a
 dry-run that flags a cell silently removes it from supervision.
 
-`runs.common.WS` / `runs.common.ORCH` are patched to a TemporaryDirectory in every test that
+`runs.common.WS` and the scheduling plane are patched to a TemporaryDirectory in every test that
 writes. Nothing touches the live workspace tree.
 """
 import os
@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-from _ctx import runs, ROOT
+from _ctx import runs, ROOT, patch_plane
 
 TS = "2026-07-30T09:00:00Z"
 
@@ -152,7 +152,7 @@ class TestAgentProgress(unittest.TestCase):
 
     def test_the_book_survives_a_corrupt_file(self):
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(runs.common, "ORCH", Path(d)):
+                mock.patch.multiple(runs.common, QUEUES=Path(d), CONDUCT=Path(d), LOCKS=Path(d)):
             (Path(d) / "agent-io.json").write_text("{not json")
             self.assertEqual(runs.supervise._agent_io_book(), {})
 
@@ -188,7 +188,7 @@ class TestTheEpochSeedIsComplete(unittest.TestCase):
 
     def test_lock_holders_are_read_from_the_mutex_files(self):
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(runs.common, "ORCH", Path(d)):
+                mock.patch.multiple(runs.common, QUEUES=Path(d), CONDUCT=Path(d), LOCKS=Path(d)):
             slots = Path(d) / "work-slots"
             (slots / "slot-1").mkdir(parents=True)
             (slots / "slot-1" / "holder").write_text("cell-a\n4242\n123\n")
@@ -200,7 +200,7 @@ class TestTheEpochSeedIsComplete(unittest.TestCase):
 
     def test_no_locks_held_reads_empty(self):
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(runs.common, "ORCH", Path(d)):
+                mock.patch.multiple(runs.common, QUEUES=Path(d), CONDUCT=Path(d), LOCKS=Path(d)):
             self.assertEqual(runs.rig._slot_holders(), set())
             self.assertEqual(runs.rig._verify_holder(), "")
 
@@ -283,13 +283,9 @@ class TestTheModelLearnsAboutKilledLoops(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.orch = Path(self._tmp.name)
-        self.log = self.orch / "transitions.log"
-        self.p = [mock.patch.object(runs.common, "ORCH", self.orch),
-                  mock.patch.object(runs.common, "TRANSITIONS_LOG", self.log),
-                  mock.patch.object(runs.common, "RECONCILE_LOG", self.orch / "r.log")]
-        for p in self.p:
-            p.start()
+        patch_plane(self, Path(self._tmp.name))
+        self.log = self.plane / "transitions.log"
+        self.p = []
 
     def tearDown(self):
         for p in self.p:
@@ -408,20 +404,10 @@ class TestDryRunWritesNothing(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
         self.ws = self.root / "ws"
-        self.orch = self.ws / ".orch"
-        self.orch.mkdir(parents=True)
         self.cid = "sonnet_high_beta_apidocs_T1_r1"
-        (self.ws / self.cid).mkdir()
-        self.patches = [mock.patch.object(runs.common, "WS", self.ws),
-                        mock.patch.object(runs.common, "ORCH", self.orch),
-                        mock.patch.object(runs.ops, "RESPAWN_BOOK",
-                                          self.orch / "respawns.json"),
-                        mock.patch.object(runs.common, "TRANSITIONS_LOG",
-                                          self.orch / "transitions.log"),
-                        # unpatched, _rec_log appends TEST lines into the
-                        # LIVE .orch/reconcile.log (observed 2026-08-12)
-                        mock.patch.object(runs.common, "RECONCILE_LOG",
-                                          self.orch / "reconcile.log")]
+        (self.ws / self.cid).mkdir(parents=True)
+        patch_plane(self, self.ws)
+        self.patches = [mock.patch.object(runs.common, "WS", self.ws)]
         for p in self.patches:
             p.start()
 
@@ -471,16 +457,12 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.orch = Path(self._tmp.name) / ".orch"
-        self.orch.mkdir(parents=True)
-        self.p = mock.patch.object(runs.common, "ORCH", self.orch)
-        self.p.start()
+        patch_plane(self, Path(self._tmp.name))
         self._probe = runs.ops.SPAWN_PROBE_S
         runs.ops.SPAWN_PROBE_S = 0.4
 
     def tearDown(self):
         runs.ops.SPAWN_PROBE_S = self._probe
-        self.p.stop()
         self._tmp.cleanup()
 
     def test_immediate_failure_returns_the_exit_code(self):
@@ -493,7 +475,7 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         rc = runs.ops._spawn_detached(["bash", "-c", "sleep 5"],
                                   dict(os.environ), "cell-y", "spawn")
         self.assertIsNone(rc)
-        self.assertTrue((self.orch / "cell.cell-y.err").exists(),
+        self.assertTrue((self.conduct / "cell.cell-y.err").exists(),
                         "a surviving driver has nowhere to write a traceback")
 
     def test_a_survivors_later_output_still_lands_in_it(self):
@@ -503,7 +485,7 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         runs.ops._spawn_detached(
             ["bash", "-c", 'sleep 0.8; echo "died later" >&2'],
             dict(os.environ), "cell-w", "spawn")
-        kept = self.orch / "cell.cell-w.err"
+        kept = self.conduct / "cell.cell-w.err"
         for _ in range(40):
             if "died later" in kept.read_text():
                 break
@@ -513,7 +495,7 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
     def test_stderr_is_kept_for_inspection_on_failure(self):
         runs.ops._spawn_detached(["bash", "-c", 'echo "boom" >&2; exit 43'],
                              dict(os.environ), "cell-z", "spawn")
-        kept = self.orch / "cell.cell-z.err"
+        kept = self.conduct / "cell.cell-z.err"
         self.assertTrue(kept.exists())
         self.assertIn("boom", kept.read_text())
 
@@ -528,9 +510,9 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         emitted = []
         # The Resume is gated on the LEDGER pause, exactly as replay judges
         # it — so the fixture seeds the Pause `stop` emits, into a patched
-        # log (this class patches ORCH only; the live ledger must stay clean).
+        # log (the live ledger must stay clean).
         with mock.patch.object(runs.common, "TRANSITIONS_LOG",
-                               self.orch / "transitions.log"):
+                               self.plane / "transitions.log"):
             runs.common._emit_transition("Pause", cid, "reason=stopped")
             with mock.patch.object(runs.common, "_emit_transition",
                                    side_effect=lambda a, c, *r: emitted.append((a, c))):
@@ -573,11 +555,10 @@ class SweepCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.ws = Path(self._tmp.name) / "ws"
-        self.orch = self.ws / ".orch"
-        self.orch.mkdir(parents=True)
         self.cid = "sonnet_high_beta_apidocs_T1_r1"
         self.cell = self.ws / self.cid
-        self.cell.mkdir()
+        self.cell.mkdir(parents=True)
+        patch_plane(self, self.ws)
         (self.cell / "iterations.log").touch()
         self.patches = [
             # _teardown_cell waits for the loop to exit, and these suites
@@ -585,10 +566,6 @@ class SweepCase(unittest.TestCase):
             # forever and the full grace is burned in a unit test.
             mock.patch.object(runs.ops, "_await_exit", return_value=True),
             mock.patch.object(runs.common, "WS", self.ws),
-            mock.patch.object(runs.common, "ORCH", self.orch),
-            mock.patch.object(runs.ops, "RESPAWN_BOOK", self.orch / "respawns.json"),
-            mock.patch.object(runs.common, "TRANSITIONS_LOG", self.orch / "trans.log"),
-            mock.patch.object(runs.common, "RECONCILE_LOG", self.orch / "rec.log"),
             mock.patch.object(runs.state, "loop_pids", return_value={}),
         ]
         for p in self.patches:
@@ -600,7 +577,7 @@ class SweepCase(unittest.TestCase):
               only="", ps="", validate_error=None):
         doc = {"reverify_active": False, "gate": 0, "att": 1, "events": 3, "verdict": None}
         doc.update(ledger_doc or {})
-        # only the cell dir is a cell: .orch lives under WS and cell_state
+        # only the cell dir is a cell: the plane lives under WS and cell_state
         # returns None for it in production
         with mock.patch.object(runs.state, "cell_state",
                                side_effect=lambda w, *a: st
@@ -638,7 +615,7 @@ class TestSweepClassification(SweepCase):
             val, _, _ = self.sweep(self.st(state="DONE", why="green"),
                                    validate_error=TypeError("str / str"))
             val.assert_called_once()
-        log = (self.orch / "rec.log").read_text()
+        log = (self.conduct / "reconcile.log").read_text()
         self.assertEqual(log.count("validation FAILED"), 1, log)
         self.assertIn("TypeError: str / str", log)
 
@@ -663,7 +640,7 @@ class TestSweepClassification(SweepCase):
              mock.patch.object(runs.supervise.queue, "lane_has", return_value=queued):
             for _ in range(n):
                 self.sweep(self.st(state="CRASHED", why="loop", events=5))
-        log = self.orch / "rec.log"
+        log = self.conduct / "reconcile.log"
         return log.read_text() if log.exists() else ""
 
     def test_a_crashed_cell_waiting_in_its_lane_is_not_reported_every_sweep(self):
@@ -696,7 +673,7 @@ class TestSweepClassification(SweepCase):
     def test_an_agent_crash_asks_for_a_human(self):
         _, _, kill = self.sweep(self.st(why="agent", detail="creds expired"))
         kill.assert_not_called()
-        self.assertIn("needs a", (self.orch / "rec.log").read_text())
+        self.assertIn("needs a", (self.conduct / "reconcile.log").read_text())
 
     def test_a_stranded_reverify_repairs_the_ledger(self):
         old = time.time() - 10 * runs.supervise.T_HANG
@@ -729,7 +706,7 @@ class TestSweepClassification(SweepCase):
                                 live={self.cid: 4242},
                                 boxes={f"fae-agent-{self.cid}"})
         kill.assert_not_called()
-        self.assertIn("STALL-BUT-ALIVE", (self.orch / "rec.log").read_text())
+        self.assertIn("STALL-BUT-ALIVE", (self.conduct / "reconcile.log").read_text())
 
 
 class TestVerifyHeldAlert(SweepCase):
@@ -747,7 +724,7 @@ class TestVerifyHeldAlert(SweepCase):
     def _acquire(self, seconds_ago):
         ts = datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
         line = f"{ts:%Y-%m-%dT%H:%M:%SZ}\tAcquireVerify\t{self.cid}\tdeploy0=0\n"
-        (self.orch / "trans.log").write_text(line)
+        (self.plane / "transitions.log").write_text(line)
 
     def test_a_verify_held_past_the_threshold_is_alerted(self):
         self._acquire(runs.supervise.VERIFY_HELD_ALERT_S + 30)
@@ -837,16 +814,15 @@ class TestAStaleArmSlotSidecarIsNotAZombieForever(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.orch = Path(self._tmp.name) / "orch"
         self.ws = Path(self._tmp.name) / "ws"
         self.ws.mkdir()
-        slots = self.orch / "arm-alpha.slots"
+        patch_plane(self, Path(self._tmp.name) / "plane")
+        slots = self.queues / "arm-alpha.slots"
         slots.mkdir(parents=True)
         self.slot = slots / "slot-2"
         self.slot.touch()
         (slots / "slot-2.holder").write_text("sonnet_high_alpha_apidocs_T1_r6 54638 1\n")
         self.patches = [
-            mock.patch.object(runs.common, "ORCH", self.orch),
             mock.patch.object(runs.common, "WS", self.ws),
             mock.patch.object(runs.state, "loop_parents", return_value={}),
             mock.patch.object(runs.zombies, "_leaked_lock_holders", return_value=[]),
@@ -886,7 +862,7 @@ class TestVerifyWedgedStandsTheCellDown(SweepCase):
 
     def _acquire(self, seconds_ago):
         ts = datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
-        (self.orch / "trans.log").write_text(
+        (self.plane / "transitions.log").write_text(
             f"{ts:%Y-%m-%dT%H:%M:%SZ}\tAcquireVerify\t{self.cid}\tdeploy0=0\n")
 
     # ABSOLUTE seconds against PINNED thresholds. Deriving the hold from the
@@ -1012,11 +988,9 @@ class TestLeakedLockHolders(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.orch = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
-        p = mock.patch.object(runs.common, "ORCH", self.orch)
-        p.start(); self.addCleanup(p.stop)
-        (self.orch / "rig-lock").write_text("")
+        patch_plane(self, Path(self._tmp.name))
+        (self.locks / "rig-lock").write_text("")
 
     def _find(self, *, held, entitled_running, fd_pids, alive=True, loops=None):
         with mock.patch.object(runs.mutex, "probe_held", return_value=held), \

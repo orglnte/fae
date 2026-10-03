@@ -511,7 +511,7 @@ def _arm_slot_of(arm, cid):
     if not arm:
         return None
     for i in range(1, 33):
-        slot = common.ORCH / f"arm-{arm}.slots" / f"slot-{i}"
+        slot = common.QUEUES / f"arm-{arm}.slots" / f"slot-{i}"
         if not slot.exists():
             break
         if mutex.holder_name(slot) != cid or not _lock_is_held(slot):
@@ -539,7 +539,7 @@ def arm_wait(ws):
         return None
     held = []
     for i in range(1, 33):
-        slot = common.ORCH / f"arm-{arm}.slots" / f"slot-{i}"
+        slot = common.QUEUES / f"arm-{arm}.slots" / f"slot-{i}"
         if not slot.exists():
             break
         if _lock_is_held(slot):
@@ -555,7 +555,7 @@ def arm_wait(ws):
 
 def slot_wait_detail():
     """How many work slots are occupied, for a cell queued on the semaphore."""
-    slots_dir = common.ORCH / "work-slots"
+    slots_dir = common.QUEUES / "work-slots"
     try:
         n = int(os.environ.get("WORK_SLOTS", 7))
     except ValueError:

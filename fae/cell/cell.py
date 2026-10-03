@@ -52,6 +52,7 @@ from .verify import (RUN_OUT, Ctx, Verdict, _mutex_module as _load_mutex, run_ve
 _mutex = _load_mutex()
 
 from fae import paths as _paths  # noqa: E402
+from fae import plane as _plane  # noqa: E402
 
 HARNESS = _paths.ENGINE
 ROOT = _paths.ROOT
@@ -316,7 +317,7 @@ class Cell:
     def _transitions_log(self):
         return Path(os.environ.get(
             "TRANSITIONS_LOG",
-            self.root / "workspaces.nosync" / ".orch" / "transitions.log"))
+            _plane.transitions_log(self.root)))
 
     def note_pause(self):
         """Mark this cell paused before a StandDown — without doubling the
@@ -550,9 +551,9 @@ class Cell:
         process's fd around the verifier subprocess, which inherits no fd.
         Returns the open file (closing it is the release), or None past the
         wait deadline or on an operator pause."""
-        orch = self.root / "workspaces.nosync" / ".orch"
-        d = Path(self.conf.get("RIG_LOCK_DIR") or orch / "rig-lock") if name == "rig" \
-            else orch / f"{name}-lock"
+        locks = _plane.locks(self.root)
+        d = Path(self.conf.get("RIG_LOCK_DIR") or locks / "rig-lock") if name == "rig" \
+            else locks / f"{name}-lock"
         d.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.time() + int(self.conf.get("RIG_LOCK_WAIT_S") or 3600)
         fh = _mutex.open_lock(d)
@@ -967,7 +968,7 @@ class Cell:
     def arena(self, work_slots=None):
         arm = self.arm
         s = self.variant_cls
-        return Arena(self.root / "workspaces.nosync" / ".orch",
+        return Arena(_plane.queues(self.root),
                      work_slots=int(work_slots
                                     or self.conf.get("WORK_SLOTS", 7)),
                      arm=arm,
@@ -984,7 +985,7 @@ class Cell:
         never held by a cell that intends to exit.
         """
         d = Path(self.conf.get("VERIFY_LOCK_DIR")
-                 or self.root / "workspaces.nosync" / ".orch" / "verify-lock")
+                 or _plane.locks(self.root) / "verify-lock")
         d.parent.mkdir(parents=True, exist_ok=True)
         fh = _mutex.open_lock(d)
         while not _mutex.try_fd(fh):
@@ -1001,7 +1002,7 @@ class Cell:
     def loop_lock(self):
         """Exclusive claim on this workspace. Returns the open file, or None if
         another loop already owns the cell."""
-        d = self.root / "workspaces.nosync" / ".orch" / "loop-locks"
+        d = _plane.locks(self.root) / "loop-locks"
         d.mkdir(parents=True, exist_ok=True)
         fh = _mutex.open_lock(d / self.cid)
         if not _mutex.try_fd(fh):
@@ -1047,13 +1048,13 @@ class Cell:
         """
         slots = [fd for fd in arena.fds if fd < _arena_mod.FD_ARM_BASE]
         arms = [fd for fd in arena.fds if fd >= _arena_mod.FD_ARM_BASE]
-        orch = self.root / "workspaces.nosync" / ".orch"
+        queues = _plane.queues(self.root)
 
         self.hb(Phase.SLOT_WAIT, 0)
         got = _mutex.wait_fds(slots, self.cid, "work-slots")
         if got is None:
             return "slot-queue"
-        _mutex.note_holder(orch / "work-slots" / f"slot-{got - _arena_mod.FD_SLOT_BASE}",
+        _mutex.note_holder(queues / "work-slots" / f"slot-{got - _arena_mod.FD_SLOT_BASE}",
                            self.cid, os.getpid())
         self.apply(T.ACQUIRE_SLOT)
 
@@ -1063,7 +1064,7 @@ class Cell:
             if got is None:
                 return "arm-lock-queue"
             _mutex.note_holder(
-                orch / f"arm-{self.arm}.slots" / f"slot-{got - _arena_mod.FD_ARM_BASE}",
+                queues / f"arm-{self.arm}.slots" / f"slot-{got - _arena_mod.FD_ARM_BASE}",
                 self.cid, os.getpid())
         return True
 
@@ -1125,10 +1126,10 @@ class Cell:
         """Drop every slot holder note naming this cell. The fd is the lock —
         the notes are the fleet's display of who holds what — so they must
         go on EVERY exit, or a halted cell reads as a zombie holder."""
-        orch = self.root / "workspaces.nosync" / ".orch"
-        dirs = [orch / "work-slots"]
+        queues = _plane.queues(self.root)
+        dirs = [queues / "work-slots"]
         if self.arm:
-            dirs.append(orch / f"arm-{self.arm}.slots")
+            dirs.append(queues / f"arm-{self.arm}.slots")
         for d in dirs:
             for holder in d.glob("slot-*.holder"):
                 try:
@@ -1326,9 +1327,8 @@ class Cell:
         cli = self.conf.get("AGENT_CLI", "claude")
         try:
             from . import image as _image
-            orch = self.root / "workspaces.nosync" / ".orch"
             v = _image.client_versions(self.conf.get("AGENT_IMAGE") or self.agent_image(),
-                                       orch / "agent_clients.json").get(cli)
+                                       _plane.queues(self.root) / "agent_clients.json").get(cli)
         except Exception:       # an unreadable version never costs an attempt
             v = None
         return f"client={cli}:{v or '-'}"

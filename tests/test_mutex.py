@@ -7,7 +7,7 @@ does a pause stand us down, what does the CLI return, and does the filesystem
 probe reach the right verdict.
 
 Every test locks inside a TemporaryDirectory. Nothing touches the live
-`.orch/` locks the fleet is using.
+`.locks/` the fleet is using.
 """
 import errno
 import os

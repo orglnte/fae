@@ -178,10 +178,10 @@ def _conduct_preflight():
     until it exists. Docker itself and the arm tools are NOT installed: that
     is a machine-level change, and it is reported instead.
     """
-    ok, why = common.mutex.fs_enforces_flock(common.ORCH)
+    ok, why = common.mutex.fs_enforces_flock(common.LOCKS)
     if not ok:
         print(f"run: STOP — filesystem locking is not enforced on\n"
-              f"  {common.ORCH}\n"
+              f"  {common.LOCKS}\n"
               f"  detected: {why}\n"
               f"  Every arm cap, work slot and verify lock in this rig is a "
               f"flock(2) on a file in that directory. Without enforcement each "
@@ -190,7 +190,7 @@ def _conduct_preflight():
               f"  Fix: put workspaces.nosync on a local disk. A network mount, "
               f"a synced folder, or some virtiofs/9p shares are the usual "
               f"causes.\n"
-              f"  Probe it yourself: python3 fae/mutex.py fscheck {common.ORCH}",
+              f"  Probe it yourself: python3 fae/mutex.py fscheck {common.LOCKS}",
               flush=True)
         return False
     if subprocess.run(["docker", "info"], capture_output=True).returncode != 0:
@@ -257,7 +257,7 @@ def conduct(args):
     """
     n = args.limit
     if not _ws_is_default():
-        # The backlog lives in the GLOBAL .orch: a scheduler running against
+        # The backlog lives in the GLOBAL .queues: a scheduler running against
         # an alternative root would drain the scored queue into it. The test
         # root is spawn-by-hand only.
         print(f"the run refuses: WORKSPACES_DIR={common.WS} is not the scored root "
@@ -265,8 +265,8 @@ def conduct(args):
               f"into the wrong tree. Spawn validation cells by hand.",
               file=sys.stderr)
         return 2
-    common.ORCH.mkdir(parents=True, exist_ok=True)
-    pidfile = common.ORCH / "conduct.pid"
+    common.CONDUCT.mkdir(parents=True, exist_ok=True)
+    pidfile = common.CONDUCT / "conduct.pid"
     if pidfile.exists():
         try:
             _pid, _, _ = pidfile.read_text().partition(" ")
@@ -515,7 +515,7 @@ def _stop_conductor():
     SIGKILLed conduct never reaches its own pidfile.unlink(), so a stale file
     can name a RECYCLED pid, and TERMing that hits an unrelated process.
     """
-    pf = common.ORCH / "conduct.pid"
+    pf = common.CONDUCT / "conduct.pid"
     if not pf.exists():
         return False
     try:
@@ -624,8 +624,8 @@ def conduct_resume(args):
         if acted:
             print(f"  {cid}: {', '.join(acted)}")
     if budget_resets:
-        common.ORCH.mkdir(parents=True, exist_ok=True)
-        with common.fs_lock(common.ORCH / "respawn-book.lock"):
+        common.CONDUCT.mkdir(parents=True, exist_ok=True)
+        with common.fs_lock(common.CONDUCT / "respawn-book.lock"):
             book = {}
             if ops.RESPAWN_BOOK.exists():
                 try:
@@ -637,7 +637,7 @@ def conduct_resume(args):
                 ops.RESPAWN_BOOK.write_text(json.dumps(book))
                 print(f"  respawn budgets reset for {n_reset} cell(s)")
     hint = ("a live `experiment run` admits them under its caps"
-            if (common.ORCH / "conduct.pid").exists()
+            if (common.CONDUCT / "conduct.pid").exists()
             else "the run is DOWN — nothing starts until you run: "
                  "python3 cli.py experiment run")
     print(f"experiment resume: {lifted} lock(s) lifted, {requeued} cell(s) "
@@ -694,7 +694,7 @@ def conduct_pause(args):
                 print("would leave the running cells undisturbed (--admission-only)")
             print("would leave conduct running for the other lanes")
         else:
-            if (common.ORCH / "conduct.pid").exists():
+            if (common.CONDUCT / "conduct.pid").exists():
                 print("would stop conduct (TERM)")
             queued = ops.queued_cids("all")
             if queued:

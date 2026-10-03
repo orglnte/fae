@@ -602,7 +602,7 @@ EXPERIMENT_DIR=shout python3 cli.py results score         # validate -> score.js
 ```
 
 The backlog is a directory tree, one file per spec, moved by atomic rename
-between `queue/`, `running/` and `done/` under `workspaces.nosync/.orch/`,
+between `queue/`, `running/` and `done/` under `workspaces.nosync/.queues/`,
 so an interrupted scheduler neither loses nor duplicates work.
 
 ## 12. Reading what came out

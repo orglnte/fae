@@ -31,7 +31,7 @@ _WEEKLY_EVENT_RE = re.compile(r'"type":"rate_limit_event","rate_limit_info":(\{[
 
 
 def _weekly_book():
-    return common.ORCH / "weekly.json"
+    return common.QUEUES / "weekly.json"
 
 
 def weekly_load():
@@ -49,7 +49,7 @@ def weekly_load():
 
 
 def weekly_save(st):
-    common.ORCH.mkdir(parents=True, exist_ok=True)
+    common.QUEUES.mkdir(parents=True, exist_ok=True)
     _weekly_book().write_text(json.dumps(st))
 
 
@@ -178,7 +178,7 @@ COOLDOWN_DEFAULT_S = int(os.environ.get("LIMIT_COOLDOWN_S", 3 * 3600))
 
 
 def _cooldown_file(agent):
-    return common.ORCH / f"cooldown.{agent}"
+    return common.QUEUES / f"cooldown.{agent}"
 
 
 def _is_quota_wall(text):

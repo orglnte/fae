@@ -2,7 +2,7 @@
 
 WORKSPACES_DIR names an alternative workspace tree (ws-test.nosync for
 harness-validation cells). The invariant these tests hold: only cell
-PLACEMENT follows the override — .orch (rig lock, verify lock, slots,
+PLACEMENT follows the override — the scheduling plane (queues, locks, slots,
 transitions.log) serializes the one physical rig and stays global — and the
 safe_wipe boundary is per-root, so no root can reach into another's cells.
 The choke point is config.load (fae/cell/config.py resolves the workspace
@@ -29,12 +29,15 @@ class TestThePythonOrchestratorKnob(unittest.TestCase):
         self.assertIn('WS = Path(os.environ["WORKSPACES_DIR"])', block)
 
     def test_the_lock_plane_does_not_follow(self):
-        # ORCH is derived from a literal, never from WS: the override moves
-        # cells, not locks.
+        # The plane is derived from ROOT and a literal, never from WS: the
+        # override moves cells, not locks.
         src = (Path(ROOT) / "fae" / "driver" / "common.py").read_text()
-        line = [l for l in src.splitlines() if l.startswith("ORCH = ")][0]
-        self.assertIn('"workspaces.nosync"', line)
-        self.assertNotIn("WS", line.split("=", 1)[1])
+        for name in ("QUEUES", "CONDUCT", "LOCKS"):
+            line = [l for l in src.splitlines() if l.startswith(f"{name} = ")][0]
+            self.assertIn("(ROOT)", line)
+            self.assertNotIn("WS", line.split("=", 1)[1])
+        plane = (Path(ROOT) / "fae" / "plane.py").read_text()
+        self.assertIn('Path(root) / "workspaces.nosync"', plane)
 
     def test_loop_pids_matches_the_active_root(self):
         with mock.patch.object(runs.common, "WS", Path("/x/ws-test.nosync")), \

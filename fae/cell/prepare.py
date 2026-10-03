@@ -24,6 +24,7 @@ from . import experiment as _experiment
 from .surface import Surface
 
 from fae import paths as _paths  # noqa: E402
+from fae import plane as _plane  # noqa: E402
 
 ROOT = _paths.ROOT
 
@@ -72,7 +73,7 @@ def safe_wipe(target, workspaces):
 
 def _transitions_log(root):
     return Path(os.environ.get("TRANSITIONS_LOG")
-                or Path(root) / "workspaces.nosync" / ".orch" / "transitions.log")
+                or _plane.transitions_log(root))
 
 
 def _log_retire(root, cid, moved):

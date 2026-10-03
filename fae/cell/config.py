@@ -22,6 +22,8 @@ try:
 except ModuleNotFoundError:                       # py<3.11
     import tomli as tomllib                        # type: ignore
 
+from fae import plane as _plane  # noqa: E402
+
 # Attempts-to-green is the study's dependent variable. A per-cell budget makes
 # two cells incomparable, so this is one constant for the whole experiment,
 # mirrored in fae/driver/common.py; prepare.py records it into every cell.env.
@@ -306,8 +308,8 @@ def _build(root, env, toml, definition=None):
     v["INSTRUMENTS_DIR"] = f"{v['EXPERIMENT_DIR']}/instruments"
     v["TASK_DIR"] = f"{v['EXPERIMENT_DIR']}/task"
     v["RESULTS_DIR"] = env.get("RESULTS_DIR") or f"{root}/results"
-    v["RIG_LOCK_DIR"] = env.get("RIG_LOCK_DIR") or f"{root}/workspaces.nosync/.orch/rig-lock"
-    v["VERIFY_LOCK_DIR"] = env.get("VERIFY_LOCK_DIR") or f"{root}/workspaces.nosync/.orch/verify-lock"
+    v["RIG_LOCK_DIR"] = env.get("RIG_LOCK_DIR") or str(_plane.locks(root) / "rig-lock")
+    v["VERIFY_LOCK_DIR"] = env.get("VERIFY_LOCK_DIR") or str(_plane.locks(root) / "verify-lock")
 
     if smoke:
         v["WORKSPACES_DIR"] = env.get("SMOKE_WORKSPACES_DIR") or f"{root}/smoke-workspaces.nosync"

@@ -1,5 +1,5 @@
 """conduct: the unified scheduler. Everything it touches is mocked; nothing
-here starts a process. Fixtures patch runs.common.WS / runs.common.ORCH to a temp tree, the
+here starts a process. Fixtures patch runs.common.WS and the scheduling plane to a temp tree, the
 same convention as test_operator_control.py.
 """
 import contextlib
@@ -11,12 +11,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from _ctx import runs, OrchTmpCase, ROOT
+from _ctx import runs, OrchTmpCase, ROOT, patch_plane
 
 
 class ConductCase(OrchTmpCase):
     def setUp(self):
-        super().setUp()   # temp tree + WS/ORCH/RESPAWN_BOOK/TRANSITIONS_LOG/RECONCILE_LOG
+        super().setUp()   # temp tree + WS and the scheduling plane
         self.spawned = []
         self.live = {}
         self.patches = [
@@ -172,7 +172,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         with mock.patch.object(runs.state, "containers", return_value=set()):
             runs.supervise._retire_finished_specs()
         self.assertEqual(runs.queue.lane_specs(m), [])
-        self.assertTrue((runs.common.ORCH / "done" / m / f"{cid}.json").exists())
+        self.assertTrue((runs.common.QUEUES / "done" / m / f"{cid}.json").exists())
 
     def test_an_unfinished_cells_spec_stays(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
@@ -225,7 +225,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
                 mock.patch.object(runs.ops, "_spawn_detached", return_value=None):
             runs.ops.resume(SimpleNamespace(selectors=[cid], force=False))
         self.assertEqual(runs.queue.lane_specs(m), [], "spec still in the lane")
-        self.assertTrue((runs.common.ORCH / "running" / m / f"{cid}.json").exists())
+        self.assertTrue((runs.common.QUEUES / "running" / m / f"{cid}.json").exists())
 
     def test_a_spawn_that_never_starts_gives_the_spec_back(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
@@ -245,7 +245,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
                 mock.patch.object(runs.ops, "_spawn_detached", return_value=3):
             runs.ops.resume(SimpleNamespace(selectors=[cid], force=False))
         self.assertEqual(len(runs.queue.lane_specs(m)), 1, "spec was not returned")
-        self.assertFalse((runs.common.ORCH / "running" / m / f"{cid}.json").exists())
+        self.assertFalse((runs.common.QUEUES / "running" / m / f"{cid}.json").exists())
 
     def test_a_preview_moves_nothing(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
@@ -261,6 +261,11 @@ class TestFinishedSpecsAreRetired(ConductCase):
 class TestPreflight(unittest.TestCase):
     """A fresh clone and a reset Docker VM look identical from conduct: no
     agent image, and every spawn dying at preflight until there is one."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch_plane(self, Path(tmp.name))
 
     def _run(self, rcs, image_ok=True):
         calls = []
@@ -351,14 +356,14 @@ class TestClaims(ConductCase):
         st = {"cid": cid, "state": "CRASHED", "why": "loop", "agent": "aaa",
               "variant": "beta_apidocs", "task": "T1",
               "rep": "7", "budget": 10}
-        with mock.patch.object(runs.common, "RECONCILE_LOG", self.orch / "rec.log"):
+        with mock.patch.object(runs.common, "RECONCILE_LOG", self.conduct / "rec.log"):
             runs.supervise._reclaim(st, dry=False)
         self.assertEqual(runs.queue.running_specs("aaa"), [])
         self.assertEqual(self.pending("aaa"), [])
 
     def _reclaim_log(self, cid):
         st = {"cid": cid, "state": "CRASHED", "why": "loop", "agent": "aaa"}
-        log = self.orch / "rec.log"
+        log = self.conduct / "rec.log"
         with mock.patch.object(runs.common, "RECONCILE_LOG", log):
             runs.supervise._reclaim(st, dry=False)
         return log.read_text() if log.exists() else ""
@@ -427,7 +432,7 @@ class TestClaims(ConductCase):
                                              "why": "green"}):
             self.run_conduct()
         self.assertEqual(self.claimed("aaa"), [])
-        self.assertTrue((self.orch / "done" / "aaa" / f"{cid}.json").exists())
+        self.assertTrue((self.queues / "done" / "aaa" / f"{cid}.json").exists())
 
     def test_repairs_are_bounded_then_flagged(self):
         (self.ws / "aaa_high_beta_apidocs_T1_r1").mkdir(parents=True)
@@ -618,7 +623,7 @@ class TestLimitCooldown(ConductCase):
         self.q("aaa", [self.spec()])
         runs.weekly._cooldown_file("aaa").write_text(f"{int(runs.time.time()) - 5} x\n")
         with mock.patch.object(runs.common, "TRANSITIONS_LOG",
-                               self.orch / "transitions.log"):
+                               self.plane / "transitions.log"):
             out = self.run_conduct()
         self.assertIn("cooldown expired", out)
         self.assertFalse(runs.weekly._cooldown_file("aaa").exists())
@@ -655,12 +660,11 @@ class TestReapingBelongsToConduct(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.ws = Path(self._tmp.name) / "ws"
-        self.orch = self.ws / ".orch"
-        self.orch.mkdir(parents=True)
+        self.ws.mkdir(parents=True)
         self.addCleanup(self._tmp.cleanup)
-        for p in (mock.patch.object(runs.common, "WS", self.ws),
-                  mock.patch.object(runs.common, "ORCH", self.orch)):
-            p.start(); self.addCleanup(p.stop)
+        p = mock.patch.object(runs.common, "WS", self.ws)
+        p.start(); self.addCleanup(p.stop)
+        patch_plane(self, self.ws)
 
     Z = ("container", "fae-agent-x", "x", "no live loop")
 
@@ -742,7 +746,7 @@ class TestConvergeBranches(ConductCase):
         (d / "aaa_high_beta_apidocs_T1_r1.json").write_text("{not json\n")
         self._converge()
         self.assertEqual(runs.queue.running_specs("aaa"), [])
-        self.assertEqual(len(list((self.orch / "backups").glob("unreadable-*.json"))), 1)
+        self.assertEqual(len(list((self.queues / "backups").glob("unreadable-*.json"))), 1)
 
     def test_a_systemic_repair_death_freezes_the_lane(self):
         cid = "aaa_high_beta_apidocs_T1_r1"
@@ -877,7 +881,7 @@ class TestConductLiftsItsOwnStandDowns(ConductCase):
 
     def run_lift(self):
         with mock.patch.object(runs.common, "TRANSITIONS_LOG",
-                               self.orch / "transitions.log"):
+                               self.plane / "transitions.log"):
             return self.run_conduct()
 
     def test_a_cooled_stand_down_is_lifted_and_costs_a_repair(self):

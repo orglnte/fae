@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from _ctx import runs
+from _ctx import runs, patch_plane
 
 zombies = runs.zombies
 common = runs.common
@@ -163,10 +163,7 @@ class FindZombiesCase(unittest.TestCase):
         self.ws_patch.start()
         self.addCleanup(self.ws_patch.stop)
         # no arm-*.slots dirs, no zombie candidates there
-        self.orch_patch = mock.patch.object(common, "ORCH", ws / ".orch")
-        self.orch_patch.start()
-        self.addCleanup(self.orch_patch.stop)
-        (ws / ".orch").mkdir()
+        patch_plane(self, ws)
 
 
 class TestFindZombiesContainers(FindZombiesCase):
@@ -386,7 +383,7 @@ class TestTheRepairReaps(unittest.TestCase):
     def test_a_sweep_within_the_cooldown_does_nothing(self):
         from fae.driver import common, zombies
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(common, "ORCH", Path(d)), \
+                mock.patch.multiple(common, QUEUES=Path(d), CONDUCT=Path(d), LOCKS=Path(d)), \
                 mock.patch.object(zombies, "find_zombies", return_value=[("c", "x", "o", "n")]), \
                 mock.patch.object(zombies, "reap_zombies", return_value=["reaped x"]) as reap:
             self.assertEqual(zombies.reap_sweep(), ["reaped x"])

@@ -99,29 +99,43 @@ runs.sys = sys
 runs.time = time
 
 
+def plane_globals(plane):
+    """{(module, attribute): path} for every scheduling-plane global, rooted at
+    `plane` the way fae/plane.py roots them at <root>/workspaces.nosync."""
+    return {
+        (runs.common, "QUEUES"): plane / ".queues",
+        (runs.common, "CONDUCT"): plane / ".conduct",
+        (runs.common, "LOCKS"): plane / ".locks",
+        (runs.common, "TRANSITIONS_LOG"): plane / "transitions.log",
+        (runs.common, "RECONCILE_LOG"): plane / ".conduct" / "reconcile.log",
+        (runs.ops, "RESPAWN_BOOK"): plane / ".conduct" / "reconcile.respawns.json",
+    }
+
+
+def patch_plane(case, plane):
+    """Patch every scheduling-plane global to a temp `plane` for the life of
+    the test `case`, and expose case.plane / .queues / .conduct / .locks."""
+    case.plane = plane
+    case.queues, case.conduct, case.locks = plane / ".queues", plane / ".conduct", plane / ".locks"
+    for d in (case.queues, case.conduct, case.locks):
+        d.mkdir(parents=True, exist_ok=True)
+    for (target, attr), val in plane_globals(plane).items():
+        p = mock.patch.object(target, attr, val)
+        p.start()
+        case.addCleanup(p.stop)
+
+
 class OrchTmpCase(unittest.TestCase):
     """Base for tests that must never touch the LIVE fleet.
 
     setUp builds a throwaway tree and patches EVERY path global that points into
-    it — the parametric workspace root, the lock plane, and the .orch logs — to
-    the temp tree. This is the ONE place those targets are named: when a path
-    global moves to another module (e.g. WS/ORCH now live in fae/driver/common.py),
-    it is a one-line change here instead of an edit in every test file.
+    it — the parametric workspace root and the scheduling plane — to the temp
+    tree. This is the ONE place those targets are named.
 
-    Provides self.root, self.ws (the scored root) and self.orch. A subclass adds
-    its own patches by calling super().setUp() first, then starting its own.
+    Provides self.root, self.ws (the scored root, which is also the plane's
+    base here), self.queues, self.conduct and self.locks. A subclass adds its
+    own patches by calling super().setUp() first, then starting its own.
     """
-
-    # (target-module, attribute, value-factory(self)) for each path global. A
-    # target that no longer has the attribute is skipped, so this list can lead
-    # a move rather than trail it.
-    _ORCH_GLOBALS = (
-        (runs.common, "WS", lambda s: s.ws),
-        (runs.common, "ORCH", lambda s: s.orch),
-        (runs.common, "TRANSITIONS_LOG", lambda s: s.orch / "transitions.log"),
-        (runs.common, "RECONCILE_LOG", lambda s: s.orch / "reconcile.log"),
-        (runs.ops, "RESPAWN_BOOK", lambda s: s.orch / "respawns.json"),
-    )
 
     def setUp(self):
         super().setUp()
@@ -129,11 +143,8 @@ class OrchTmpCase(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         self.ws = self.root / "ws"
-        self.orch = self.ws / ".orch"
-        self.orch.mkdir(parents=True)
-        for target, attr, val in self._ORCH_GLOBALS:
-            if not hasattr(target, attr):
-                continue
-            p = mock.patch.object(target, attr, val(self))
-            p.start()
-            self.addCleanup(p.stop)
+        self.ws.mkdir(parents=True)
+        p = mock.patch.object(runs.common, "WS", self.ws)
+        p.start()
+        self.addCleanup(p.stop)
+        patch_plane(self, self.ws)

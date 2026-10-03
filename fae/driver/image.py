@@ -38,7 +38,7 @@ def image_name():
 
 
 def cache_path():
-    return common.ORCH / "agent_image.json"
+    return common.QUEUES / "agent_image.json"
 
 
 def vtuple(v):

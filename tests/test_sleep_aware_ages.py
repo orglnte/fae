@@ -11,16 +11,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from _ctx import runs
+from _ctx import runs, patch_plane
 
 
 class SleepCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.orch = Path(self._tmp.name) / ".orch"
-        self.orch.mkdir()
-        self.patches = [mock.patch.object(runs.common, "ORCH", self.orch),
-                        mock.patch.object(runs.common, "_sleep_clocks", None),
+        patch_plane(self, Path(self._tmp.name))
+        self.patches = [mock.patch.object(runs.common, "_sleep_clocks", None),
                         mock.patch.object(runs.common, "_sleep_gaps", None)]
         for p in self.patches:
             p.start()
@@ -114,7 +112,7 @@ class TestTheAgesTheSupervisorReads(SleepCase):
         self.assertGreater(age, 250)
 
     def test_arm_slot_age_excludes_the_sleep(self):
-        slot = self.orch / "arm-keda.slots" / "slot-1"
+        slot = self.queues / "arm-keda.slots" / "slot-1"
         slot.parent.mkdir()
         slot.touch()
         Path(str(slot) + ".holder").write_text(

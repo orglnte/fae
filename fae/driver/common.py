@@ -4,10 +4,10 @@ ledger/mutex/faults modules loaded by path.
 
 This is the leaf of the runs/ package split: it depends on nothing else in
 fae/driver/, so importing it can never cycle. The parametric WORKSPACE root (WS)
-and the lock plane (ORCH) live here as module-level globals — the single
-patch point every other driver module reads (`common.WS`, `common.ORCH`),
-which is why the test suite patches them at `runs.common.WS` /
-`runs.common.ORCH` rather than per-module.
+and the scheduling plane (QUEUES, CONDUCT, LOCKS, TRANSITIONS_LOG; fae/plane.py)
+live here as module-level globals — the single patch point every other driver
+module reads, which is why the test suite patches them at `runs.common.*`
+rather than per-module.
 """
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from pathlib import Path
 
 # fae/driver/ sits directly under the repo root, so the repo root is one up.
 from fae import paths as _paths  # noqa: E402
+from fae import plane as _plane  # noqa: E402
 
 ROOT = _paths.ROOT
 
@@ -38,10 +39,11 @@ else:
     WS = ROOT / "workspaces.nosync"
     if not WS.is_dir():
         WS = ROOT / "workspaces"
-# The LOCK PLANE is NOT parametric: .orch (rig lock, verify lock, slots,
-# transitions.log) serializes the ONE physical rig, so it stays global no
-# matter which workspace root a cell lives in.
-ORCH = ROOT / "workspaces.nosync" / ".orch"
+# The scheduling plane is NOT parametric: it serializes the ONE physical rig,
+# so it stays global no matter which workspace root a cell lives in.
+QUEUES = _plane.queues(ROOT)
+CONDUCT = _plane.conduct(ROOT)
+LOCKS = _plane.locks(ROOT)
 # The reference-benchmark and smoke cells live here, never among scored cells.
 SMOKE_WS = ROOT / "smoke-workspaces.nosync"
 
@@ -224,11 +226,11 @@ def seal_reason(cid):
 # TLA+ live-trace conformance: the same global transitions log the driver writes
 # through Cell.apply(), mirrored here for the actions this side owns
 # (Pause/Resume/Kill/Crash).
-TRANSITIONS_LOG = ORCH / "transitions.log"
+TRANSITIONS_LOG = _plane.transitions_log(ROOT)
 
 
 def _emit_transition(action, cid, extra=""):
-    ORCH.mkdir(parents=True, exist_ok=True)
+    TRANSITIONS_LOG.parent.mkdir(parents=True, exist_ok=True)
     with TRANSITIONS_LOG.open("a") as f:
         f.write(f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}\t{action}\t{cid}\t{extra}\n")
 
@@ -304,11 +306,11 @@ class fs_lock:
             self._f = None
 
 
-RECONCILE_LOG = ORCH / "reconcile.log"
+RECONCILE_LOG = CONDUCT / "reconcile.log"
 
 
 def _rec_log(msg):
-    ORCH.mkdir(parents=True, exist_ok=True)
+    RECONCILE_LOG.parent.mkdir(parents=True, exist_ok=True)
     line = f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}  {msg}"
     print(line)
     with RECONCILE_LOG.open("a") as f:
@@ -360,7 +362,7 @@ HOST_SLEEP_BOOK_DAYS = 7
 _sleep_clocks = None            # (wall, monotonic) at the last observation
 _sleep_gaps = None              # the book, loaded on first use
 def _host_sleep_book():
-    return ORCH / "host_sleep.json"
+    return CONDUCT / "host_sleep.json"
 def _host_sleep_gaps():
     global _sleep_gaps
     if _sleep_gaps is None:
@@ -385,7 +387,7 @@ def host_sleep_observe(now=None, mono=None):
             keep = wall - HOST_SLEEP_BOOK_DAYS * 86400
             gaps[:] = [g for g in gaps if g["start"] + g["s"] >= keep]
             try:
-                ORCH.mkdir(parents=True, exist_ok=True)
+                _host_sleep_book().parent.mkdir(parents=True, exist_ok=True)
                 _host_sleep_book().write_text(json.dumps(gaps))
             except OSError:
                 pass

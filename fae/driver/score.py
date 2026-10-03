@@ -416,7 +416,7 @@ def _grade_opts(args):
         "cells": set(cells),
         "limit": int(getattr(args, "limit", None) or E.get("LIMIT", 0) or 0),
         "cost_log": Path(getattr(args, "cost_log", None) or E.get("COST_LOG")
-                         or common.WS / ".orch" / "defect-judge-cost.tsv"),
+                         or common.WS / "defect-judge-cost.tsv"),
         "inflight": bool(getattr(args, "grade_inflight", False)) or E.get("GRADE_INFLIGHT") == "1",
     }
 

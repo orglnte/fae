@@ -5,7 +5,7 @@ the same file and the kernel arbitrates, so there is no on-disk protocol to
 keep in step.
 
 Every test locks inside a TemporaryDirectory. None of them touch the real
-`.orch/` locks, which the live fleet is using right now.
+`.locks/`, which the live fleet is using right now.
 """
 import signal
 import subprocess

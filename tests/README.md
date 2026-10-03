@@ -9,16 +9,16 @@ installing it is plan-gated. Nothing here needs a third-party runner.
 
 ## Safety rule — these tests never touch the live fleet
 
-`fae/driver/common.py` computes `WS` (`workspaces.nosync/`) and `ORCH`
-(`workspaces.nosync/.orch/`) at import time, and the fleet reads those
-directories while it runs. A test that wrote a pause file or a queue line
+`fae/driver/common.py` computes `WS` (`workspaces.nosync/`) and the scheduling
+plane (`QUEUES`, `CONDUCT`, `LOCKS`, `TRANSITIONS_LOG`; `fae/plane.py`) at import
+time, and the fleet reads those paths while it runs. A test that wrote a pause file or a queue line
 under them would act on live cells.
 
 So: importing `runs` is safe (import is side-effect free — path construction
 plus `exec_module` of `fae/ledger.py`, no writes), but **any test that
 exercises a function which writes must redirect the target into a
 `TemporaryDirectory` first**, by passing an explicit path or by patching
-`runs.common.ORCH` / `runs.common.WS`. No test in this suite reads or writes the real
+`runs.common.WS` and the plane (`_ctx.patch_plane`, or `OrchTmpCase`). No test in this suite reads or writes the real
 workspace tree.
 
 ## What is covered
@@ -52,7 +52,7 @@ pointed at — this has happened once during development. Fixtures that touch
 those paths stub `_respawn` and `_spawn_detached`, and any test exercising
 recovery calls `_recover_inflight()` directly rather than `worker()`.
 
-Patch `TRANSITIONS_LOG` too, not just `WS` and `ORCH`: `_emit_transition`
+Patch `TRANSITIONS_LOG` too, not just `WS` and the plane folders: `_emit_transition`
 resolves the module-level path, so an unpatched test writes fabricated
 transitions into the live conformance log that `experiment check --tla-trace` replays against
 `.tla/Runs.tla`.

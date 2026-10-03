@@ -79,12 +79,12 @@ def _holder_of(lock_dir):
 
 
 def _slot_holders():
-    d = common.ORCH / "work-slots"
+    d = common.QUEUES / "work-slots"
     return {c for c in (_holder_of(p) for p in sorted(d.glob("slot-*"))) if c}
 
 
 def _verify_holder():
-    return _holder_of(common.ORCH / "verify-lock")
+    return _holder_of(common.LOCKS / "verify-lock")
 
 
 def _loop_of_phase(phase, slot_held):
@@ -175,7 +175,7 @@ def trace_reset(args):
     NOT checked is history from before it — that history was never logged, and
     saying so plainly beats pretending otherwise.
     """
-    common.ORCH.mkdir(parents=True, exist_ok=True)
+    common.TRANSITIONS_LOG.parent.mkdir(parents=True, exist_ok=True)
     cells = _observed_epoch()
     default = dict(outcome="none", intent="run", loop="none", attempts=0,
                    slot=False, verify=False)
@@ -193,7 +193,7 @@ def trace_reset(args):
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     if common.TRANSITIONS_LOG.exists():
-        archived = common.ORCH / f"transitions.archived-{stamp}.log"
+        archived = common.TRANSITIONS_LOG.parent / f"transitions.archived-{stamp}.log"
         common.TRANSITIONS_LOG.rename(archived)
         print(f"archived {archived.name}")
 

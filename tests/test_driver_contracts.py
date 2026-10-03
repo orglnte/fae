@@ -224,8 +224,8 @@ class TestEveryExitClearsTheHolderNotes(DriverCase):
     or TRIAGE reads a zombie holder for resources that are long gone."""
 
     def _notes_naming(self, c):
-        orch = self.root / "workspaces.nosync" / ".orch"
-        return [h for h in orch.glob("*/slot-*.holder")
+        queues = self.root / "workspaces.nosync" / ".queues"
+        return [h for h in queues.glob("*/slot-*.holder")
                 if h.read_text().split()[0] == c.cid]
 
     def test_a_setup_failure_leaves_no_note(self):

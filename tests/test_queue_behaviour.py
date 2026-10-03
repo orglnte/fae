@@ -1,10 +1,10 @@
 """The backlog on disk: a spec is one FILE, its state is the directory it sits
 in, lane order is the filename sort, and sequence numbers never collide.
 
-Every test runs against its own temp .orch tree (OrchTmpCase); nothing here
+Every test runs against its own temp .queues tree (OrchTmpCase); nothing here
 touches the live fleet. Paths are compared as Path objects or by their
 relative parts, never by existence alone — the host filesystem is
-case-insensitive, so `orch/queue` and `orch/QUEUE` are the same directory
+case-insensitive, so `.queues/queue` and `.queues/QUEUE` are the same directory
 and only the spelling in the returned path tells the two apart.
 """
 import contextlib
@@ -35,12 +35,12 @@ def seq_of(p):
 class QueueCase(OrchTmpCase):
 
     def rel(self, p):
-        return p.relative_to(self.orch).parts
+        return p.relative_to(self.queues).parts
 
     def everywhere(self, cid):
-        """Every file under the .orch tree that names this cid, as parts
-        relative to .orch — the set must always have exactly one member."""
-        return sorted(self.rel(p) for p in self.orch.rglob(f"*{cid}.json"))
+        """Every file under the .queues tree that names this cid, as parts
+        relative to .queues — the set must always have exactly one member."""
+        return sorted(self.rel(p) for p in self.queues.rglob(f"*{cid}.json"))
 
 
 class TestASpecIsInExactlyOneState(QueueCase):
@@ -70,11 +70,11 @@ class TestASpecIsInExactlyOneState(QueueCase):
 
     def test_the_lane_dirs_are_the_spelled_out_queue_running_done_paths(self):
         queue.enqueue(AGENT, spec())
-        self.assertEqual(queue.lane_dir(AGENT), self.orch / "queue" / AGENT)
+        self.assertEqual(queue.lane_dir(AGENT), self.queues / "queue" / AGENT)
         self.assertEqual(queue.lane_dir(AGENT, parked=True),
-                         self.orch / "queue" / f"{AGENT}.parked")
-        self.assertEqual(queue.rundir(AGENT), self.orch / "running" / AGENT)
-        self.assertEqual(queue.lane_dirs(), [self.orch / "queue" / AGENT])
+                         self.queues / "queue" / f"{AGENT}.parked")
+        self.assertEqual(queue.rundir(AGENT), self.queues / "running" / AGENT)
+        self.assertEqual(queue.lane_dirs(), [self.queues / "queue" / AGENT])
 
     def test_a_second_claim_on_a_cid_is_refused_and_named(self):
         cid = cid_of()
@@ -88,13 +88,13 @@ class TestASpecIsInExactlyOneState(QueueCase):
         self.assertEqual(len(queue.running_specs(AGENT)), 1)
 
     def test_release_recreates_a_lane_whose_queue_tree_is_gone(self):
-        # A claim adopted into a fresh .orch has no queue/ at all; releasing
+        # A claim adopted into a fresh .queues has no queue/ at all; releasing
         # it must build the whole path, not just the leaf.
         cid = cid_of()
         r = queue.rundir(AGENT) / f"{cid}.json"
         r.parent.mkdir(parents=True)
         r.write_text("{}\n")
-        self.assertFalse((self.orch / "queue").exists())
+        self.assertFalse((self.queues / "queue").exists())
         back = queue.release(AGENT, r)
         self.assertEqual(self.rel(back), ("queue", AGENT, f"{SEQ:06d}.{cid}.json"))
         self.assertEqual(queue.lane_specs(AGENT), [back])
@@ -266,26 +266,26 @@ class TestAParkedLaneIsSkippedButKeepsItsBacklog(QueueCase):
         queue.enqueue(AGENT, spec())
         queue.enqueue("bbb", spec())
         self.assertEqual(queue.park_lane(AGENT), "parked")
-        self.assertEqual(queue.lane_dirs(), [self.orch / "queue" / "bbb"])
+        self.assertEqual(queue.lane_dirs(), [self.queues / "queue" / "bbb"])
         self.assertEqual(queue.lane_dirs(include_parked=True), [
-            self.orch / "queue" / f"{AGENT}.parked",
-            self.orch / "queue" / "bbb",
+            self.queues / "queue" / f"{AGENT}.parked",
+            self.queues / "queue" / "bbb",
         ])
         self.assertEqual(queue._parked_queues(),
-                         [self.orch / "queue" / f"{AGENT}.parked"])
+                         [self.queues / "queue" / f"{AGENT}.parked"])
         self.assertEqual(queue.lane_specs(AGENT), [])
         self.assertTrue(queue.lane_has(AGENT, cid_of()))
 
     def test_a_stray_file_under_queue_is_not_a_lane(self):
         queue.enqueue(AGENT, spec())
         queue.park_lane(AGENT)
-        (self.orch / "queue" / "notes.txt").write_text("")
-        (self.orch / "queue" / "old.parked").write_text("")
+        (self.queues / "queue" / "notes.txt").write_text("")
+        (self.queues / "queue" / "old.parked").write_text("")
         self.assertEqual(queue.lane_dirs(), [])
         self.assertEqual(queue.lane_dirs(include_parked=True),
-                         [self.orch / "queue" / f"{AGENT}.parked"])
+                         [self.queues / "queue" / f"{AGENT}.parked"])
         self.assertEqual(queue._parked_queues(),
-                         [self.orch / "queue" / f"{AGENT}.parked"])
+                         [self.queues / "queue" / f"{AGENT}.parked"])
 
     def test_enqueue_and_release_land_in_the_parked_dir_and_unpark_restores_order(self):
         queue.enqueue(AGENT, spec(rep=1))
@@ -334,7 +334,7 @@ class TestShelveKeepsARestorableBackup(QueueCase):
         r = queue.claim(AGENT, queue.enqueue(AGENT, spec(rep=2)))
         d = queue.finish(AGENT, queue.claim(AGENT, queue.enqueue(AGENT, spec(rep=3))))
         dests = [queue.shelve(p, "stop") for p in (q, r, d)]
-        self.assertEqual({x.parent for x in dests}, {self.orch / "backups"})
+        self.assertEqual({x.parent for x in dests}, {self.queues / "backups"})
         for cid in (cid_of(rep=1), cid_of(rep=2), cid_of(rep=3)):
             self.assertEqual(len(self.everywhere(cid)), 1)
             self.assertEqual(self.everywhere(cid)[0][0], "backups")
@@ -361,14 +361,14 @@ class TestCancelAndList(OrchTmpCase):
         runs.ops.queue_cancel(runs.argparse.Namespace(selectors=["r1"], dry_run=False))
         left = [runs.queue.spec_cid(p) for p in runs.queue.lane_specs("aaa")]
         self.assertEqual(left, ["aaa_high_beta_apidocs_T1_r2"])
-        moved = list((self.orch / ".to_be_deleted").rglob("*.json"))
+        moved = list((self.queues / ".to_be_deleted").rglob("*.json"))
         self.assertEqual([runs.queue.spec_cid(p) for p in moved], ["aaa_high_beta_apidocs_T1_r1"])
 
     def test_dry_run_moves_nothing(self):
         self.spec("aaa", "aaa_high_beta_apidocs_T1_r1")
         runs.ops.queue_cancel(runs.argparse.Namespace(selectors=["all"], dry_run=True))
         self.assertEqual(len(runs.queue.lane_specs("aaa")), 1)
-        self.assertFalse((self.orch / ".to_be_deleted").exists())
+        self.assertFalse((self.queues / ".to_be_deleted").exists())
 
     def test_a_running_spec_is_not_cancelled(self):
         p = self.spec("aaa", "aaa_high_beta_apidocs_T1_r1")
