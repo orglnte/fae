@@ -38,8 +38,6 @@ class TestTheTriage(unittest.TestCase):
 class TestALongWaitIsNotAStall(SweepCase):
     def setUp(self):
         super().setUp()
-        self.addCleanup(runs.common._PHASE_ALERTED.clear)
-        runs.common._PHASE_ALERTED.clear()
 
     def _alert_for(self, phase):
         limit = runs.supervise.PHASE_LIMITS[phase][0]

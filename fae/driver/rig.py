@@ -232,7 +232,7 @@ def infra(args):
     attempt) and its verify image (built when missing), then a sweep of
     stale infra. Nothing per cell is created here. Exit 1 if any variant is
     refused."""
-    bad = _probe_variants()
+    bad = probe_variants()
     sys.path.insert(0, str(ROOT))
     from fae.cell import variants as _tr
     for infra in {cls.INFRA for cls in _tr.registry().values()}:
@@ -241,7 +241,7 @@ def infra(args):
         sys.exit(f"infra: {bad} variant(s) refused — see hooks.log lines above")
 
 
-def _probe_variants(variants=None):
+def probe_variants(variants=None):
     """Every variant's own preflight (its infra's ok(): the daemon, the tools)
     and the image its cells are verified in, built here when missing —
     printed one per line; the count refused."""
@@ -357,7 +357,7 @@ def smoke(args):
           f"(cells tagged ref_high_smoke_*, in {SMOKE_WORKSPACES.name}) ===")
     # each variant's own preflight, so a missing daemon, tool or image is
     # named before any infra is spent
-    if _probe_variants(variants):
+    if probe_variants(variants):
         sys.exit("SMOKE ABORTED: a variant refused this host — see hooks.log lines above")
     env = dict(os.environ, WORKSPACES_DIR=str(SMOKE_WORKSPACES), AGENT="ref",
                SMOKE="1", REFERENCE="1",

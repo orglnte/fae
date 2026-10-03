@@ -93,24 +93,23 @@ class TestRetiredCommands(unittest.TestCase):
 
 class TestTheRunCommands(unittest.TestCase):
     def test_run(self):
-        (ns,), _ = invoke("conduct", ["experiment", "run", "-n", "5",
-                                      "--per-agent", "2", "--interval", "10"], mod=cli.conduct)
+        (ns,), _ = invoke("run", ["experiment", "run", "-n", "5",
+                                      "--per-agent", "2", "--interval", "10"], mod=cli.conduct.Conduct)
         self.assertEqual(vars(ns), dict(limit=5, per_agent=2, per_agent_override={},
                                         interval=10, supervise_interval=300))
 
     def test_run_per_model_override(self):
-        (ns,), _ = invoke("conduct", ["experiment", "run",
-                                      "--per-agent-override", "haiku=3,opus=2"],
-                          mod=cli.conduct)
+        (ns,), _ = invoke("run", ["experiment", "run",
+                                      "--per-agent-override", "haiku=3,opus=2"], mod=cli.conduct.Conduct)
         self.assertEqual(ns.per_agent_override, {"haiku": 3, "opus": 2})
 
     def test_run_supervision_off(self):
-        (ns,), _ = invoke("conduct", ["experiment", "run",
-                                      "--supervise-interval", "0"], mod=cli.conduct)
+        (ns,), _ = invoke("run", ["experiment", "run",
+                                      "--supervise-interval", "0"], mod=cli.conduct.Conduct)
         self.assertEqual(ns.supervise_interval, 0)
 
     def test_diagnose(self):
-        (ns,), _ = invoke("conduct_diagnose", ["experiment", "diagnose"], mod=cli.supervise)
+        (ns,), _ = invoke("diagnose", ["experiment", "diagnose"], mod=cli.conduct.Conduct)
         self.assertEqual(vars(ns), {})
 
     def test_queue_add_matrix(self):
@@ -127,28 +126,28 @@ class TestTheRunCommands(unittest.TestCase):
                                         task="T1", dry_run=True))
 
     def test_pause_full(self):
-        (ns,), _ = invoke("conduct_pause", ["experiment", "pause", "all",
-                                            "-n", "15", "--dry-run"], mod=cli.conduct)
+        (ns,), _ = invoke("pause", ["experiment", "pause", "all",
+                                            "-n", "15", "--dry-run"], mod=cli.conduct.Conduct)
         self.assertEqual(vars(ns), dict(scope=["all"], admission_only=False,
                                         interval=15, dry_run=True))
 
     def test_pause_partial_admission_only(self):
-        (ns,), _ = invoke("conduct_pause", ["experiment", "pause", "dsv4f",
-                                            "gemini", "--admission-only"], mod=cli.conduct)
+        (ns,), _ = invoke("pause", ["experiment", "pause", "dsv4f",
+                                            "gemini", "--admission-only"], mod=cli.conduct.Conduct)
         self.assertEqual(vars(ns), dict(scope=["dsv4f", "gemini"],
                                         admission_only=True, interval=60,
                                         dry_run=False))
 
     def test_resume(self):
-        (ns,), _ = invoke("conduct_resume", ["experiment", "resume", "opus", "haiku"], mod=cli.conduct)
+        (ns,), _ = invoke("resume", ["experiment", "resume", "opus", "haiku"], mod=cli.conduct.Conduct)
         self.assertEqual(vars(ns), dict(scope=["opus", "haiku"]))
 
     def test_stop(self):
-        (ns,), _ = invoke("conduct_stop", ["experiment", "stop", "all"], mod=cli.conduct)
+        (ns,), _ = invoke("stop", ["experiment", "stop", "all"], mod=cli.conduct.Conduct)
         self.assertEqual(vars(ns), dict(scope=["all"], yes=False))
 
     def test_stop_yes_plumbs(self):
-        (ns,), _ = invoke("conduct_stop", ["experiment", "stop", "all", "--yes"], mod=cli.conduct)
+        (ns,), _ = invoke("stop", ["experiment", "stop", "all", "--yes"], mod=cli.conduct.Conduct)
         self.assertEqual(vars(ns), dict(scope=["all"], yes=True))
 
 

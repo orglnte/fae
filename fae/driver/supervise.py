@@ -4,7 +4,7 @@ back to the operator. Runs inside conduct's loop every --supervise-interval,
 and as the one-shot `reconcile` / `experiment diagnose` (dry).
 
 Depends on fae/driver/ops.py for the one way a cell dies by conduct's hand
-(_teardown_cell/_variant_teardown/request_pause/_claimed) — one direction
+(teardown_cell/_variant_teardown/request_pause/is_claimed) — one direction
 only: nothing in ops.py calls back into supervise.
 """
 from __future__ import annotations
@@ -97,14 +97,11 @@ T_STALL = int(os.environ.get("T_STALL", 1500))  # long verify tolerance
 VERIFY_HELD_ALERT_S = int(os.environ.get("VERIFY_HELD_ALERT_S", 300))
 
 
-_VERIFY_ALERTED = {}   # cid -> AcquireVerify ts already alerted on (dedup)
-_VALIDATION_FAILED = {}   # cid -> the error last reported for it (dedup)
 
 
 VERIFY_WEDGED_S = int(os.environ.get("VERIFY_WEDGED_S", 14400))
 
 
-_VERIFY_WEDGED = {}    # cid -> AcquireVerify ts already acted on
 
 
 ARM_HELD_ALERT_S = int(os.environ.get("ARM_HELD_ALERT_S", 10800))
@@ -278,7 +275,7 @@ def _reconcile_dead_loop(cid, loop_pid, in_box, out_age, last, dry,
 def _conducts(cid):
     """Is this cell conduct's to restart: claimed (converge restarts it) or
     its spec waiting in its lane (admission restarts it)?"""
-    if ops._claimed(cid):
+    if ops.is_claimed(cid):
         return True
     parsed = common.parse_cell_id(cid)
     return bool(parsed and common.queues().lane_has(parsed[0], cid))
@@ -299,10 +296,25 @@ def _reclaim(st, dry):
     common._rec_log(f"{cid} unclaimed — resume it to put its spec back in the lane")
 
 
-_MEM_ALERTED = {"level": 1}   # last pressure band logged, for rising-edge dedup
+class Alerts:
+    """What the supervision pass has already reported, so it reports each
+    thing once. Owned by the Conduct that runs the pass."""
+
+    def __init__(self):
+        self.verify_slow = {}     # cid -> AcquireVerify ts already alerted on
+        self.validation = {}      # cid -> the error last reported for it
+        self.verify_wedged = {}   # cid -> AcquireVerify ts already acted on
+        self.memory = {"level": 1}   # last pressure band logged, for rising-edge dedup
+        self.arm = set()          # cids alerted for holding their arm too long
+        self.phase = set()        # (cid, phase, attempt) already reported
+
+    def forget(self, cid):
+        """A lifted stand-down starts the cell's alerts afresh."""
+        self.arm.discard(cid)
+        self.phase = {k for k in self.phase if k[0] != cid}
 
 
-def _supervise_pass(dry=False, only=""):
+def supervise_pass(alerts, dry=False, only=""):
     """One supervision sweep: judge every cell by MECHANISM (process alive?
     output growing? log advancing?) and act: ORPHAN loop -> kill; SILENT
     HANG -> kill container + loop, requeue; DEAD loop -> requeue; bounded by
@@ -312,14 +324,14 @@ def _supervise_pass(dry=False, only=""):
     `experiment diagnose` (dry)."""
     common.host_sleep_observe()
     _mp = common.mem_pressure()
-    if _mp["level"] >= 2 and _mp["level"] != _MEM_ALERTED["level"]:
+    if _mp["level"] >= 2 and _mp["level"] != alerts.memory["level"]:
         common._rec_log(f"MEMORY PRESSURE {_mp['label']} — "
                  f"{_mp['used_gb']:.1f}/{_mp['total_gb']:.1f}GB used "
                  f"({_mp['avail_pct']}% avail); a heavy cell fleet risks an OOM "
                  f"kill on this host")
-    elif _mp["level"] < 2 and _MEM_ALERTED["level"] >= 2:
+    elif _mp["level"] < 2 and alerts.memory["level"] >= 2:
         common._rec_log("memory pressure back to normal")
-    _MEM_ALERTED["level"] = _mp["level"]
+    alerts.memory["level"] = _mp["level"]
     loops, boxes = state.loop_pids(), state.containers()
     parents = state.loop_parents()
     last_tr = common._last_transitions()
@@ -354,12 +366,12 @@ def _supervise_pass(dry=False, only=""):
                 try:
                     doc = taint._validate_cell(ws)
                 except Exception as e:
-                    if _VALIDATION_FAILED.get(cid) != repr(e):
-                        _VALIDATION_FAILED[cid] = repr(e)
+                    if alerts.validation.get(cid) != repr(e):
+                        alerts.validation[cid] = repr(e)
                         common._rec_log(f"{cid} ALERT — validation FAILED, left unvalidated "
                                         f"and retried every pass: {type(e).__name__}: {e}")
                 else:
-                    _VALIDATION_FAILED.pop(cid, None)
+                    alerts.validation.pop(cid, None)
                     common._rec_log(f"{cid} validated: {doc['verdict']}"
                              + (f" ({'; '.join(doc['taints'])})" if doc["taints"] else ""))
             loop_pid = parents.get(cid)
@@ -385,25 +397,25 @@ def _supervise_pass(dry=False, only=""):
                     _slow = _held if _quiet is None else _quiet
                     _key = (_ts, _mark_ts)
                     if _slow is not None and _slow > VERIFY_HELD_ALERT_S \
-                            and _VERIFY_ALERTED.get(cid) != _key:
+                            and alerts.verify_slow.get(cid) != _key:
                         common._rec_log(f"{cid} ALERT — verify quiet {int(_slow)}s > "
                                  f"{VERIFY_HELD_ALERT_S}s (lock held {int(_held or 0)}s)"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
                             common.ledger.alert(ws, cid, f"VERIFY-SLOW no progress for {int(_slow)}s > {VERIFY_HELD_ALERT_S}s (global verify-lock held {int(_held or 0)}s) — every other lane queues behind it")
-                            _VERIFY_ALERTED[cid] = _key
+                            alerts.verify_slow[cid] = _key
                     # Past the wedge threshold, end it. The alert above is
                     # report-only, and a global lock nobody frees stalls every
                     # lane for as long as it takes an operator to notice.
                     if _held is not None and _held > VERIFY_WEDGED_S \
-                            and _VERIFY_WEDGED.get(cid) != _ts:
+                            and alerts.verify_wedged.get(cid) != _ts:
                         common._rec_log(f"{cid} ALERT — verify wedged {int(_held)}s > "
                                  f"{VERIFY_WEDGED_S}s -> stand down"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
                             common.ledger.alert(ws, cid, f"VERIFY-WEDGED held the global verify-lock {int(_held)}s > {VERIFY_WEDGED_S}s — standing it down; this attempt is lost")
-                            _VERIFY_WEDGED[cid] = _ts
-                            ops._teardown_cell(cid, st["variant"],
+                            alerts.verify_wedged[cid] = _ts
+                            ops.teardown_cell(cid, st["variant"],
                                            reason="verify-wedged",
                                            unblock_agent=True)
                             _reclaim(st, dry)
@@ -419,7 +431,7 @@ def _supervise_pass(dry=False, only=""):
                 if _lim and _pa is not None:
                     _alert_s, _kill_s = _lim
                     _key = (cid, _ph, str(_hbp.get("attempt", "")))
-                    if _pa > _alert_s and _key not in common._PHASE_ALERTED:
+                    if _pa > _alert_s and _key not in alerts.phase:
                         # a wait phase is someone else's time: long, not stalled
                         _kind = "WAIT-LONG" if _ph in state.WAIT_PHASES else "PHASE-STALLED"
                         common._rec_log(f"{cid} ALERT — {_kind} '{_ph}' unchanged "
@@ -427,13 +439,13 @@ def _supervise_pass(dry=False, only=""):
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
                             common.ledger.alert(ws, cid, f"{_kind} '{_ph}' unchanged {int(_pa)}s > {_alert_s}s")
-                            common._PHASE_ALERTED.add(_key)
+                            alerts.phase.add(_key)
                     if _kill_s is not None and _pa > _kill_s:
                         common._rec_log(f"{cid} ALERT — phase '{_ph}' unchanged "
                                  f"{int(_pa)}s > {_kill_s}s -> stand down"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
-                            ops._teardown_cell(cid, st["variant"],
+                            ops.teardown_cell(cid, st["variant"],
                                            reason=f"phase-stalled-{_ph}",
                                            unblock_agent=True)
                             _reclaim(st, dry)
@@ -444,7 +456,7 @@ def _supervise_pass(dry=False, only=""):
             if not terminal and st["state"] in ("RUNNING", "WAITING"):
                 _arm = common.definition().lock_of(st["variant"])
                 _slot = state._arm_slot_of(_arm, cid) if _arm else None
-                if _slot is not None and cid not in common._ARM_ALERTED:
+                if _slot is not None and cid not in alerts.arm:
                     # Stalled means NOT PROGRESSING, which is phase_age. The
                     # heartbeat's own age only says the ticker is alive: the
                     # ticker rewrites .loop every HB_TICK for as long as the
@@ -471,8 +483,8 @@ def _supervise_pass(dry=False, only=""):
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
                             common.ledger.alert(ws, cid, f"ARM-STUCK held the {_arm} arm {int(_slot)}s with no progress for {int(_silent)}s — standing it down")
-                            common._ARM_ALERTED.add(cid)
-                            ops._teardown_cell(cid, st["variant"],
+                            alerts.arm.add(cid)
+                            ops.teardown_cell(cid, st["variant"],
                                            reason="arm-stuck", unblock_agent=True)
                             _reclaim(st, dry)
                         continue
@@ -483,7 +495,7 @@ def _supervise_pass(dry=False, only=""):
             _L = common.ledger.parse(ws)
             if terminal and _L["reverify_active"] \
                     and iter_age > T_HANG \
-                    and not any(re.search(zombies._VERIFY_HOLDER_ARGV, l)
+                    and not any(re.search(zombies.VERIFY_HOLDER_ARGV, l)
                                 for l in common.sh(["ps", "-axww", "-o", "command="]).splitlines()):
                 common._rec_log(f"{cid} stranded reverify ({st['shape']}) -> ledger repair"
                          + (" [dry-run]" if dry else ""))
@@ -573,7 +585,7 @@ def _supervise_pass(dry=False, only=""):
                         # the arm slot in the kernel while this cell's cluster
                         # is still up, and the next acquirer would provision
                         # against it.
-                        _outcome = ops._teardown_cell(
+                        _outcome = ops.teardown_cell(
                             cid, st["variant"], reason="limit-wall",
                             unblock_agent=True)
                         if _outcome in ("termed", "killed"):
@@ -604,7 +616,7 @@ def _supervise_pass(dry=False, only=""):
                          f"out_age={int(out_age or -1)}s iter_age={int(iter_age)}s)"
                          + (" [dry-run]" if dry else ""))
                 if not dry:
-                    _outcome = ops._teardown_cell(
+                    _outcome = ops.teardown_cell(
                         cid, st["variant"], reason="silent-hang",
                         unblock_agent=True)
                     if _outcome in ("termed", "killed"):
@@ -642,78 +654,3 @@ def _supervise_pass(dry=False, only=""):
     if not dry:
         _agent_io_book({c: {"rx": rx, "cpu": cpu, "flat": io_flat.get(c, 0)}
                         for c, (rx, cpu) in io_now.items()})
-
-
-def reconcile(args):
-    """One-shot supervision sweep (engine verb). conduct runs the same pass
-    every --supervise-interval while it is up — `--watch` was removed
-    2026-08-12 so a second controller cannot be started (the 2026-07-18
-    two-controllers stall, now impossible by construction)."""
-    _supervise_pass(dry=args.dry_run, only=args.only or "")
-    if args.dry_run:
-        for kind, ident, owner, note in zombies.find_zombies():
-            print(f"would reap {kind:<10} {ident}  owner={owner}  {note}")
-        return
-    for line in zombies.reap_sweep():
-        print(line)
-
-
-def conduct_diagnose(_args):
-    """READ-ONLY one-shot: the conduct loop's judgment without waiting for
-    (or running) the loop — what supervision would do, what is zombie, what
-    admission would do next. Mutates nothing: supervision runs dry, zombies
-    are listed not reaped, queue lines are read but never popped."""
-    qs = common.queues()
-    print("— SUPERVISION (dry run) " + "—" * 36)
-    _supervise_pass(dry=True)
-    zs = zombies.find_zombies()
-    print(f"\n— ZOMBIES ({len(zs)}) — listed only; a live `experiment run` reaps "
-          f"on the 2nd consecutive sighting")
-    for kind, ident, owner, note in zs:
-        print(f"  {kind:<10} {ident}  owner={owner}  {note}")
-    live = state.loop_parents()
-    up = (common.CONDUCT / "conduct.pid").exists()
-    print(f"\n— ADMISSION PREVIEW — {len(live)} live loop(s), per-agent cap "
-          f"{common.PER_AGENT_CAP}, run {'UP' if up else 'DOWN'}"
-          + ("" if up else " (nothing admits until `experiment run`)"))
-    for d in qs.lane_dirs(include_parked=True):
-        m = qs.lane_agent(d)
-        parked = d.name.endswith(".parked")
-        paths = qs.specs_in(d)
-        claims = qs.running_specs(m)
-        _cu = qs.cooldown_until(m)
-        if parked:
-            note = "parked — no admission until experiment resume"
-        elif _cu > time.time():
-            note = (f"limit-cooling until "
-                    f"{datetime.fromtimestamp(_cu, timezone.utc):%m-%d %H:%M}Z "
-                    f"— the run retries then")
-        elif len(claims) >= common.PER_AGENT_CAP:
-            held = ", ".join(sorted(qs.spec_cid(p) for p in claims))
-            note = f"HELD at {common.PER_AGENT_CAP}/lane — claimed: {held}"
-        else:
-            skipped = 0
-            for p in paths:
-                cid = qs.spec_cid(p)
-                ws = common.WS / cid
-                if ws.is_dir():
-                    if (ws / "reconcile.flagged").exists():
-                        skipped += 1
-                        continue
-                    st = state.cell_state(ws, {}, set())
-                    if st and st["state"] == "DONE":
-                        skipped += 1
-                        continue
-                if state.pause_lock(cid) or live.get(cid):
-                    skipped += 1
-                    continue
-                note = f"next: {cid} — would admit"
-                break
-            else:
-                note = "nothing admissible"
-            if skipped:
-                note += f" ({skipped} flagged/done/paused ahead of it)"
-        print(f"  {m:<8}{len(paths):>4} pending{' [PAUSED]' if parked else '':<9} "
-              f"{len(claims)} claimed  {note}")
-    for l in zombies.janitor_lines():
-        print(l)

@@ -59,7 +59,7 @@ def _changes(method):
     return held
 
 
-def _hhmm():
+def hhmm():
     return f"{datetime.now(timezone.utc):%H:%M:%S}"
 
 
@@ -635,7 +635,7 @@ class Queues:
                 hold.remove(m)
                 changed = True
                 left = max(0.0, (resets - now) / 3600)
-                out(f"  [{_hhmm()}] weekly cap: released {m} ({r}; the reset is "
+                out(f"  [{hhmm()}] weekly cap: released {m} ({r}; the reset is "
                     f"{left:.0f}h away — spend the remainder)")
         if util is not None and util >= BUDGET_HOLD_AT and not near_reset:
             parked = []
@@ -650,7 +650,7 @@ class Queues:
             if parked:
                 when = (f"{datetime.fromtimestamp(resets, timezone.utc):%a %H:%M}Z"
                         if resets else "unknown")
-                out(f"  [{_hhmm()}] ALERT weekly cap {util:.0%} — budget hold: "
+                out(f"  [{hhmm()}] ALERT weekly cap {util:.0%} — budget hold: "
                     f"parked {', '.join(parked)} (resets {when}); the other lanes "
                     f"keep the remaining {1 - util:.0%}")
         if changed:

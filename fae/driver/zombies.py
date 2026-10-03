@@ -2,7 +2,7 @@
 longer owns, and the reaper's owner-protection logic that must never touch a
 live cell.
 
-_VERIFY_HOLDER_ARGV / _is_driver_pid answer "is this pid entitled to hold the
+VERIFY_HOLDER_ARGV / _is_driver_pid answer "is this pid entitled to hold the
 lock it has" for a verify running via `cli.py experiment verb|cell reverify|experiment
 smoke` in the FOREGROUND process — the regex tracks the real invoked argv,
 so moving the code that implements a verb changes nothing about what it
@@ -179,11 +179,11 @@ def _fd_holders(path):
 # loop_parents). Matched on the invoked argv, group token included.
 
 
-_VERIFY_HOLDER_ARGV = r"cli\.py\s+(experiment\s+(verb|smoke)|cell\s+reverify)\b"
+VERIFY_HOLDER_ARGV = r"cli\.py\s+(experiment\s+(verb|smoke)|cell\s+reverify)\b"
 
 
 def _verify_holders_alive():
-    return bool(common.sh(["pgrep", "-f", _VERIFY_HOLDER_ARGV]).split())
+    return bool(common.sh(["pgrep", "-f", VERIFY_HOLDER_ARGV]).split())
 
 
 def _leaked_lock_holders():
@@ -223,7 +223,7 @@ def _is_driver_pid(pid):
     in a validation root (ws-test.nosync) is invisible to it; the lock it
     holds is not a leak."""
     cmd = common.sh(["ps", "-o", "command=", "-p", str(pid)])
-    return "fae.cell" in cmd or bool(re.search(_VERIFY_HOLDER_ARGV, cmd))
+    return "fae.cell" in cmd or bool(re.search(VERIFY_HOLDER_ARGV, cmd))
 
 
 def find_zombies():
