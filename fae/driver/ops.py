@@ -481,7 +481,7 @@ def resume(args):
                 print(f"  {cid}: {', '.join(acted)}")
                 continue
         common.CONDUCT.mkdir(parents=True, exist_ok=True)
-        with common.fs_lock(common.CONDUCT / "respawn-book.lock"):
+        with common.mutex.fs_lock(common.CONDUCT / "respawn-book.lock"):
             book = {}
             if RESPAWN_BOOK.exists():
                 try:
@@ -949,7 +949,7 @@ def _respawn_count(cid, bump=False):
                 book = {}
         return book.get(cid, 0)
     common.CONDUCT.mkdir(parents=True, exist_ok=True)
-    with common.fs_lock(common.CONDUCT / "respawn-book.lock"):
+    with common.mutex.fs_lock(common.CONDUCT / "respawn-book.lock"):
         book = {}
         if RESPAWN_BOOK.exists():
             try:

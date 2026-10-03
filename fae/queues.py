@@ -15,7 +15,10 @@ module is the only code that reads or writes it.
     agent-io.json, agent_image.json, agent_clients.json   the agents' books
 
 A spec moves by one rename(2), so it is always in exactly one state: a crash
-at any instant can neither lose nor duplicate it.
+at any instant can neither lose nor duplicate it. Every change also holds
+<root>/workspaces.nosync/.locks/queues-lock for the change alone, so two
+processes never interleave a multi-rename change (a renumber, a park, the
+weekly hold). It is never held while a cell waits for a slot or holds one.
 """
 from __future__ import annotations
 
@@ -23,6 +26,7 @@ import os
 import re
 import time
 import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -41,6 +45,20 @@ _WEEKLY_EVENT_RE = re.compile(r'"type":"rate_limit_event","rate_limit_info":(\{[
 _SEQ_PREFIX = re.compile(r"^(?:\d+|tmp-\d+)\.")
 
 
+@contextmanager
+def _nothing():
+    yield
+
+
+def _changes(method):
+    """The method changes .queues/: it runs under the queues-lock."""
+    def held(self, *a, **k):
+        with self._changing():
+            return method(self, *a, **k)
+    held.__name__, held.__doc__ = method.__name__, method.__doc__
+    return held
+
+
 def _hhmm():
     return f"{datetime.now(timezone.utc):%H:%M:%S}"
 
@@ -49,9 +67,10 @@ class Book:
     """One JSON file of the queues. A missing or unreadable file reads as
     `default`; a save replaces the file whole."""
 
-    def __init__(self, path, default=dict):
+    def __init__(self, path, default=dict, changing=None):
         self.path = Path(path)
         self._default = default
+        self._changing = changing
 
     def load(self):
         try:
@@ -60,10 +79,11 @@ class Book:
             return self._default()
 
     def save(self, doc):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.tmp")
-        tmp.write_text(json.dumps(doc, sort_keys=True))
-        os.replace(tmp, self.path)
+        with (self._changing() if self._changing else _nothing()):
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(doc, sort_keys=True))
+            os.replace(tmp, self.path)
         return doc
 
 
@@ -98,11 +118,30 @@ class Queues:
 
     SEQ_START = SEQ_START
 
-    def __init__(self, base, *, cell_id=None, refuse=None, workspaces=None):
+    def __init__(self, base, *, locks=None, cell_id=None, refuse=None, workspaces=None):
         self.base = Path(base)
+        self.lock = Path(locks or self.base.parent / ".locks") / "queues-lock"
         self._cell_id = cell_id
         self._refuse = refuse
         self.workspaces = Path(workspaces) if workspaces else None
+        self._held = 0
+
+    @contextmanager
+    def _changing(self):
+        """The queues-lock, re-entered freely by the method that holds it."""
+        if self._held:
+            self._held += 1
+            try:
+                yield
+            finally:
+                self._held -= 1
+            return
+        with mutex.fs_lock(self.lock):
+            self._held = 1
+            try:
+                yield
+            finally:
+                self._held = 0
 
     # --- specs and lanes ------------------------------------------------------
 
@@ -204,6 +243,7 @@ class Queues:
                 return True
         return False
 
+    @_changes
     def enqueue(self, agent, spec, front=False):
         """Add a spec to a lane. Returns its path, or None when the lane
         already holds that cid or the cell may not be queued (refuse)."""
@@ -235,6 +275,7 @@ class Queues:
     def is_claimed(self, agent, cid):
         return (self.rundir(agent) / f"{cid}.json").exists()
 
+    @_changes
     def adopt(self, agent, cid, spec):
         """A claim for a live cell started outside the scheduler."""
         d = self.rundir(agent)
@@ -253,6 +294,7 @@ class Queues:
         return sorted((p for d in base.iterdir() if d.is_dir()
                        for p in self.specs_in(d)), key=lambda p: p.name)
 
+    @_changes
     def claim(self, agent, p):
         """QUEUED -> RUNNING. Refuses to overwrite an existing claim: rename
         would drop it silently, and two claims on one cid means two cells."""
@@ -264,6 +306,7 @@ class Queues:
         p.rename(dest)
         return dest
 
+    @_changes
     def release(self, agent, p, front=True):
         """RUNNING -> QUEUED, keeping the spec's place at the head by default."""
         d = self._writable_lane(agent)
@@ -272,6 +315,7 @@ class Queues:
         p.rename(dest)
         return dest
 
+    @_changes
     def finish(self, agent, p):
         """RUNNING -> DONE."""
         d = self.base / "done" / agent
@@ -280,6 +324,7 @@ class Queues:
         p.rename(dest)
         return dest
 
+    @_changes
     def shelve(self, p, why):
         """Any state -> backups/. Specs are never deleted, only taken out of
         play, so a mistaken stop is restorable by moving the file back."""
@@ -290,6 +335,7 @@ class Queues:
         p.rename(dest)
         return dest
 
+    @_changes
     def park_lane(self, agent):
         """'parked' | 'already' | 'empty'."""
         live, parked = self.lane_dir(agent), self.lane_dir(agent, parked=True)
@@ -300,6 +346,7 @@ class Queues:
         live.rename(parked)
         return "parked"
 
+    @_changes
     def unpark_lane(self, agent):
         """'resumed' | 'not-paused' | 'conflict' (both dirs exist — someone
         hand-moved things; merging silently would reorder the backlog)."""
@@ -330,6 +377,7 @@ class Queues:
                                              if base.is_dir() else [])
         return [p for d in dirs for p in self.specs_in(d)]
 
+    @_changes
     def cancel(self, p, agent, stamp):
         """QUEUED -> out of play, before admission: moved into
         .to_be_deleted/<stamp>/queue/<agent>/, never deleted; moving it back
@@ -372,8 +420,8 @@ class Queues:
         """The kernel's answer: is the slot's flock held right now?"""
         return mutex.probe_held(slot)
 
-    @staticmethod
-    def clear_slot_note(slot):
+    @_changes
+    def clear_slot_note(self, slot):
         mutex.clear_holder(slot)
 
     def occupied(self, n):
@@ -390,6 +438,7 @@ class Queues:
                 f"all, so a tree holding both has no mutual exclusion.")
         return (pool, path, mutex.open_lock(path))
 
+    @_changes
     def open_slots(self, work_slots, lock=None, lock_slots=1):
         """Every candidate slot file of the work pool and, for a locked
         variant, of its lock's pool, open and not yet held."""
@@ -410,18 +459,19 @@ class Queues:
             raise
         return Slots(files)
 
-    def _take(self, slots, pool, cid, label):
+    def _take(self, slots, pool, cid, label, poll):
         cand = slots._pool(pool)
         by_fd = {f.fileno(): p for p, f in cand}
-        got = mutex.wait_fds(list(by_fd), cid, label)
+        got = mutex.wait_fds(list(by_fd), cid, label, poll=poll)
         if got is None:
             return False
-        mutex.note_holder(by_fd[got], cid, os.getpid())
+        with self._changing():
+            mutex.note_holder(by_fd[got], cid, os.getpid())
         slots.held.append(by_fd[got])
         return True
 
     def acquire_slots(self, cid, work_slots, lock=None, lock_slots=1,
-                      on_wait_work=None, on_work_slot=None, on_wait_lock=None):
+                      on_wait_work=None, on_work_slot=None, on_wait_lock=None, poll=5.0):
         """A work slot, then (for a locked variant) a slot of its lock — slot
         first, so a cell queuing for the scarce lock already holds its work
         slot, never the reverse. Blocks until held; an operator pause stands
@@ -434,20 +484,21 @@ class Queues:
         try:
             if on_wait_work:
                 on_wait_work()
-            if not self._take(slots, "work", cid, "work-slots"):
+            if not self._take(slots, "work", cid, "work-slots", poll):
                 return slots, "slot-queue"
             if on_work_slot:
                 on_work_slot()
             if lock:
                 if on_wait_lock:
                     on_wait_lock()
-                if not self._take(slots, "lock", cid, f"arm-lock[{lock}]"):
+                if not self._take(slots, "lock", cid, f"arm-lock[{lock}]", poll):
                     return slots, "arm-lock-queue"
             return slots, None
         except BaseException:
             slots.close()
             raise
 
+    @_changes
     def clear_holder_notes(self, cid, lock=None):
         """Drop every slot holder note naming this cell. The fd is the lock —
         the notes are the fleet's display of who holds what — so they must go
@@ -463,17 +514,18 @@ class Queues:
     # --- the agents' books ----------------------------------------------------
 
     def agent_io_book(self):
-        return Book(self.base / "agent-io.json")
+        return Book(self.base / "agent-io.json", changing=self._changing)
 
     def agent_image_book(self):
-        return Book(self.base / "agent_image.json")
+        return Book(self.base / "agent_image.json", changing=self._changing)
 
     def agent_clients_book(self):
-        return Book(self.base / "agent_clients.json")
+        return Book(self.base / "agent_clients.json", changing=self._changing)
 
     def cooldown_file(self, agent):
         return self.base / f"cooldown.{agent}"
 
+    @_changes
     def set_cooldown(self, agent, until, detail):
         """The lane may not admit before `until` (epoch seconds)."""
         self.base.mkdir(parents=True, exist_ok=True)
@@ -487,6 +539,7 @@ class Queues:
         except (OSError, ValueError, IndexError):
             return 0
 
+    @_changes
     def clear_cooldown(self, agent):
         self.cooldown_file(agent).unlink(missing_ok=True)
 
@@ -508,10 +561,12 @@ class Queues:
         st.setdefault("hold", [])
         return st
 
+    @_changes
     def weekly_save(self, st):
         self.base.mkdir(parents=True, exist_ok=True)
         self._weekly_book().write_text(json.dumps(st))
 
+    @_changes
     def weekly_cap_observe(self, st=None, now=None):
         """Fold every seven_day rate_limit_event the agents logged since the
         last scan into the book; the newest event (log mtime, then line
@@ -563,6 +618,7 @@ class Queues:
             return None, resets
         return st.get("utilization"), resets
 
+    @_changes
     def weekly_budget_apply(self, st, now=None, out=print):
         """Hold the budget lanes past BUDGET_HOLD_AT; release them within
         BUDGET_RELEASE_H of the reset or once it has passed. Lanes the
@@ -602,6 +658,7 @@ class Queues:
             self.weekly_save(st)
         return st
 
+    @_changes
     def weekly_hold_clear(self, agent, out=print):
         """An operator resume of a held lane ends the hold: it is not re-parked
         until the next reading crosses the threshold again."""

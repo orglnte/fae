@@ -8,7 +8,7 @@ mechanism fails silently.
 
 The holder here is a Python process that takes the lock the way every holder
 in this rig does — an fd it opened itself, flock'd, kept open (Arena,
-Cell.verify_lock_acquire, Verify.rig_lock_acquire, fae/driver/common.py's fs_lock). The bash
+Cell.verify_lock_acquire, Verify.rig_lock_acquire, fae/mutex.py's fs_lock). The bash
 holder these tests used to drive went with the bash hooks.
 """
 import os

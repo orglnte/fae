@@ -227,6 +227,7 @@ the probe proves exclusion across a real second process. Probe by hand:
 | **variant lock** (`arm-<lock>` in the lock plane) | the `[infra] lock` a variant file names, N-ary; declared by variants whose agents hold a live infra | **cell lifetime, setup→teardown** | host contention: another live infra distorts load-test timing |
 | work slot | global semaphore, `WORK_SLOTS` | cell lifetime | total concurrent cells |
 | exclusive lock | global, the name a verifier declares in `EXCLUSIVE` (none: no lock) | one arrangement, on the cell's own fd around the verifier | whatever singleton infra a verifier declares |
+| queues-lock (`.locks/queues-lock`) | global | one change to `.queues/` (`fae/queues.py`), never while a cell waits for or holds a slot | two processes interleaving a multi-rename change: a lane renumber, a park, the weekly hold |
 
 **Lock ordering is work slot ≺ variant lock**, globally consistent, so
 deadlock-free; it also keeps the scarce lock held only while the cell works. Release is the
