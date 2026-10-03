@@ -26,6 +26,7 @@ from __future__ import annotations
 import errno
 import fcntl
 import os
+import re
 import subprocess
 import sys
 import time
@@ -282,6 +283,42 @@ def _probe_cross_process(path):
         return False, "a second PROCESS took the same exclusive lock"
     return False, (f"the confirming probe could not decide (rc={r.returncode}): "
                    f"{r.stderr.decode(errors='replace').strip()[:120]}")
+
+
+REMOTE_FS = frozenset({"nfs", "nfs4", "smbfs", "cifs", "smb3", "afpfs", "webdav", "sshfs",
+                       "fuse.sshfs", "9p", "virtiofs", "ceph", "glusterfs", "fuse.glusterfs",
+                       "davfs", "fuse.davfs2"})
+
+
+def parse_mount(table, mountpoint):
+    """(local, fstype) of `mountpoint` in `mount`'s output; local is None when
+    the mount point is not listed. Reads both the Linux form (`on X type T
+    (opts)`) and the macOS form (`on X (T, opts)`, where `local` is an option)."""
+    for line in table.splitlines():
+        m = re.match(r"^.+? on (.+?) type (\S+) \(.*\)$", line)
+        if m and m.group(1) == mountpoint:
+            return m.group(2) not in REMOTE_FS, m.group(2)
+        m = re.match(r"^.+? on (.+?) \(([^,)]+)(.*)\)$", line)
+        if m and m.group(1) == mountpoint:
+            opts = [o.strip() for o in m.group(3).split(",")]
+            return "local" in opts and m.group(2) not in REMOTE_FS, m.group(2)
+    return None, "?"
+
+
+def fs_is_local(path):
+    """(local, fstype) for the filesystem holding `path` (or its nearest
+    existing parent). Appending to a shared file is atomic per write only on a
+    local disk; local is None when it cannot be told."""
+    path = Path(path).resolve()
+    while not path.exists() and path != path.parent:
+        path = path.parent
+    try:
+        df = subprocess.run(["df", "-P", str(path)], capture_output=True, text=True, timeout=10)
+        mountpoint = df.stdout.splitlines()[-1].split(None, 5)[-1]
+        table = subprocess.run(["mount"], capture_output=True, text=True, timeout=10).stdout
+    except Exception:       # whatever stops the probe, the answer is "cannot tell"
+        return None, "?"
+    return parse_mount(table, mountpoint)
 
 
 def fs_enforces_flock(d):

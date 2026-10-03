@@ -195,6 +195,11 @@ def _conduct_preflight():
         print("run: STOP — the docker daemon is not reachable. Start "
               "Docker, then run `experiment run` again.", flush=True)
         return False
+    local, fstype = common.mutex.fs_is_local(common.WS)
+    if local is False:
+        print(f"run: WARNING — {common.WS} is on {fstype}, not a local disk. Cells and "
+              f"conduct append to the same ledgers; appends interleave safely only on a "
+              f"local disk.", flush=True)
     # the agent image every spawn uses: the base (built when missing, its
     # clients current) and the experiment's layer over it
     if not image.ensure_agent(log=lambda t: print(f"run: {t}", flush=True)):
