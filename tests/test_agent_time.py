@@ -10,6 +10,7 @@ from _ctx import ROOT
 
 from fae.cell import cell as cellmod
 from fae.cell import config as _config
+from fae.queues import Book
 
 
 class TestTheFields(unittest.TestCase):
@@ -61,7 +62,7 @@ class TestTheClientVersion(unittest.TestCase):
     def test_versions_are_probed_once_per_image_id(self):
         from unittest import mock
         from fae.cell import image as img
-        cache = Path(tempfile.mkdtemp()) / "agent_clients.json"
+        cache = Book(Path(tempfile.mkdtemp()) / "agent_clients.json")
         probes = []
 
         def installed(iid):
@@ -78,7 +79,7 @@ class TestTheClientVersion(unittest.TestCase):
         from unittest import mock
         from fae.cell import image as img
         with mock.patch.object(img, "image_id", return_value=""):
-            self.assertEqual(img.client_versions("gone", Path(tempfile.mkdtemp()) / "c.json"), {})
+            self.assertEqual(img.client_versions("gone", Book(Path(tempfile.mkdtemp()) / "c.json")), {})
 
     def _cell(self, cli):
         c = cellmod.Cell.__new__(cellmod.Cell)

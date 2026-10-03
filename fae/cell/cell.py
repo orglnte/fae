@@ -9,7 +9,7 @@ WHAT THIS FILE OWNS, and what it does not. It owns the cell's IDENTITY, its
 LIFECYCLE and its JUDGEMENT. Everything else is a collaborator:
 
     fsm.py           the state machine (pure; no files, no processes, no clock)
-    arena.py         the fd arena
+    fae/queues.py    the slots it holds while it runs
     checkpoints.py   per-attempt provenance (git tree hashes)
     surface.py       the authorable surface: manifest, seal, heal, check
     verify.py        the boundary to the experiment's verifier: Ctx out,
@@ -40,8 +40,6 @@ from . import config as _config
 from . import faults
 from . import rig as _rig
 from . import variants as _variants
-from . import arena as _arena_mod
-from .arena import Arena
 from .checkpoints import Checkpoints
 from .surface import Surface, authorable
 from .fsm import (ENABLED, PHASE_TO_LOOP, IllegalTransition, Loop, Phase,
@@ -53,6 +51,7 @@ _mutex = _load_mutex()
 
 from fae import paths as _paths  # noqa: E402
 from fae import plane as _plane  # noqa: E402
+from fae.queues import Queues  # noqa: E402
 
 HARNESS = _paths.ENGINE
 ROOT = _paths.ROOT
@@ -897,13 +896,12 @@ class Cell:
         out.mkdir(parents=True, exist_ok=True)
         # The arm's infra is provisioned the same way a run provisions it:
         # the verify probes a cache that only the setup hook brings up.
-        arena = self.arena().open()
         results = []
         # a re-verify always runs the full gate
         prev = {"SHAPE_GATE": self.conf.values.get("SHAPE_GATE")}
         self.conf.values["SHAPE_GATE"] = "all"
         try:
-            rc, _ = self.setup(arena)
+            rc, _ = self.setup()
             if rc != 0:
                 raise RuntimeError(f"{self.variant} cell_setup failed (rc={rc}) "
                                    f"— cannot re-verify without its infra")
@@ -918,7 +916,6 @@ class Cell:
                 else:
                     self.conf.values[k] = v
             self.teardown()
-            arena.close()
         (out / "reverify.json").write_text(json.dumps({
             "cid": self.cid, "at": _now(),
             "shapes": [r.shape for r in results],
@@ -965,16 +962,10 @@ class Cell:
         s = self.variant_cls
         return s.LOCK if s else None
 
-    def arena(self, work_slots=None):
-        arm = self.arm
-        s = self.variant_cls
-        return Arena(_plane.queues(self.root),
-                     work_slots=int(work_slots
-                                    or self.conf.get("WORK_SLOTS", 7)),
-                     arm=arm,
-                     arm_slots=int(self.conf.get(
-                         f"ARM_SLOTS_{(arm or '').upper()}",
-                         s.LOCK_SLOTS if s else 1)))
+    @property
+    def queues(self):
+        """The queues (fae/queues.py): this cell's slots live there."""
+        return Queues(_plane.queues(self.root))
 
     def verify_lock_acquire(self, poll=5.0):
         """The fleet-wide verify lock: gates are serialized WHOLE, so one
@@ -1035,38 +1026,22 @@ class Cell:
 
     SLOTS_HELD_ENV = "CELL_SLOTS_HELD"
 
-    def acquire_slots(self, arena):
-        """Take the work slot, and the arm slot for an *_access arm.
+    def acquire_slots(self):
+        """Take the work slot, and the lock's slot for a locked variant
+        (Queues.acquire_slots). The cell process holds them on its own fds for
+        its whole life, so no lock can outlive the process that took it.
 
-        The cell process flocks its OWN fds: it is the holder for its whole
-        life, so there is no window in which a lock outlives the process that
-        took it. Ordering is slot then arm — a cell queuing for the scarce arm
-        already holds the work slot, never the reverse.
-
-        Returns True, or the queue that stood the cell down ("slot-queue" /
-        "arm-lock-queue") — the ledger must name the queue it happened in.
+        Returns (slots, None), or (slots, queue) when it stood down — the
+        ledger must name the queue it happened in. The caller closes `slots`.
         """
-        slots = [fd for fd in arena.fds if fd < _arena_mod.FD_ARM_BASE]
-        arms = [fd for fd in arena.fds if fd >= _arena_mod.FD_ARM_BASE]
-        queues = _plane.queues(self.root)
-
-        self.hb(Phase.SLOT_WAIT, 0)
-        got = _mutex.wait_fds(slots, self.cid, "work-slots")
-        if got is None:
-            return "slot-queue"
-        _mutex.note_holder(queues / "work-slots" / f"slot-{got - _arena_mod.FD_SLOT_BASE}",
-                           self.cid, os.getpid())
-        self.apply(T.ACQUIRE_SLOT)
-
-        if arms:
-            self.hb(Phase.ARM_LOCK, 0)
-            got = _mutex.wait_fds(arms, self.cid, f"arm-lock[{self.arm}]")
-            if got is None:
-                return "arm-lock-queue"
-            _mutex.note_holder(
-                queues / f"arm-{self.arm}.slots" / f"slot-{got - _arena_mod.FD_ARM_BASE}",
-                self.cid, os.getpid())
-        return True
+        s = self.variant_cls
+        return self.queues.acquire_slots(
+            self.cid, int(self.conf.get("WORK_SLOTS", 7)), lock=self.arm,
+            lock_slots=int(self.conf.get(f"ARM_SLOTS_{(self.arm or '').upper()}",
+                                         s.LOCK_SLOTS if s else 1)),
+            on_wait_work=lambda: self.hb(Phase.SLOT_WAIT, 0),
+            on_work_slot=lambda: self.apply(T.ACQUIRE_SLOT),
+            on_wait_lock=lambda: self.hb(Phase.ARM_LOCK, 0))
 
     @property
     def infra(self):
@@ -1076,7 +1051,7 @@ class Cell:
             self._infra = _variants.for_cell(self)
         return self._infra
 
-    def setup(self, arena=None):
+    def setup(self):
         """The cell's network, then the arm's provisioning on it. Returns
         (rc, env): 0 and the agent-container env on success; 1 and the
         failure already logged on a rig fault."""
@@ -1123,20 +1098,8 @@ class Cell:
         self.clear_holder_notes()
 
     def clear_holder_notes(self):
-        """Drop every slot holder note naming this cell. The fd is the lock —
-        the notes are the fleet's display of who holds what — so they must
-        go on EVERY exit, or a halted cell reads as a zombie holder."""
-        queues = _plane.queues(self.root)
-        dirs = [queues / "work-slots"]
-        if self.arm:
-            dirs.append(queues / f"arm-{self.arm}.slots")
-        for d in dirs:
-            for holder in d.glob("slot-*.holder"):
-                try:
-                    if holder.read_text().split()[0] == self.cid:
-                        holder.unlink(missing_ok=True)
-                except (OSError, IndexError):
-                    pass
+        """Drop every slot holder note naming this cell (Queues.clear_holder_notes)."""
+        self.queues.clear_holder_notes(self.cid, self.arm)
 
     def infra_ok(self):
         """An ENVIRONMENT fault must never burn an attempt, and must never be
@@ -1328,7 +1291,7 @@ class Cell:
         try:
             from . import image as _image
             v = _image.client_versions(self.conf.get("AGENT_IMAGE") or self.agent_image(),
-                                       _plane.queues(self.root) / "agent_clients.json").get(cli)
+                                       self.queues.agent_clients_book()).get(cli)
         except Exception:       # an unreadable version never costs an attempt
             v = None
         return f"client={cli}:{v or '-'}"
@@ -1470,7 +1433,7 @@ class Cell:
         ee = extra_env or {}
         # An AGENT_CMD in the environment (or passed in) is an override — a
         # custom agent, or a rig-test stub. The normal path builds the
-        # container argv from the config; no arena in pass_fds, so an agent
+        # container argv from the config; no slot fd in pass_fds, so an agent
         # container outliving this loop can never hold its locks.
         # The scripted testagent reads TESTAGENT_PLAN from the environment; the
         # container's `-e TESTAGENT_PLAN` passthrough inherits it, so it must
@@ -1541,9 +1504,8 @@ class Cell:
         """The attempt loop. Returns the cell's verdict, or None if it stood
         down without reaching one.
 
-        Holds the loop lock for the whole run and the fd arena from before the
-        setup hook until after teardown: the hook flocks the slots on inherited
-        fds, and closing them here is the release.
+        Holds the loop lock for the whole run and its slots from before the
+        setup hook until after teardown; closing them is the release.
         """
         self._refuse_if_sealed("running")
         gate = verify or self.gate
@@ -1576,15 +1538,15 @@ class Cell:
         prior = self.attempts
         self.apply(T.SPAWN)
 
-        arena = self.arena().open()
+        slots = None
         stop_ticker = self.start_ticker()
         setup_env, green, attempt = {}, False, prior
         try:
             self.hb(Phase.SETUP, 0)
             # Always: a cell occupies the rig whether or not an agent runs, and
             # AcquireSlot is what tells the model an attempt has begun.
-            queue = self.acquire_slots(arena)
-            if queue is not True:
+            slots, queue = self.acquire_slots()
+            if queue is not None:
                 self._append("PAUSED", "attempt=0", queue)
                 self.note_pause()
                 self.apply(T.STAND_DOWN, queue)
@@ -1598,7 +1560,7 @@ class Cell:
                     raise Halt(f"HALT[agent]: no creds to stage for "
                                f"{self.cid}: {e}", 42) from e
             # a stub replaces the agent, never the infra the gate runs on
-            rc, setup_env = self.setup(arena)
+            rc, setup_env = self.setup()
             if rc != 0:
                 self._append("ALERT", f"SETUP-FAILED rc={rc}",
                              f"{self.variant} cell_setup; investigate")
@@ -1776,7 +1738,8 @@ class Cell:
             self.teardown()
             self.clear_holder_notes()
             (self.ws / ".loop").unlink(missing_ok=True)
-            arena.close()
+            if slots is not None:
+                slots.close()
             loop_lock.close()
             if awake is not None:
                 awake.terminate()

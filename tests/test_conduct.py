@@ -59,14 +59,14 @@ class ConductCase(OrchTmpCase):
 
     def q(self, agent, specs):
         for spec in specs:
-            runs.queue.enqueue(agent, spec)
+            runs.queues.enqueue(agent, spec)
 
     def pending(self, agent):
         """The lane's pending specs, in admission order."""
-        return [runs.queue.read_spec(p) for p in runs.queue.lane_specs(agent)]
+        return [runs.queues.read_spec(p) for p in runs.queues.lane_specs(agent)]
 
     def claimed(self, agent):
-        return [runs.queue.spec_cid(p) for p in runs.queue.running_specs(agent)]
+        return [runs.queues.spec_cid(p) for p in runs.queues.running_specs(agent)]
 
     def spec(self, variant="beta_apidocs", rep=1):
         return {"task": "T1", "variant": variant,
@@ -166,18 +166,18 @@ class TestFinishedSpecsAreRetired(ConductCase):
     def test_a_done_cells_spec_leaves_the_lane(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
         m, v, task, rep = runs.parse_cell_id(cid)
-        runs.queue.enqueue(m, dict(task=task, variant=v, rep=int(rep),
+        runs.queues.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         self._done_cell(cid)
         with mock.patch.object(runs.state, "containers", return_value=set()):
             runs.supervise._retire_finished_specs()
-        self.assertEqual(runs.queue.lane_specs(m), [])
+        self.assertEqual(runs.queues.lane_specs(m), [])
         self.assertTrue((runs.common.QUEUES / "done" / m / f"{cid}.json").exists())
 
     def test_an_unfinished_cells_spec_stays(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
         m, v, task, rep = runs.parse_cell_id(cid)
-        runs.queue.enqueue(m, dict(task=task, variant=v, rep=int(rep),
+        runs.queues.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         d = self.ws / cid
         (d / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -186,14 +186,14 @@ class TestFinishedSpecsAreRetired(ConductCase):
         (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
         with mock.patch.object(runs.state, "containers", return_value=set()):
             runs.supervise._retire_finished_specs()
-        self.assertEqual(len(runs.queue.lane_specs(m)), 1)
+        self.assertEqual(len(runs.queues.lane_specs(m)), 1)
 
     def test_resume_retires_it_too(self):
         """`cell resume` is what leaves these behind — it respawns without
         going through admission, so the spec is never claimed."""
         cid = "sonnet_high_beta_apidocs_T1_r1"
         m, v, task, rep = runs.parse_cell_id(cid)
-        runs.queue.enqueue(m, dict(task=task, variant=v, rep=int(rep),
+        runs.queues.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         self._done_cell(cid)
         out = io.StringIO()
@@ -202,7 +202,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
                 mock.patch.object(runs.state, "containers", return_value=set()):
             runs.ops.resume(SimpleNamespace(selectors=[cid], force=False))
         self.assertIn("spec retired", out.getvalue())
-        self.assertEqual(runs.queue.lane_specs(m), [])
+        self.assertEqual(runs.queues.lane_specs(m), [])
 
     def test_resume_claims_the_spec_it_respawns(self):
         """A running cell whose spec is still queued reads as backlog, and
@@ -210,7 +210,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         two cannot both win."""
         cid = "sonnet_high_beta_apidocs_T1_r1"
         m, v, task, rep = runs.parse_cell_id(cid)
-        runs.queue.enqueue(m, dict(task=task, variant=v, rep=int(rep),
+        runs.queues.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         d = self.ws / cid
         (d / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -224,13 +224,13 @@ class TestFinishedSpecsAreRetired(ConductCase):
                 mock.patch.object(runs.ops, "prestart_clean"), \
                 mock.patch.object(runs.ops, "_spawn_detached", return_value=None):
             runs.ops.resume(SimpleNamespace(selectors=[cid], force=False))
-        self.assertEqual(runs.queue.lane_specs(m), [], "spec still in the lane")
+        self.assertEqual(runs.queues.lane_specs(m), [], "spec still in the lane")
         self.assertTrue((runs.common.QUEUES / "running" / m / f"{cid}.json").exists())
 
     def test_a_spawn_that_never_starts_gives_the_spec_back(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
         m, v, task, rep = runs.parse_cell_id(cid)
-        runs.queue.enqueue(m, dict(task=task, variant=v, rep=int(rep),
+        runs.queues.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         d = self.ws / cid
         (d / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -244,18 +244,18 @@ class TestFinishedSpecsAreRetired(ConductCase):
                 mock.patch.object(runs.ops, "prestart_clean"), \
                 mock.patch.object(runs.ops, "_spawn_detached", return_value=3):
             runs.ops.resume(SimpleNamespace(selectors=[cid], force=False))
-        self.assertEqual(len(runs.queue.lane_specs(m)), 1, "spec was not returned")
+        self.assertEqual(len(runs.queues.lane_specs(m)), 1, "spec was not returned")
         self.assertFalse((runs.common.QUEUES / "running" / m / f"{cid}.json").exists())
 
     def test_a_preview_moves_nothing(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
         m, v, task, rep = runs.parse_cell_id(cid)
-        runs.queue.enqueue(m, dict(task=task, variant=v, rep=int(rep),
+        runs.queues.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         self._done_cell(cid)
         with mock.patch.object(runs.state, "containers", return_value=set()):
             runs.supervise._retire_finished_specs(dry=True)
-        self.assertEqual(len(runs.queue.lane_specs(m)), 1)
+        self.assertEqual(len(runs.queues.lane_specs(m)), 1)
 
 
 class TestPreflight(unittest.TestCase):
@@ -338,15 +338,15 @@ class TestClaims(ConductCase):
         """rename would drop the existing claim silently, and two claims on
         one cid means two cells."""
         self.q("aaa", [self.spec()])
-        p = runs.queue.lane_specs("aaa")[0]
-        runs.queue.claim("aaa", p)
-        runs.queue.enqueue("aaa", self.spec())
+        p = runs.queues.lane_specs("aaa")[0]
+        runs.queues.claim("aaa", p)
+        runs.queues.enqueue("aaa", self.spec())
         # the dedupe normally prevents this; force the collision
-        d = runs.queue.lane_dir("aaa"); d.mkdir(parents=True, exist_ok=True)
+        d = runs.queues.lane_dir("aaa"); d.mkdir(parents=True, exist_ok=True)
         dup = d / "099999.aaa_high_beta_apidocs_T1_r1.json"
         dup.write_text(json.dumps(self.spec()) + "\n")
         with self.assertRaises(FileExistsError):
-            runs.queue.claim("aaa", dup)
+            runs.queues.claim("aaa", dup)
 
     def test_an_unclaimed_crashed_cell_is_left_to_the_operator(self):
         """Supervision must not invent claims: doing so restarted every
@@ -358,7 +358,7 @@ class TestClaims(ConductCase):
               "rep": "7", "budget": 10}
         with mock.patch.object(runs.common, "RECONCILE_LOG", self.conduct / "rec.log"):
             runs.supervise._reclaim(st, dry=False)
-        self.assertEqual(runs.queue.running_specs("aaa"), [])
+        self.assertEqual(runs.queues.running_specs("aaa"), [])
         self.assertEqual(self.pending("aaa"), [])
 
     def _reclaim_log(self, cid):
@@ -397,7 +397,7 @@ class TestClaims(ConductCase):
         self.q("aaa", [self.spec()])
         self.run_conduct()
         self.live.clear()
-        runs.weekly._cooldown_file("aaa").write_text(f"{int(runs.time.time()) + 9999} x\n")
+        runs.queues.cooldown_file("aaa").write_text(f"{int(runs.time.time()) + 9999} x\n")
         self.max_rounds, self.rounds = 2, 0
         self.run_conduct()
         self.assertEqual(len(self.spawned), 1, "restarted a walled lane's cell")
@@ -612,7 +612,7 @@ class TestSupervision(ConductCase):
 class TestLimitCooldown(ConductCase):
     def test_cooling_lane_is_not_admitted_from(self):
         self.q("aaa", [self.spec()])
-        runs.weekly._cooldown_file("aaa").write_text(f"{int(runs.time.time()) + 9999} x\n")
+        runs.queues.cooldown_file("aaa").write_text(f"{int(runs.time.time()) + 9999} x\n")
         self.run_conduct()
         self.assertEqual(self.spawned, [], "admitted from a cooling lane")
 
@@ -621,12 +621,12 @@ class TestLimitCooldown(ConductCase):
         (self.ws / cid).mkdir(parents=True)
         (self.ws / cid / ".paused").write_text("limit-wall by=conduct\n")
         self.q("aaa", [self.spec()])
-        runs.weekly._cooldown_file("aaa").write_text(f"{int(runs.time.time()) - 5} x\n")
+        runs.queues.cooldown_file("aaa").write_text(f"{int(runs.time.time()) - 5} x\n")
         with mock.patch.object(runs.common, "TRANSITIONS_LOG",
                                self.plane / "transitions.log"):
             out = self.run_conduct()
         self.assertIn("cooldown expired", out)
-        self.assertFalse(runs.weekly._cooldown_file("aaa").exists())
+        self.assertFalse(runs.queues.cooldown_file("aaa").exists())
         self.assertIsNone(runs.state.pause_lock(cid))
         self.assertEqual(self.spawned, [cid])
 
@@ -734,7 +734,7 @@ class TestConvergeBranches(ConductCase):
         cid = "aaa_high_beta_apidocs_T1_r1"
         (self.ws / cid).mkdir(parents=True)
         self.q("aaa", [self.spec()])
-        runs.queue.claim("aaa", runs.queue.lane_specs("aaa")[0])
+        runs.queues.claim("aaa", runs.queues.lane_specs("aaa")[0])
         with mock.patch.object(runs.state, "pause_lock", side_effect=lambda c: "manual"):
             self._converge()
         self.assertEqual(self.claimed("aaa"), [], "paused claim was kept")
@@ -742,17 +742,17 @@ class TestConvergeBranches(ConductCase):
         self.assertEqual(self.spawned, [])
 
     def test_an_unreadable_claim_is_shelved(self):
-        d = runs.queue.rundir("aaa"); d.mkdir(parents=True)
+        d = runs.queues.rundir("aaa"); d.mkdir(parents=True)
         (d / "aaa_high_beta_apidocs_T1_r1.json").write_text("{not json\n")
         self._converge()
-        self.assertEqual(runs.queue.running_specs("aaa"), [])
+        self.assertEqual(runs.queues.running_specs("aaa"), [])
         self.assertEqual(len(list((self.queues / "backups").glob("unreadable-*.json"))), 1)
 
     def test_a_systemic_repair_death_freezes_the_lane(self):
         cid = "aaa_high_beta_apidocs_T1_r1"
         (self.ws / cid).mkdir(parents=True)
         self.q("aaa", [self.spec()])
-        runs.queue.claim("aaa", runs.queue.lane_specs("aaa")[0])
+        runs.queues.claim("aaa", runs.queues.lane_specs("aaa")[0])
         self.spawn_rc = 42
         frozen = set()
         out = self._converge(frozen)
@@ -764,7 +764,7 @@ class TestConvergeBranches(ConductCase):
         cid = "aaa_high_beta_apidocs_T1_r1"
         (self.ws / cid).mkdir(parents=True)
         self.q("aaa", [self.spec()])
-        runs.queue.claim("aaa", runs.queue.lane_specs("aaa")[0])
+        runs.queues.claim("aaa", runs.queues.lane_specs("aaa")[0])
         self.spawn_rc = 43
         self._converge()
         self.assertEqual(len(self.claimed("aaa")), 1)
@@ -796,24 +796,24 @@ class TestDiagnose(ConductCase):
 
     def test_changes_nothing(self):
         self.q("aaa", [self.spec(rep=r) for r in (1, 2)])
-        before = {p.name for p in runs.queue.lane_specs("aaa")}
+        before = {p.name for p in runs.queues.lane_specs("aaa")}
         self._diagnose()
-        self.assertEqual({p.name for p in runs.queue.lane_specs("aaa")}, before)
-        self.assertEqual(runs.queue.running_specs(), [])
+        self.assertEqual({p.name for p in runs.queues.lane_specs("aaa")}, before)
+        self.assertEqual(runs.queues.running_specs(), [])
         self.assertEqual(self.spawned, [])
 
     def test_shows_a_parked_lane_and_a_cooling_lane(self):
         self.q("aaa", [self.spec()])
         self.q("bbb", [self.spec()])
-        runs.queue.park_lane("aaa")
-        runs.weekly._cooldown_file("bbb").write_text(f"{int(runs.time.time()) + 9999} x\n")
+        runs.queues.park_lane("aaa")
+        runs.queues.cooldown_file("bbb").write_text(f"{int(runs.time.time()) + 9999} x\n")
         out, _ = self._diagnose()
         self.assertIn("parked", out)
         self.assertIn("limit-cooling", out)
 
     def test_shows_a_lane_held_at_its_cap(self):
         self.q("aaa", [self.spec(rep=r) for r in (1, 2)])
-        runs.queue.claim("aaa", runs.queue.lane_specs("aaa")[0])
+        runs.queues.claim("aaa", runs.queues.lane_specs("aaa")[0])
         out, _ = self._diagnose()
         self.assertIn("HELD at 1/lane", out)
 
@@ -836,7 +836,7 @@ class TestSpawnAndAdoptEdges(ConductCase):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 runs.conduct._adopt_live_cells()
-        self.assertEqual(runs.queue.running_specs(), [])
+        self.assertEqual(runs.queues.running_specs(), [])
         self.assertNotIn("adopted", out.getvalue())
 
 
@@ -920,7 +920,7 @@ class TestConductLiftsItsOwnStandDowns(ConductCase):
 
     def test_a_limit_wall_is_the_cooldowns_not_this_lifts(self):
         self.stood_down(reason="limit-wall")
-        runs.weekly._cooldown_file("aaa").write_text(
+        runs.queues.cooldown_file("aaa").write_text(
             f"{int(runs.time.time()) + 9999} x\n")
         out = self.run_lift()
         self.assertNotIn("lifted", out)
@@ -982,7 +982,7 @@ class TestWeeklyBudgetLanes(ConductCase):
         super().setUp()
         self.now = runs.time.time()
         self.reset = int(self.now + 3 * 86400)
-        self.patches.append(mock.patch.object(runs.weekly, "BUDGET_LANES", ["fable", "opus"]))
+        self.patches.append(mock.patch.object(runs.queues_module, "BUDGET_LANES", ["fable", "opus"]))
         self.patches[-1].start()
         self.addCleanup(self.patches[-1].stop)
 
@@ -1005,36 +1005,36 @@ class TestWeeklyBudgetLanes(ConductCase):
                  mtime=self.now - 100)
         self.log("opus_high_beta_apidocs_T1_r1",
                  self.WARN % (self.reset, "0.83"), mtime=self.now - 50)
-        st = runs.weekly.weekly_cap_observe(now=self.now)
+        st = runs.queues.weekly_cap_observe(now=self.now)
         self.assertEqual(st["utilization"], 0.83)
         self.assertEqual(st["resets_at"], self.reset)
         self.assertEqual(st["source_cid"], "opus_high_beta_apidocs_T1_r1")
 
     def test_rejected_is_the_cap_and_five_hour_is_ignored(self):
         self.log("sonnet_high_beta_apidocs_T1_r1", self.REJECT % self.reset)
-        self.assertEqual(runs.weekly.weekly_cap_observe(now=self.now)["utilization"], 1.0)
+        self.assertEqual(runs.queues.weekly_cap_observe(now=self.now)["utilization"], 1.0)
         self.log("sonnet_high_beta_apidocs_T1_r2", self.FIVE_H % self.reset,
                  mtime=self.now + 10)
-        st = runs.weekly.weekly_cap_observe(now=self.now + 20)
+        st = runs.queues.weekly_cap_observe(now=self.now + 20)
         self.assertEqual(st["utilization"], 1.0, "a five_hour event is not a reading")
 
     def test_a_reading_from_before_the_reset_says_nothing(self):
         st = dict(utilization=0.96, resets_at=self.now - 10, seen_at=0, hold=[])
-        self.assertEqual(runs.weekly.weekly_reading(st, self.now), (None, self.now - 10))
+        self.assertEqual(runs.queues.weekly_reading(st, self.now), (None, self.now - 10))
 
     def test_past_the_threshold_the_budget_lanes_are_held_and_alerted(self):
         self.lanes("fable", "opus", "sonnet")
         st = dict(utilization=0.78, resets_at=self.reset, seen_at=0, hold=[])
         out = []
-        runs.weekly.weekly_budget_apply(st, self.now, out=out.append)
-        self.assertTrue(runs.queue.lane_dir("fable", parked=True).is_dir())
-        self.assertTrue(runs.queue.lane_dir("opus", parked=True).is_dir())
-        self.assertFalse(runs.queue.lane_dir("sonnet", parked=True).is_dir())
+        runs.queues.weekly_budget_apply(st, self.now, out=out.append)
+        self.assertTrue(runs.queues.lane_dir("fable", parked=True).is_dir())
+        self.assertTrue(runs.queues.lane_dir("opus", parked=True).is_dir())
+        self.assertFalse(runs.queues.lane_dir("sonnet", parked=True).is_dir())
         self.assertEqual(st["hold"], ["fable", "opus"])
         self.assertEqual(len(out), 1)
         self.assertIn("ALERT weekly cap 78%", out[0])
         self.assertIn("parked fable, opus", out[0])
-        runs.weekly.weekly_budget_apply(st, self.now + 60, out=out.append)
+        runs.queues.weekly_budget_apply(st, self.now + 60, out=out.append)
         self.assertEqual(len(out), 1, "the hold is announced once")
 
     def test_below_the_threshold_nothing_moves(self):
@@ -1042,68 +1042,68 @@ class TestWeeklyBudgetLanes(ConductCase):
         for util in (None, 0.5, 0.74):
             st = dict(utilization=util, resets_at=self.reset, seen_at=0, hold=[])
             out = []
-            runs.weekly.weekly_budget_apply(st, self.now, out=out.append)
-            self.assertFalse(runs.queue.lane_dir("fable", parked=True).is_dir(), util)
+            runs.queues.weekly_budget_apply(st, self.now, out=out.append)
+            self.assertFalse(runs.queues.lane_dir("fable", parked=True).is_dir(), util)
             self.assertEqual(out, [])
 
     def test_an_operator_park_is_not_conducts_to_hold_or_release(self):
         self.lanes("fable", "opus")
-        runs.queue.park_lane("fable")
+        runs.queues.park_lane("fable")
         st = dict(utilization=0.9, resets_at=self.reset, seen_at=0, hold=[])
-        runs.weekly.weekly_budget_apply(st, self.now, out=lambda s: None)
+        runs.queues.weekly_budget_apply(st, self.now, out=lambda s: None)
         self.assertEqual(st["hold"], ["opus"])
-        runs.weekly.weekly_budget_apply(st, self.reset - 3600, out=lambda s: None)
-        self.assertTrue(runs.queue.lane_dir("fable", parked=True).is_dir(),
+        runs.queues.weekly_budget_apply(st, self.reset - 3600, out=lambda s: None)
+        self.assertTrue(runs.queues.lane_dir("fable", parked=True).is_dir(),
                         "the operator's park survived the release")
-        self.assertFalse(runs.queue.lane_dir("opus", parked=True).is_dir())
+        self.assertFalse(runs.queues.lane_dir("opus", parked=True).is_dir())
 
     def test_released_within_a_day_of_the_reset_and_not_reheld(self):
         self.lanes("fable")
-        runs.queue.park_lane("fable")
+        runs.queues.park_lane("fable")
         st = dict(utilization=0.9, resets_at=self.reset, seen_at=0, hold=["fable"])
         out = []
-        runs.weekly.weekly_budget_apply(st, self.reset - 20 * 3600, out=out.append)
-        self.assertFalse(runs.queue.lane_dir("fable", parked=True).is_dir())
+        runs.queues.weekly_budget_apply(st, self.reset - 20 * 3600, out=out.append)
+        self.assertFalse(runs.queues.lane_dir("fable", parked=True).is_dir())
         self.assertEqual(st["hold"], [])
         self.assertIn("released fable", out[0])
-        runs.weekly.weekly_budget_apply(st, self.reset - 19 * 3600, out=out.append)
-        self.assertFalse(runs.queue.lane_dir("fable", parked=True).is_dir(),
+        runs.queues.weekly_budget_apply(st, self.reset - 19 * 3600, out=out.append)
+        self.assertFalse(runs.queues.lane_dir("fable", parked=True).is_dir(),
                          "no re-hold inside the release window")
 
     def test_released_after_the_reset_passed(self):
         self.lanes("opus")
-        runs.queue.park_lane("opus")
+        runs.queues.park_lane("opus")
         st = dict(utilization=1.0, resets_at=self.now - 5, seen_at=0, hold=["opus"])
-        runs.weekly.weekly_budget_apply(st, self.now, out=lambda s: None)
-        self.assertFalse(runs.queue.lane_dir("opus", parked=True).is_dir())
+        runs.queues.weekly_budget_apply(st, self.now, out=lambda s: None)
+        self.assertFalse(runs.queues.lane_dir("opus", parked=True).is_dir())
 
     def test_an_empty_budget_lane_is_held_by_creating_its_parked_dir(self):
         st = dict(utilization=0.8, resets_at=self.reset, seen_at=0, hold=[])
-        runs.weekly.weekly_budget_apply(st, self.now, out=lambda s: None)
-        self.assertTrue(runs.queue.lane_dir("fable", parked=True).is_dir())
-        runs.queue.enqueue("fable", self.spec())
-        self.assertEqual(runs.queue.lane_specs("fable"), [], "enqueue lands in the parked lane")
+        runs.queues.weekly_budget_apply(st, self.now, out=lambda s: None)
+        self.assertTrue(runs.queues.lane_dir("fable", parked=True).is_dir())
+        runs.queues.enqueue("fable", self.spec())
+        self.assertEqual(runs.queues.lane_specs("fable"), [], "enqueue lands in the parked lane")
 
     def test_the_hold_survives_a_reload_and_resume_clears_it(self):
         st = dict(utilization=0.8, resets_at=self.reset, seen_at=0, hold=[])
-        runs.weekly.weekly_budget_apply(st, self.now, out=lambda s: None)
-        self.assertEqual(runs.weekly.weekly_load()["hold"], ["fable", "opus"])
+        runs.queues.weekly_budget_apply(st, self.now, out=lambda s: None)
+        self.assertEqual(runs.queues.weekly_load()["hold"], ["fable", "opus"])
         out = []
-        runs.weekly.weekly_hold_clear("fable", out=out.append)
-        self.assertEqual(runs.weekly.weekly_load()["hold"], ["opus"])
+        runs.queues.weekly_hold_clear("fable", out=out.append)
+        self.assertEqual(runs.queues.weekly_load()["hold"], ["opus"])
         self.assertIn("cleared", out[0])
 
     def test_the_status_line(self):
-        self.assertEqual(runs.weekly.weekly_line(self.now), "claude weekly: unknown")
-        runs.weekly.weekly_save(dict(utilization=0.83, resets_at=self.reset, seen_at=1,
+        self.assertEqual(runs.queues.weekly_line(self.now), "claude weekly: unknown")
+        runs.queues.weekly_save(dict(utilization=0.83, resets_at=self.reset, seen_at=1,
                               event_at=1, hold=["fable"]))
-        line = runs.weekly.weekly_line(self.now)
+        line = runs.queues.weekly_line(self.now)
         self.assertIn("claude weekly: 83%", line)
         self.assertIn("resets", line)
         self.assertIn("hold: fable", line)
-        runs.weekly.weekly_save(dict(utilization=None, resets_at=None, seen_at=1,
+        runs.queues.weekly_save(dict(utilization=None, resets_at=None, seen_at=1,
                               event_at=1, hold=[]))
-        self.assertEqual(runs.weekly.weekly_line(self.now), "claude weekly: <75%")
+        self.assertEqual(runs.queues.weekly_line(self.now), "claude weekly: <75%")
 
 
 class TestMemoryPressureMonitor(unittest.TestCase):
@@ -1148,7 +1148,7 @@ class TestMemoryPressureMonitor(unittest.TestCase):
         with mock.patch.object(runs.common, "mem_pressure", return_value=fake), \
              mock.patch.object(runs.state, "all_states", return_value=([], {}, set())), \
              mock.patch.object(runs.render, "queued_summary", return_value=[]), \
-             mock.patch.object(runs.weekly, "weekly_line", return_value=""), \
+             mock.patch.object(runs.queues_module.Queues, "weekly_line", return_value=""), \
              mock.patch.object(runs.state, "containers", return_value=set()), \
              mock.patch.object(runs.state, "loop_pids", return_value={}), \
              mock.patch.object(runs.state, "loop_parents", return_value={}), \

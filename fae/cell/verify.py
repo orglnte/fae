@@ -15,7 +15,7 @@ by its content, every tool pinned), named `fae-verify-<cid>`, on the
 cell's network, with the roots it needs mounted at their own paths and the
 daemon's socket for what it provisions. Nothing of the verify — not the
 law, not the judged program, not a load tool — runs on the host, so every
-host judges in the same environment. The driver holds the arena, the
+host judges in the same environment. The driver holds its slots, the
 verify lock and the verifier's exclusive lock on open fds; the container
 inherits none, and a verifier exception, hang or crash cannot touch the
 cell loop: the container is removed when the child returns or times out,

@@ -167,6 +167,8 @@ fae/cell/           the Python cell driver: attempt loop, the Variant
                      contrib/ and infra/ blocks
 fae/                the engine package: cli.py, driver/, cell/, scoring/,
                      ledger.py (the one parser), mutex.py (the one flock),
+                     queues.py (the only code touching .queues/),
+                     plane.py (where the scheduling plane lives),
                      agent-container/
 fae/scoring/             score_cell.py, aggregate.py, surface_filter.py,
                      grader_agreement.py, SCHEMA.md

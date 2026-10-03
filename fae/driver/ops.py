@@ -21,7 +21,6 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from fae.driver import common
-from fae.driver import queue
 from fae.driver import state
 from fae.driver import zombies
 
@@ -197,10 +196,11 @@ def queued_cids(sel):
     `drain` unsafe: it paused the workspaces that existed, waited for their
     loops, and printed "safe to edit FP-guarded files" while the scheduler was
     still free to start a brand new cell against a half-edited tree."""
+    qs = common.queues()
     out = []
-    for d in queue.lane_dirs(include_parked=True):
-        for p in queue._dir_specs(d):
-            cid = queue.spec_cid(p)
+    for d in qs.lane_dirs(include_parked=True):
+        for p in qs.specs_in(d):
+            cid = qs.spec_cid(p)
             if (common.WS / cid).is_dir():
                 continue                      # has a workspace: select_cells has it
             if sel in ("all", "*") or _matches(cid, sel):
@@ -384,6 +384,7 @@ def resume(args):
     deliberate: the flag means 'a human must look', and resume IS that human
     — the counter also used to be consumed by operator drains and stops that
     were indistinguishable from crashes, charging maintenance to the cell."""
+    qs = common.queues()
     sels = _selector_list(args)
     matches = select_cells_many(sels)
     # Exactly-1 rule (operator, 2026-08-12): a direct spawn is safe at n=1 —
@@ -437,12 +438,12 @@ def resume(args):
             # `next:` until supervision or an admission scan gets to it.
             if st["state"] == "DONE":
                 agent = cid.split("_", 1)[0]
-                for q in queue.lane_specs(agent):
-                    if queue.spec_cid(q) == cid:
+                for q in qs.lane_specs(agent):
+                    if qs.spec_cid(q) == cid:
                         try:
-                            queue.finish(agent, queue.claim(agent, q))
+                            qs.finish(agent, qs.claim(agent, q))
                         except FileExistsError:
-                            queue.shelve(q, "done-duplicate")
+                            qs.shelve(q, "done-duplicate")
                         done_acts.append("spec retired (cell is DONE)")
                         break
             if done_acts:
@@ -496,10 +497,10 @@ def resume(args):
         # Without this the loop runs while its spec still reads as backlog.
         claimed = None
         if not _claimed(cid):
-            for q in queue.lane_specs(agent):
-                if queue.spec_cid(q) == cid:
+            for q in qs.lane_specs(agent):
+                if qs.spec_cid(q) == cid:
                     try:
-                        claimed = queue.claim(agent, q)
+                        claimed = qs.claim(agent, q)
                         acted.append("spec claimed")
                     except (FileExistsError, OSError):
                         pass
@@ -507,7 +508,7 @@ def resume(args):
         if _respawn(st, dry=False):
             acted.append("respawned")
         elif claimed is not None:
-            queue.release(agent, claimed, front=True)
+            qs.release(agent, claimed, front=True)
             acted.append("spec returned to the lane front")
         touched += 1
         print(f"  {cid}: {', '.join(acted)}")
@@ -519,15 +520,13 @@ def _shelve_specs(cids, why="stopped"):
     """Take these cids' specs out of play so nothing re-admits a stopped cell.
     Specs are moved to backups/, never deleted — a mistaken stop is undone by
     moving the file back into its lane."""
+    qs = common.queues()
     n = 0
     for cid in sorted(set(cids)):
         agent = cid.split("_", 1)[0]
-        for d in (queue.lane_dir(agent), queue.lane_dir(agent, parked=True), queue.rundir(agent)):
-            if not d.is_dir():
-                continue
-            for p in sorted(d.glob(f"*{cid}.json")):
-                queue.shelve(p, why)
-                n += 1
+        for p in qs.specs_of(agent, cid):
+            qs.shelve(p, why)
+            n += 1
     if n:
         print(f"  {n} spec(s) out of the backlog (restore from .queues/backups/)")
     return n
@@ -807,7 +806,7 @@ def spawn_matrix(args):
     specs = [dict(task=args.task, variant=v, rep=rep, fresh=args.fresh)
              for rep in range(1, args.reps + 1)
              for v in common.definition().active]
-    n = sum(queue.enqueue(args.agent, s) is not None for s in specs)
+    n = sum(common.queues().enqueue(args.agent, s) is not None for s in specs)
     print(f"enqueued {n} runs for {args.agent} — `experiment run` admits them "
           f"(start it if not running: python3 cli.py experiment run)"
           + (f"; {len(specs) - n} already pending" if n < len(specs) else ""))
@@ -835,15 +834,15 @@ def top_up(args):
     no attempt and will never produce a score, so counting it silently caps
     the variant below target and every coverage report inherits the error.
     """
+    qs = common.queues()
     variants = _selected(getattr(args, "variants", []))
     queued = set()
-    for d_ in (queue.lane_dir(args.agent), queue.lane_dir(args.agent, parked=True)):
-        for p in queue._dir_specs(d_):
-            try:
-                s = queue.read_spec(p)
-            except (OSError, json.JSONDecodeError):
-                continue
-            queued.add((s["variant"], s["rep"]))
+    for p in qs.queued_specs(args.agent):
+        try:
+            s = qs.read_spec(p)
+        except (OSError, ValueError):
+            continue
+        queued.add((s["variant"], s["rep"]))
     have = collections.defaultdict(set)
     unstarted = collections.defaultdict(set)
     for d in common.WS.iterdir():
@@ -872,7 +871,7 @@ def top_up(args):
     if args.dry_run:
         print(f"[dry-run] would enqueue {len(specs)} spec(s) for {args.agent}")
         return
-    n = sum(queue.enqueue(args.agent, s) is not None for s in specs)
+    n = sum(qs.enqueue(args.agent, s) is not None for s in specs)
     print(f"enqueued {n} spec(s) for {args.agent} (nothing started)")
 
 
@@ -1002,8 +1001,7 @@ def _respawn(st, dry):
 def _claimed(cid):
     """Is this cell's spec claimed — i.e. is conduct already responsible for
     restarting it?"""
-    d = queue.rundir(cid.split("_", 1)[0])
-    return d.is_dir() and (d / f"{cid}.json").exists()
+    return common.queues().is_claimed(cid.split("_", 1)[0], cid)
 
 
 def refresh_cell_creds(agent):
@@ -1133,19 +1131,20 @@ def log(args):
 def queue_cancel(args):
     """Take pending specs out of the queue before admission: every pending
     spec whose cid a selector matches (`all` matches all), moved aside by
-    queue.cancel, never deleted. Running and done specs are not pending and
+    Queues.cancel, never deleted. Running and done specs are not pending and
     are never touched."""
+    qs = common.queues()
     from datetime import datetime, timezone
-    hits = [(agent, p) for agent, p, _ in queue.pending_specs()
-            if any(s in ("all", "*") or _matches(queue.spec_cid(p), s) for s in args.selectors)]
+    hits = [(agent, p) for agent, p, _ in qs.pending_specs()
+            if any(s in ("all", "*") or _matches(qs.spec_cid(p), s) for s in args.selectors)]
     if not hits:
         print("cancel: no pending spec matches")
         return []
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     for agent, p in hits:
         if args.dry_run:
-            print(f"  would cancel  {agent:10s} {queue.spec_cid(p)}")
+            print(f"  would cancel  {agent:10s} {qs.spec_cid(p)}")
         else:
-            dest = queue.cancel(p, agent, stamp)
-            print(f"  cancelled     {agent:10s} {queue.spec_cid(p)}  -> {dest.parent}")
+            dest = qs.cancel(p, agent, stamp)
+            print(f"  cancelled     {agent:10s} {qs.spec_cid(p)}  -> {dest.parent}")
     return hits

@@ -140,14 +140,14 @@ class TestNoLaunchPathStartsASealedCell(SealedFleetTestCase):
         self.cell(self.CID, self.GREEN, sealed="sealed=x\tverdict=green\n")
         spec = dict(task="T1", variant="beta_apidocs",
                     rep=1, fresh=False)
-        self.assertIsNone(runs.queue.enqueue("sonnet", spec))
-        self.assertEqual(runs.queue.lane_specs("sonnet"), [])
+        self.assertIsNone(runs.queues.enqueue("sonnet", spec))
+        self.assertEqual(runs.queues.lane_specs("sonnet"), [])
 
     def test_queueing_an_unsealed_cell_still_works(self):
         self.cell(self.CID, self.OPEN)
         spec = dict(task="T1", variant="beta_apidocs",
                     rep=1, fresh=False)
-        self.assertIsNotNone(runs.queue.enqueue("sonnet", spec))
+        self.assertIsNotNone(runs.queues.enqueue("sonnet", spec))
 
 
 class TestTheSealCommand(SealedFleetTestCase):

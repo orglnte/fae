@@ -20,7 +20,7 @@ from pathlib import Path
 
 from fae.driver import common
 from fae.driver.common import (
-    parse_cell_id, awake_age, VALIDATION, ledger, mutex, faults,
+    parse_cell_id, awake_age, VALIDATION, ledger, faults,
     _ledger_intent,
 )
 
@@ -123,7 +123,7 @@ def wait_reason(ws):
     return faults.reason(snaps[-1].read_text(errors="replace"))[:WAIT_REASON_MAX]
 # phases a loop declares that mean "alive but parked, waiting on something it
 # will leave by itself" — as opposed to spending wall clock productively.
-# slot-wait: queued on the global work-slot semaphore (Cell.acquire_slots).
+# slot-wait: queued on the global work-slot semaphore (Queues.acquire_slots).
 
 
 WAIT_PHASES = {"arm-lock", "verify-lock", "limit", "slot-wait"}
@@ -326,9 +326,8 @@ def cell_liveness(ws, boxes):
 
 
 def _queued(cid):
-    from fae.driver import queue
     parsed = common.parse_cell_id(cid)
-    return bool(parsed) and queue.lane_has(parsed[0], cid)
+    return bool(parsed) and common.queues().lane_has(parsed[0], cid)
 
 
 def never_started(st):
@@ -492,35 +491,21 @@ def _cell_state(ws, loops, boxes):
 # attention list printed the NUL straight to the terminal. A cid is
 
 
-def _lock_is_held(path):
-    """Kernel truth: does anyone hold this lock right now?
-
-    Takes it non-blocking and drops it again — if we got it, nobody had it.
-    An acquirer racing this loses at most one poll tick.
-    """
-    return mutex.probe_held(path)
-
-
 def _arm_slot_of(arm, cid):
     """Seconds this cid has held a slot of `arm`, or None if it holds none.
 
-    The sidecar's timestamp is when the slot was taken; the kernel says
-    whether it is still held. Both are needed — the sidecar alone would age a
-    slot its holder released long ago.
+    The note's timestamp is when the slot was taken; the kernel says whether
+    it is still held. Both are needed — the note alone would age a slot its
+    holder released long ago.
     """
     if not arm:
         return None
-    for i in range(1, 33):
-        slot = common.QUEUES / f"arm-{arm}.slots" / f"slot-{i}"
-        if not slot.exists():
-            break
-        if mutex.holder_name(slot) != cid or not _lock_is_held(slot):
+    q = common.queues()
+    for slot in q.slot_files(arm):
+        note = q.slot_note(slot)
+        if not note or note[0] != cid or not q.slot_held(slot):
             continue
-        try:
-            ts = int((Path(str(slot) + ".holder")).read_text().split()[2])
-        except (OSError, IndexError, ValueError):
-            return None
-        return awake_age(ts)
+        return awake_age(note[2]) if note[2] is not None else None
     return None
 
 
@@ -528,8 +513,8 @@ def arm_wait(ws):
     """If this cell's loop is queued on its variant's lock, the holder's cid.
 
     Two questions, in order: the kernel says whether a slot is held, and only
-    then does the sidecar name who. The sidecar alone would name whoever took
-    the slot LAST, held or not.
+    then does the note name who. The note alone would name whoever took the
+    slot LAST, held or not.
     """
     parsed = parse_cell_id(ws.name)
     if not parsed:
@@ -537,13 +522,8 @@ def arm_wait(ws):
     arm = common.definition().lock_of(parsed[1])
     if not arm:
         return None
-    held = []
-    for i in range(1, 33):
-        slot = common.QUEUES / f"arm-{arm}.slots" / f"slot-{i}"
-        if not slot.exists():
-            break
-        if _lock_is_held(slot):
-            held.append(mutex.holder_name(slot))
+    q = common.queues()
+    held = [(q.slot_note(s) or ("",))[0] for s in q.slot_files(arm) if q.slot_held(s)]
     # A cell that HOLDS a slot is never blocked, whatever its heartbeat phase
     # still says. Skipping only "not me" made every holder display the OTHER
     # holder as its blocker, so two holders rendered as a circular
@@ -555,14 +535,11 @@ def arm_wait(ws):
 
 def slot_wait_detail():
     """How many work slots are occupied, for a cell queued on the semaphore."""
-    slots_dir = common.QUEUES / "work-slots"
     try:
         n = int(os.environ.get("WORK_SLOTS", 7))
     except ValueError:
         return ""
-    occupied = sum(1 for i in range(1, n + 1)
-                   if _lock_is_held(slots_dir / f"slot-{i}"))
-    return f"{occupied}/{n} slots busy"
+    return f"{common.queues().occupied(n)}/{n} slots busy"
 
 
 def all_states(running_only=False):

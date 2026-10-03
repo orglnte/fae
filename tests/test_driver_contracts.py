@@ -193,7 +193,7 @@ class TestASetupFailureIsLoud(DriverCase):
 
     def test_a_failed_hook_alerts_and_halts_the_cell(self):
         c = self.cell()
-        c.setup = lambda arena: (7, {})
+        c.setup = lambda: (7, {})
         with self.assertRaises(cell.Halt) as cm:
             c.run(verify=self.green)
         self.assertEqual(cm.exception.code, 45)
@@ -204,7 +204,7 @@ class TestASetupFailureIsLoud(DriverCase):
 
     def test_a_stub_still_provisions_the_infra(self):
         c = self.cell()
-        c.setup = lambda arena: (7, {})
+        c.setup = lambda: (7, {})
         with self.assertRaises(cell.Halt) as cm:
             c.run(stub_overlay=self.overlay, verify=self.green)
         self.assertEqual(cm.exception.code, 45)
@@ -230,7 +230,7 @@ class TestEveryExitClearsTheHolderNotes(DriverCase):
 
     def test_a_setup_failure_leaves_no_note(self):
         c = self.cell()
-        c.setup = lambda arena: (7, {})
+        c.setup = lambda: (7, {})
         with self.assertRaises(cell.Halt):
             c.run(verify=self.green)
         self.assertEqual(self._notes_naming(c), [])

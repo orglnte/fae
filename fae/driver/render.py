@@ -3,7 +3,7 @@ backlog summary they all fold in.
 
 render() is the one table-builder every view (status, watch, monitor) prints
 through — a single source keeps the flat and grouped layouts consistent.
-queued_summary/_pending_kind read the backlog (fae/driver/queue.py) and resolve
+queued_summary/_pending_kind read the backlog (fae/queues.py) and resolve
 each pending spec's state (fae/driver/state.py) into the QUEUED section's tags.
 """
 from __future__ import annotations
@@ -15,9 +15,7 @@ import ujson as json
 from datetime import datetime, timezone
 
 from fae.driver import common
-from fae.driver import queue
 from fae.driver import state
-from fae.driver import weekly
 from fae.driver import zombies
 from fae.driver.common import faults
 
@@ -76,28 +74,29 @@ def queued_summary():
     and `prepared` are work nobody has started; the rest are queued for a
     reason the operator can act on.
     """
+    qs = common.queues()
     rows, total = [], 0
     kinds = collections.Counter()
     live_loops = set(state.loop_parents())
     # A parked lane is the operator's pause (`experiment pause M`): its specs are
     # untouched, so they are still backlog — shown here tagged rather than
     # vanishing from the fleet picture.
-    for d in queue.lane_dirs(include_parked=True):
+    for d in qs.lane_dirs(include_parked=True):
         is_parked = d.name.endswith(".parked")
-        agent = queue.lane_agent(d)
-        paths = queue._dir_specs(d)
+        agent = qs.lane_agent(d)
+        paths = qs.specs_in(d)
         if not paths:
             continue
         for p in paths:
-            kinds[_pending_kind(queue.spec_cid(p), live_loops)] += 1
+            kinds[_pending_kind(qs.spec_cid(p), live_loops)] += 1
         total += len(paths)
         try:
-            nxt = queue.read_spec(paths[0])
-        except (OSError, json.JSONDecodeError):
+            nxt = qs.read_spec(paths[0])
+        except (OSError, ValueError):
             continue
-        tags = (["[BUDGET-HOLD]" if agent in weekly.weekly_load()["hold"] else "[PAUSED]"]
+        tags = (["[BUDGET-HOLD]" if agent in qs.weekly_load()["hold"] else "[PAUSED]"]
                 if is_parked else [])
-        _cu = weekly._cooldown_until(agent)
+        _cu = qs.cooldown_until(agent)
         if _cu > time.time():
             tags.append(f"[LIMIT until "
                         f"{datetime.fromtimestamp(_cu, timezone.utc):%m-%d %H:%M}Z]")
@@ -106,7 +105,7 @@ def queued_summary():
         # The same breakdown the headline gives, per lane, so a lane that is
         # not plain backlog says what it actually holds. `fresh` is omitted —
         # that is the ordinary case and every lane would carry it.
-        _kinds = collections.Counter(_pending_kind(queue.spec_cid(q), live_loops)
+        _kinds = collections.Counter(_pending_kind(qs.spec_cid(q), live_loops)
                                      for q in paths)
         for _k in ("prepared", "interrupted", "paused", "flagged",
                    "running", "done"):
@@ -276,7 +275,7 @@ def render(flat=False, running_only=False):
             out.append(f"mem: {_mp['used_gb']:.1f}/{_mp['total_gb']:.1f}GB used "
                        f"({_mp['avail_pct']}% avail), pressure={_mp['label']}  ·  "
                        f"swap {_mp['swap_used_mb']:.0f}/{_mp['swap_total_mb']:.0f}MB")
-        out.append(weekly.weekly_line())
+        out.append(common.queues().weekly_line())
     return "\n".join(out)
 
 
@@ -366,10 +365,11 @@ def monitor(args):
 def queue_list(args):
     """The work list per agent lane: pending (in admission order, parked
     lanes marked), running, and with --done the terminal specs."""
+    qs = common.queues()
     agents = set(args.agents or [])
-    pending = [(a, p, parked) for a, p, parked in queue.pending_specs()
+    pending = [(a, p, parked) for a, p, parked in qs.pending_specs()
                if not agents or a in agents]
-    running = [p for p in queue.running_specs() if not agents or p.parent.name in agents]
+    running = [p for p in qs.running_specs() if not agents or p.parent.name in agents]
     lanes = sorted({a for a, _, _ in pending} | {p.parent.name for p in running})
     if not lanes:
         print("the queue is empty")
@@ -379,11 +379,11 @@ def queue_list(args):
         parked = any(pk for _, pk in mine)
         print(f"{lane}{' (paused)' if parked else ''}: {len(mine)} pending, {len(live)} running")
         for p in live:
-            print(f"  running  {queue.spec_cid(p)}")
+            print(f"  running  {qs.spec_cid(p)}")
         for p, _ in mine:
-            print(f"  pending  {queue.spec_cid(p)}")
+            print(f"  pending  {qs.spec_cid(p)}")
     if args.done:
-        done = [p for p in queue.done_specs() if not agents or p.parent.name in agents]
+        done = [p for p in qs.done_specs() if not agents or p.parent.name in agents]
         print(f"done: {len(done)}")
         for p in done:
-            print(f"  done     {p.parent.name:10s} {queue.spec_cid(p)}")
+            print(f"  done     {p.parent.name:10s} {qs.spec_cid(p)}")

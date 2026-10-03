@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 from fae.driver import image
+from fae.queues import Book
 
 
 class ParseAndCompare(unittest.TestCase):
@@ -34,8 +35,8 @@ class UpstreamCache(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.p = Path(self.tmp.name) / "agent_image.json"
-        mock.patch.object(image, "cache_path", lambda: self.p).start()
+        book = Book(Path(self.tmp.name) / "agent_image.json")
+        mock.patch.object(image, "cache_book", lambda: book).start()
         self.addCleanup(mock.patch.stopall)
 
     def test_second_lookup_within_ttl_does_not_hit_upstream(self):

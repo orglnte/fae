@@ -37,8 +37,8 @@ def image_name():
     return _image.base_tag(common.definition(), common.ROOT)
 
 
-def cache_path():
-    return common.QUEUES / "agent_image.json"
+def cache_book():
+    return common.queues().agent_image_book()
 
 
 def vtuple(v):
@@ -90,16 +90,15 @@ def upstream(arch="arm64"):
 
 def upstream_cached(arch="arm64", now=None, ttl=CHECK_TTL_S):
     now = now if now is not None else time.time()
-    p = cache_path()
+    book = cache_book()
     try:
-        c = json.loads(p.read_text())
+        c = book.load()
         if now - c["checked_at"] < ttl and c.get("arch") == arch:
             return c["upstream"]
     except Exception:
         pass
     up = upstream(arch)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"checked_at": now, "arch": arch, "upstream": up}))
+    book.save({"checked_at": now, "arch": arch, "upstream": up})
     return up
 
 

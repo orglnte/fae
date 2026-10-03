@@ -7,8 +7,8 @@ kernel releases it when that process dies by any means — SIGKILL, OOM, panic,
 host sleep. Nothing on disk has to be judged stale, so there is no steal, no
 adoption, no settle window and no orphan grace.
 
-The holders are the cell driver (fae/cell: Arena + Cell.acquire_slots for
-the work and arm slots, Cell.verify_lock_acquire, Cell.loop_lock,
+The holders are the cell driver (fae/queues.py's acquire_slots for the work
+and lock slots, Cell.verify_lock_acquire, Cell.loop_lock,
 Cell.exclusive_acquire) and fae/driver/common.py's fs_lock. Each keeps the open file
 OBJECT for as long as it holds the lock; closing it is the release.
 
