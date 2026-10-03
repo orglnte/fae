@@ -12,6 +12,7 @@ module is the only code that reads or writes it.
     work-slots/slot-<n>               the cap on running cells (flock)
     arm-<lock>.slots/slot-<n>         a variant lock's cap (flock)
     weekly.json, cooldown.<agent>     when a lane may admit
+    requests/<ns>.<cid>.json          an operator's pause or stop of one cell, until the run acts on it
     agent-io.json                     the agents' output, sampled by supervision
 
 A spec moves by one rename(2), so it is always in exactly one state: a crash
@@ -543,6 +544,34 @@ class Queues:
                         holder.unlink(missing_ok=True)
                 except (OSError, IndexError):
                     pass
+
+    # --- requests to one cell -------------------------------------------------
+
+    @_changes
+    def request(self, cid, verb, **fields):
+        """Ask the run to `verb` (pause | stop) the cell `cid`. Returns the path."""
+        d = self.base / "requests"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / f"{time.time_ns()}.{cid}.json"
+        tmp = p.with_name(f"tmp-{p.name}")
+        tmp.write_text(json.dumps({"cid": cid, "verb": verb, **fields}) + "\n")
+        tmp.rename(p)
+        return p
+
+    def requests(self):
+        """[(path, request)] oldest first; an unreadable one is skipped."""
+        d = self.base / "requests"
+        out = []
+        for p in sorted(d.glob("[0-9]*.json")) if d.is_dir() else ():
+            try:
+                out.append((p, json.loads(p.read_text())))
+            except (OSError, ValueError):
+                continue
+        return out
+
+    @_changes
+    def request_done(self, p):
+        Path(p).unlink(missing_ok=True)
 
     # --- the agents' books ----------------------------------------------------
 

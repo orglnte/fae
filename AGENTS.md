@@ -222,6 +222,17 @@ name and the infra's `verify_teardown` runs for the cell's last
 arrangement: what the verify provisioned outside itself does not die with
 its container. `cli.py cell stop` does the same.
 
+**One cell is controlled by signal, through its `Cell`.** `Cell.loop_pid()`
+is the cell loop holding the cell lock (a writer holding it for one change
+is not a loop). `Cell.pause()` records the `Pause` (or `Kill`) and sends the
+loop SIGUSR1; the loop's handler writes its own `.paused` from that record
+and stands down at its next checkpoint, so an attempt in flight finishes.
+`Cell.kill()` sends SIGTERM, which the loop answers with its teardown, then
+SIGKILL to its session past a grace, and `Cell.clean_up()`. `cell pause` and
+`cell stop` queue a request (`.queues/requests/`); the run acts on it at its
+next pass, or the CLI itself when no run is up. Never SIGSTOP: a frozen loop
+holds its locks while its agent and verify containers run on.
+
 **`experiment run` refuses to start if the plane's filesystem does not ENFORCE
 flock** (`mutex.fs_enforces_flock`). A filesystem can accept flock without
 enforcing it, which would turn every cap into a no-op that reports success;
@@ -657,8 +668,9 @@ every prior agent's memory — cross-run leakage invisible in the results.
   in `cell.env`; no flag, spec field or environment override. A per-cell
   budget makes two cells incomparable and gives sealing an exception.
 - **`stop` is resumable; `--cancel` is the verdict, and a cancel is durable
-  before it is thorough.** A plain `cell stop` halts now (SIGKILL, infra
-  teardown, queued specs backed up) and stays `PAUSED·stopped`. `cell stop
+  before it is thorough.** A plain `cell stop` halts now (`Cell.kill`:
+  SIGTERM, SIGKILL to the session past a grace; infra teardown, queued
+  specs backed up) and stays `PAUSED·stopped`. `cell stop
   --cancel` writes `.cancelled` FIRST, before the kill and the teardown, so
   an interruption in between cannot leave a cell that looks killed and is
   respawned. Trace mapping: plain stop = `Pause` + `Crash`; only `--cancel`

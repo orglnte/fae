@@ -128,6 +128,23 @@ class Conduct:
         except OSError:
             return None
 
+    def act_on_requests(self):
+        """The operators' requests to one cell (`cell pause`, `cell stop`),
+        acted on here; while a run is up, the run acts on them at its next
+        pass instead."""
+        pid = self.pid()
+        if pid and pid != os.getpid():
+            print(f"  the run (pid {pid}) acts on it at its next pass", flush=True)
+            return
+        qs = common.queues()
+        for p, r in qs.requests():
+            cid, verb = r.get("cid", ""), r.get("verb")
+            if verb == "pause":
+                ops.pause_cell(cid, r.get("reason", "manual"), r.get("who", "operator"))
+            elif verb == "stop":
+                ops.stop_cell(cid, cancel=bool(r.get("cancel")))
+            qs.request_done(p)
+
     def status(self, args):
         from fae.driver import render
         return render.status(args)
@@ -304,6 +321,7 @@ class Conduct:
         try:
             while True:
                 common.host_sleep_observe()
+                self.act_on_requests()
                 # Supervision inside the ONE controller: repair requeues at the
                 # lane front and the admission below picks it up — conduct is the
                 # only spawner. (reconcile --watch is gone; this replaced it.)

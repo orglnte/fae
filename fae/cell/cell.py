@@ -422,11 +422,107 @@ class Cell:
             pass
         return intent
 
-    def request_pause(self, reason, who="operator"):
-        """Ask the cell to stop at its next checkpoint. The reason 'killed' is
-        a Kill: the intent that keeps the cell from running again."""
-        self._marker(".paused", f"{reason} by={who} at={_now()}\n")
+    def pause(self, reason, who="operator"):
+        """Pause the cell for `reason`; the reason 'killed' is a Kill, the
+        intent that keeps it from running again. A running loop is signalled
+        (SIGUSR1): it writes its own .paused and stands down at its next
+        checkpoint. Otherwise .paused is written here."""
         self._emit("Kill" if reason == "killed" else "Pause", f"reason={reason} by={who}")
+        pid = self.loop_pid()
+        if pid:
+            try:
+                os.kill(pid, signal.SIGUSR1)
+                return
+            except ProcessLookupError:
+                pass
+        self._marker(".paused", f"{reason} by={who} at={_now()}\n")
+
+    def _paused_by_signal(self, _signum, _frame):
+        """SIGUSR1 in the loop: write the pause the last Pause or Kill in the
+        transitions log records."""
+        reason, who = "manual", "signal"
+        try:
+            for line in self._transitions_log().read_text().splitlines():
+                p = line.split("\t")
+                if len(p) > 3 and p[2] == self.cid and p[1] in ("Pause", "Kill"):
+                    f = dict(kv.split("=", 1) for kv in p[3].split() if "=" in kv)
+                    reason, who = f.get("reason", reason), f.get("by", who)
+        except OSError:
+            pass
+        self._marker(".paused", f"{reason} by={who} at={_now()}\n")
+
+    def loop_pid(self):
+        """The pid of the cell's running loop, or None: the process holding the
+        cell's lock, when it is a cell loop (a writer holding it for one
+        change is not)."""
+        path = self._lock_path()
+        if not _mutex.probe_held(path):
+            return None
+        pid = _mutex.holder_pid(path)
+        return pid if pid and self._is_loop(pid) else None
+
+    @staticmethod
+    def _is_loop(pid):
+        r = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
+                           capture_output=True, text=True)
+        return "-m fae.cell" in r.stdout
+
+    @staticmethod
+    def _gone(pid, grace, poll=1.0):
+        end = time.time() + grace
+        while True:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return True
+            except PermissionError:
+                pass
+            if time.time() >= end:
+                return False
+            time.sleep(poll)
+
+    def kill(self, grace=30, teardown_timeout_s=240):
+        """Stop the running loop now: SIGTERM, which its teardown answers;
+        past `grace`, SIGKILL to its process group and the teardown it could
+        not run (clean_up). Returns absent | termed | killed."""
+        pid = self.loop_pid()
+        if not pid:
+            return "absent"
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return "termed"
+        if self._gone(pid, grace):
+            return "termed"
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                pass
+        self.clean_up(teardown_timeout_s)
+        return "killed"
+
+    def clean_up(self, timeout_s=240):
+        """What a loop that died without its teardown left: the last
+        arrangement's verify teardown (in a fresh container of the verify
+        image), the agent's and the infra's containers, the infra. Best
+        effort, idempotent."""
+        from .verify import run_teardown
+        if self.variant_cls is None:
+            return
+        if self.artifacts.is_dir():
+            run_out = self.ws / RUN_OUT
+            run_out.mkdir(exist_ok=True)
+            ctx = Ctx(root=str(self.root), experiment_dir=str(self.conf.get("EXPERIMENT_DIR")),
+                      workspace=str(self.ws), artifacts=str(self.artifacts), out=str(run_out),
+                      cid=self.cid, task=self.task, variant=self.variant)
+            run_teardown(ctx, self.infra, timeout_s=timeout_s, log_dir=self.ws)
+        boxes = [i for k, i in self.variant_cls.INFRA.identities(self.cid) if k == "container"]
+        subprocess.run(["docker", "rm", "-f", "-v", _config.agent_container(self.cid), *boxes],
+                       capture_output=True)
+        self.teardown()
 
     def unpause(self):
         """Lift a pause. Resume is recorded only when the transitions log holds
@@ -510,12 +606,10 @@ class Cell:
 
     def note_pause(self):
         """Mark this cell paused before a StandDown — without doubling the
-        operator's event. The COMMAND owns Pause (request_pause emits it
-        with the .paused file); the driver emits one
-        only when the ledger lacks it (a raw file write), so the replay sees
-        exactly one Pause however the pause arrived. The local intent flips
-        either way, which is
-        what makes the StandDown legal to apply."""
+        operator's event. The command owns Pause (Cell.pause records it); the
+        loop records one only when the log lacks it (a raw file write), so the
+        replay sees exactly one Pause however the pause arrived. The local
+        intent flips either way, which is what makes the StandDown legal."""
         if self.intent() == "run":
             self.apply(T.PAUSE)
         else:
@@ -1737,8 +1831,12 @@ class Cell:
                        f"through the run, or start it without slots explicitly",
                        self.NO_SLOTS_EXIT)
 
+        # A pause may be signalled the moment the lock is held, and for as
+        # long as it is.
+        on_pause = signal.signal(signal.SIGUSR1, self._paused_by_signal)
         loop_lock = self.loop_lock()
         if loop_lock is None:
+            signal.signal(signal.SIGUSR1, on_pause)
             if slots is not None:
                 slots.close()
             raise Halt(f"refusing: another loop owns {self.cid}", self.LOCK_EXIT)
@@ -1957,7 +2055,9 @@ class Cell:
             if slots is not None:
                 slots.close()
             self._held = None
+            _mutex.clear_holder(self._lock_path())
             loop_lock.close()
+            signal.signal(signal.SIGUSR1, on_pause)
             if awake is not None:
                 awake.terminate()
 

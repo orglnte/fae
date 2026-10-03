@@ -193,8 +193,8 @@ def probe_held(path):
 
 
 # --- the holder sidecar ------------------------------------------------------
-# Names who last took the lock, for display. It is NOT proof that anyone holds
-# it and no code path may branch on it: "is it held?" is a question for the
+# Names who last took the lock. It is NOT proof that anyone holds it and no
+# code path may branch on it alone: "is it held?" is a question for the
 # kernel (probe_held), and only then is "by whom?" worth asking.
 
 def _holder_path(path):
@@ -213,6 +213,15 @@ def holder_name(path):
         return _holder_path(path).read_text().split()[0]
     except (OSError, IndexError):
         return ""
+
+
+def holder_pid(path):
+    """The pid the sidecar names, or None. Ask only once probe_held says the
+    lock is held, and confirm the process is who it should be."""
+    try:
+        return int(_holder_path(path).read_text().split()[1])
+    except (OSError, IndexError, ValueError):
+        return None
 
 
 def clear_holder(path):
