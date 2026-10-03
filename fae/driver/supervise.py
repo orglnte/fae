@@ -3,9 +3,7 @@ alive? output growing? log advancing?) and repairs, requeues, or hands it
 back to the operator. Runs inside conduct's loop every --supervise-interval,
 and as the one-shot `reconcile` / `experiment diagnose` (dry).
 
-Depends on fae/driver/ops.py for the one way a cell dies by conduct's hand
-(teardown_cell/_variant_teardown/request_pause/is_claimed) — one direction
-only: nothing in ops.py calls back into supervise.
+A cell dies by conduct's hand one way, its own (Cell.take_down).
 """
 from __future__ import annotations
 
@@ -19,7 +17,6 @@ from datetime import datetime, timezone
 
 from fae.cell.cell import Busy
 from fae.driver import common
-from fae.driver import ops
 from fae.driver import state
 from fae.driver import validate as taint
 from fae.driver import zombies
@@ -271,7 +268,7 @@ def _reconcile_dead_loop(cid, loop_pid, in_box, out_age, last, dry,
 def _conducts(cid):
     """Is this cell conduct's to restart: claimed (converge restarts it) or
     its spec waiting in its lane (admission restarts it)?"""
-    if ops.is_claimed(cid):
+    if common.queues().is_claimed(cid.split("_", 1)[0], cid):
         return True
     parsed = common.parse_cell_id(cid)
     return bool(parsed and common.queues().lane_has(parsed[0], cid))
@@ -414,9 +411,8 @@ def supervise_pass(alerts, dry=False, only=""):
                         if not dry:
                             common.cell(cid).alert(f"VERIFY-WEDGED held the global verify-lock {int(_held)}s > {VERIFY_WEDGED_S}s — standing it down; this attempt is lost")
                             alerts.verify_wedged[cid] = _ts
-                            ops.teardown_cell(cid, st["variant"],
-                                           reason="verify-wedged",
-                                           unblock_agent=True)
+                            common.named_cell(cid, st["variant"]).take_down(
+                                "verify-wedged", unblock_agent=True, log=common._rec_log)
                             _reclaim(st, dry)
                         continue
             # A phase that has stood still too long. phase_age is the only
@@ -444,9 +440,9 @@ def supervise_pass(alerts, dry=False, only=""):
                                  f"{int(_pa)}s > {_kill_s}s -> stand down"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
-                            ops.teardown_cell(cid, st["variant"],
-                                           reason=f"phase-stalled-{_ph}",
-                                           unblock_agent=True)
+                            common.named_cell(cid, st["variant"]).take_down(
+                                f"phase-stalled-{_ph}", unblock_agent=True,
+                                log=common._rec_log)
                             _reclaim(st, dry)
                             continue
             # A wedged arm-slot holder: overaged AND its heartbeat has stopped.
@@ -483,8 +479,8 @@ def supervise_pass(alerts, dry=False, only=""):
                         if not dry:
                             common.cell(cid).alert(f"ARM-STUCK held the {_arm} arm {int(_slot)}s with no progress for {int(_silent)}s — standing it down")
                             alerts.arm.add(cid)
-                            ops.teardown_cell(cid, st["variant"],
-                                           reason="arm-stuck", unblock_agent=True)
+                            common.named_cell(cid, st["variant"]).take_down(
+                                "arm-stuck", unblock_agent=True, log=common._rec_log)
                             _reclaim(st, dry)
                         continue
             # stranded reverify: an in-flight gate (shape 0/6..5/6 — 6/6 is a
@@ -520,7 +516,7 @@ def supervise_pass(alerts, dry=False, only=""):
                     subprocess.run(["docker", "rm", "-f", "-v", common.agent_container(cid),
                                     *common.infra_containers(st["variant"], cid)],
                                    capture_output=True)
-                    ops._variant_teardown(st["variant"], cid)
+                    common.named_cell(cid, st["variant"]).teardown()
             elif st["state"] == "CRASHED" and not in_box and _conducts(cid):
                 continue    # claimed or queued: conduct restarts it, and
                             # says so when it does
@@ -558,7 +554,7 @@ def supervise_pass(alerts, dry=False, only=""):
                          f"cool lane {agent}"
                          + (" [dry-run]" if dry else ""))
                 if not dry:
-                    ops.request_pause([cid], "limit-wall", who="conduct")
+                    common.cell(cid).request_pause("limit-wall", who="conduct")
                     _reclaim(st, dry)
                     until = _set_cooldown(agent, detail)
                     common._rec_log(f"lane {agent}: cooling until "
@@ -587,9 +583,8 @@ def supervise_pass(alerts, dry=False, only=""):
                         # the arm slot in the kernel while this cell's cluster
                         # is still up, and the next acquirer would provision
                         # against it.
-                        _outcome = ops.teardown_cell(
-                            cid, st["variant"], reason="limit-wall",
-                            unblock_agent=True)
+                        _outcome = common.named_cell(cid, st["variant"]).take_down(
+                            "limit-wall", unblock_agent=True, log=common._rec_log)
                         if _outcome in ("termed", "killed"):
                             c.crashed("limit-wall")
                         _reclaim(st, dry)
@@ -618,9 +613,8 @@ def supervise_pass(alerts, dry=False, only=""):
                          f"out_age={int(out_age or -1)}s iter_age={int(iter_age)}s)"
                          + (" [dry-run]" if dry else ""))
                 if not dry:
-                    _outcome = ops.teardown_cell(
-                        cid, st["variant"], reason="silent-hang",
-                        unblock_agent=True)
+                    _outcome = common.named_cell(cid, st["variant"]).take_down(
+                        "silent-hang", unblock_agent=True, log=common._rec_log)
                     if _outcome in ("termed", "killed"):
                         c.crashed("silent-hang")
                 _reclaim(st, dry)

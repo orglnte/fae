@@ -18,7 +18,6 @@ import ujson as json
 
 from fae.cell.cell import Busy
 from fae.driver import common
-from fae.driver import ops
 from fae.driver import render
 from fae.driver import state
 from fae.driver import validate as taint
@@ -51,7 +50,7 @@ def validate(args, quiet=False):
     # loop O(cells) docker round-trips, and a DONE cell's container state
     # cannot change mid-sweep.
     boxes = state.containers()
-    for cid in ops.select_cells(getattr(args, "selector", None) or "all"):
+    for cid in common.select_cells(getattr(args, "selector", None) or "all"):
         ws = common.WS / cid
         st = state.cell_state(ws, {}, boxes)
         if not st or st["state"] != "DONE" or st["why"] == "cancelled":
@@ -109,7 +108,7 @@ def score(args):
           "authored surface -> <cell>/score.json, which the scoreboard reads)")
     sys.stdout.flush()
 
-    cids = [getattr(args, "cell")] if getattr(args, "cell", None) else ops.select_cells("all")
+    cids = [getattr(args, "cell")] if getattr(args, "cell", None) else common.select_cells("all")
     boxes = state.containers()
     # This phase used to print NOTHING: 50+ subprocesses ran silently under a
     # bare header, so the only evidence they had worked was the aggregate table

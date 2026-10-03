@@ -212,7 +212,7 @@ sidecar.
 **A live holder's lock is never taken; a wedged holder is ended by
 supervision.** `ARM_HELD_ALERT_S` alerts and then stands the cell down; age
 alone never acts — overaged AND heartbeat-stalled does. The run is the only
-actor that ends a cell, and `_teardown_cell` the only way it does so,
+actor that ends a cell, and `Cell.take_down` the only way it does so,
 because a kill that does not also tear down frees the variant's lock slot
 while the infra it capped still runs. A kill signals the driver's whole
 session, not its pid. After the kill, in a fresh container of the variant's
@@ -652,7 +652,7 @@ every prior agent's memory — cross-run leakage invisible in the results.
   order.**
 - **A cell that reached a verdict is SEALED and read-only.** `Cell.seal`
   writes `<ws>/.sealed` on green or on the budget spent, and `Cell.run`,
-  `ops._spawn_detached`, `queue.enqueue` and any verify that would write into
+  `Cell.before_start`, `queue.enqueue` and any verify that would write into
   the workspace refuse it; exit code 46 means *finished*. Re-verification is
   `cli.py cell reverify`, which writes under `<ws>/reverify/<ts>/` and never
   appends to the ledger. Derived files (`validation.json`, `score*.json`) are

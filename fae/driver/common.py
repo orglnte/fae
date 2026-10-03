@@ -235,6 +235,46 @@ def cell(cid, task=None, variant=None, rep=1, agent=None, reference=False,
     return Cell.new(cid, task or "T1", variant, rep, agent=agent, reference=reference, **plane)
 
 
+def named_cell(cid, variant=None):
+    """The cell `cid`, its identity read from its id where its workspace does
+    not record it."""
+    p = parse_cell_id(cid)
+    return cell(cid, p[2] if p else "T1", variant or (p[1] if p else ""), p[3] if p else 1)
+
+
+# --- selecting cells ----------------------------------------------------------
+# One selector language for every verb: `all`, a whole cid, or a run of whole
+# `_`-separated tokens (`sonnet`, an arm, `..._r1`). Anchored at token
+# boundaries, so `r1` never matches `r10` and `son` matches nothing.
+
+def matches(cid, sel):
+    if sel in ("all", "*") or cid == sel:
+        return True
+    return f"_{cid}_".find(f"_{sel}_") >= 0
+
+
+def select_cells(*selectors):
+    """cids with a workspace that any selector matches, sorted."""
+    try:
+        cids = sorted(p.name for p in WS.iterdir() if p.is_dir() and parse_cell_id(p.name))
+    except OSError:
+        return []
+    return [c for c in cids if any(matches(c, s) for s in selectors)]
+
+
+def queued_cids(*selectors):
+    """cids that exist only as a pending spec, with no workspace yet: what a
+    workspace selection cannot see."""
+    return [c for c in queues().pending_cids(lambda c: any(matches(c, s) for s in selectors))
+            if not (WS / c).is_dir()]
+
+
+def is_blanket(selectors):
+    """A selection naming `all`: standing operator decisions (roster/manual
+    pauses, a cancel) survive it, and yield only to a cell or agent named."""
+    return any(s in ("all", "*") for s in selectors)
+
+
 RECONCILE_LOG = CONDUCT / "reconcile.log"
 
 
@@ -246,11 +286,7 @@ def _rec_log(msg):
         f.write(line + "\n")
 
 
-LOOP_CLEARED_BY = {"Crash", "Kill", "ReleaseSlot", "VerifyGreen", "StandDown",
-                   "EPOCH", "Retire"}
-
-
-LOOP_UNCHANGED_BY = {"Pause", "Resume"}
+from fae.cell.fsm import LOOP_CLEARED_BY, LOOP_UNCHANGED_BY  # noqa: E402
 
 
 def _last_transitions():

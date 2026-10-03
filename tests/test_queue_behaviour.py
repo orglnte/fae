@@ -358,7 +358,7 @@ class TestCancelAndList(OrchTmpCase):
     def test_cancel_moves_matching_pending_specs_aside(self):
         self.spec("aaa", "aaa_high_beta_apidocs_T1_r1")
         self.spec("aaa", "aaa_high_beta_apidocs_T1_r2")
-        runs.ops.queue_cancel(runs.argparse.Namespace(selectors=["r1"], dry_run=False))
+        runs.cli.cancel_pending(runs.argparse.Namespace(selectors=["r1"], dry_run=False))
         left = [runs.queues.spec_cid(p) for p in runs.queues.lane_specs("aaa")]
         self.assertEqual(left, ["aaa_high_beta_apidocs_T1_r2"])
         moved = list((self.queues / ".to_be_deleted").rglob("*.json"))
@@ -366,14 +366,14 @@ class TestCancelAndList(OrchTmpCase):
 
     def test_dry_run_moves_nothing(self):
         self.spec("aaa", "aaa_high_beta_apidocs_T1_r1")
-        runs.ops.queue_cancel(runs.argparse.Namespace(selectors=["all"], dry_run=True))
+        runs.cli.cancel_pending(runs.argparse.Namespace(selectors=["all"], dry_run=True))
         self.assertEqual(len(runs.queues.lane_specs("aaa")), 1)
         self.assertFalse((self.queues / ".to_be_deleted").exists())
 
     def test_a_running_spec_is_not_cancelled(self):
         p = self.spec("aaa", "aaa_high_beta_apidocs_T1_r1")
         runs.queues.claim("aaa", p)
-        runs.ops.queue_cancel(runs.argparse.Namespace(selectors=["all"], dry_run=False))
+        runs.cli.cancel_pending(runs.argparse.Namespace(selectors=["all"], dry_run=False))
         self.assertEqual(len(runs.queues.running_specs("aaa")), 1)
 
     def test_list_shows_pending_and_running_per_lane(self):

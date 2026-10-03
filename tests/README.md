@@ -46,11 +46,12 @@ behaviour is known, guarded elsewhere, and deliberately not changed.
 
 ## Tests must never start a cell
 
-`resume()` and `_respawn()` Popen `python3 -m fae.cell`. A test that reaches
-them launches real, paid agent runs against whatever workspace tree it is
-pointed at — this has happened once during development. Fixtures that touch
-those paths stub `_respawn` and `_spawn_detached`, and any test exercising
-recovery calls `_recover_inflight()` directly rather than `worker()`.
+`cli.resume()`, `Conduct.respawn()` and `Conduct.launch()` Popen `python3 -m
+fae.cell`. A test that reaches them launches real, paid agent runs against
+whatever workspace tree it is pointed at — this has happened once during
+development. Fixtures that touch those paths stub `Conduct.respawn` and
+`Conduct._spawn`, and `Cell.prestart_clean` (it removes the cell's agent
+container).
 
 Patch `TRANSITIONS_LOG` too, not just `WS` and the plane folders: `common.cell`
 hands Cell the module-level path, so an unpatched test writes fabricated

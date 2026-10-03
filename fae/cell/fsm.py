@@ -76,6 +76,13 @@ class T(str, Enum):
     KILL = "Kill"
 
 
+# Records in transitions.log that end a cell's loop, and those that leave it as
+# it was: the last loop-affecting record says whether a loop is still owed.
+LOOP_CLEARED_BY = frozenset({"Crash", "Kill", "ReleaseSlot", "VerifyGreen", "StandDown",
+                             "EPOCH", "Retire"})
+LOOP_UNCHANGED_BY = frozenset({"Pause", "Resume"})
+
+
 class State:
     """The per-cell projection of the model's variables."""
 

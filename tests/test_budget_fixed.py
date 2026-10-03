@@ -18,7 +18,10 @@ from _ctx import ROOT, runs
 
 HARNESS = Path(ROOT) / "fae"
 CLI_PY = (Path(ROOT) / "fae" / "cli.py").read_text()
-OPS_PY = (Path(ROOT) / "fae" / "driver" / "ops.py").read_text()
+# where a cell is spawned, respawned or queued: the CLI's verbs, the run's
+# respawn, the Queues and the Cell's own start
+OPS_PY = "".join((Path(ROOT) / "fae" / f).read_text() for f in (
+    "cli.py", "driver/conduct.py", "queues.py", "cell/cell.py"))
 CONFIG_PY = (HARNESS / "cell" / "config.py").read_text()
 PREPARE = (HARNESS / "cell" / "prepare.py").read_text()
 
@@ -38,9 +41,9 @@ class TestTheConstant(unittest.TestCase):
 
 
 class TestNoPathCanSetADifferentBudget(unittest.TestCase):
-    """spawn/spawn-matrix/top-up live in fae/driver/ops.py; cli.py is the entry
-    point — a budget could be reintroduced at either layer, so both are
-    checked directly."""
+    """spawn/spawn-matrix/top-up are cli.py's verbs over the Queues, the
+    Conduct and the Cell — a budget could be reintroduced at any of them, so
+    each is checked directly."""
 
     def test_no_cli_declares_a_budget_flag(self):
         self.assertNotIn('"-b"', CLI_PY)
@@ -61,7 +64,10 @@ class TestNoPathCanSetADifferentBudget(unittest.TestCase):
         self.assertNotIn("ATTEMPT_BUDGET={", OPS_PY)
 
     def test_no_queue_spec_carries_a_budget(self):
-        self.assertNotIn("budget", CLI_PY)
+        # the CLI says "budget" about respawns and the exhausted verdict; a
+        # budget field or argument is what must not exist
+        self.assertNotIn("budget=", CLI_PY)
+        self.assertNotIn('"budget":', CLI_PY)
         self.assertNotIn("args.budget", OPS_PY)
         self.assertNotIn('spec.get("budget"', OPS_PY)
         self.assertNotIn('st["budget"] if', OPS_PY)

@@ -19,7 +19,6 @@ from types import SimpleNamespace
 import ujson as json
 
 from fae.driver import common
-from fae.driver import ops
 from fae.driver import state
 from fae.driver.common import (
     ROOT, cell_id,
@@ -379,8 +378,7 @@ def smoke(args):
             results.append((vid, False, f"NOT ADMITTED — {why}"))
             continue
         try:
-            p = subprocess.run(ops._cell_argv("T1", vid, args.rep)
-                               + ["--stub", str(empty)], cwd=str(ROOT),
+            p = subprocess.run(c.process_argv() + ["--stub", str(empty)], cwd=str(ROOT),
                                env=dict(env, **{Cell.SLOT_FDS_ENV: slots.handover()}),
                                pass_fds=tuple(slots.fds()))
         finally:

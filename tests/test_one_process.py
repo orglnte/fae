@@ -62,10 +62,17 @@ class TestNoPythonChildProcesses(unittest.TestCase):
         # rig.py builds the cell's own venv (an infra step, not an
         # instrument); verify.py names the interpreter only to compose the
         # sidecar's cache-probe command string, which the sidecar spawns.
+        # Cell.process_argv is the cell process's own command line: what
+        # starts a cell, never a child of a running one.
+        import ast
         for f in sorted(PKG.glob("*.py")):
             if f.name in ("rig.py", "verify.py"):
                 continue
-            self.assertNotIn("sys.executable", f.read_text(),
+            src = f.read_text()
+            for n in ast.walk(ast.parse(src)):
+                if isinstance(n, ast.FunctionDef) and n.name == "process_argv":
+                    src = src.replace(ast.get_source_segment(src, n), "")
+            self.assertNotIn("sys.executable", src,
                              f"{f.name} starts a Python child process")
 
     def test_it_never_shells_to_an_instrument(self):
@@ -340,8 +347,8 @@ class TestTheRunLoopTakesItsLocksAndProvisionsItsArm(unittest.TestCase):
 
 class TestBothImplementationsAreSpawnable(unittest.TestCase):
 
-    def test_ops_spawn_can_start_either(self):
-        src = (ROOT / "fae" / "driver" / "ops.py").read_text()
+    def test_a_cell_starts_its_own_process(self):
+        src = (ROOT / "fae" / "cell" / "cell.py").read_text()
         self.assertIn('"-m", "fae.cell"', src)
 
     def test_the_package_has_an_entry_point(self):

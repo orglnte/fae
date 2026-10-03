@@ -2,7 +2,7 @@
 
 There is no runs.py any more (Milestone 6) — the orchestrator is the
 fae/driver/ package plus cli.py. But the whole suite was written against one
-qualified surface (`runs.common.WS`, `runs.state.X`, `runs.ops.X`, and a
+qualified surface (`runs.common.WS`, `runs.state.X`, `runs.cli.X`, and a
 handful of bare names — `runs.cell_id`, `runs.ROOT`, `runs.ledger`, ...)
 because that discipline is what makes mock.patch.object targets stable
 across a refactor. Rebuilding that surface here, once, means the ~50 test
@@ -46,8 +46,9 @@ _EXPERIMENT = Path(os.environ.get("FAE_TEST_EXPERIMENT") or _TREE / "tests" / "f
 os.environ["EXPERIMENT_DIR"] = str(_EXPERIMENT)
 
 from fae.driver import (        # noqa: E402
-    common, conduct, ops, render, rig, score, state, supervise, zombies,
+    common, conduct, render, rig, score, state, supervise, zombies,
 )
+from fae import cli as _cli     # noqa: E402
 from fae import queues as _queues_module  # noqa: E402
 from fae.cell import experiment as _experiment  # noqa: E402
 _experiment.load(_EXPERIMENT)
@@ -67,7 +68,7 @@ runs = types.ModuleType("runs")
 runs.common = common
 runs.conduct = conduct
 runs.exp1 = exp1
-runs.ops = ops
+runs.cli = _cli
 
 
 class _QueuesNow:
@@ -124,7 +125,6 @@ def plane_globals(plane):
         (runs.common, "LOCKS"): plane / ".locks",
         (runs.common, "TRANSITIONS_LOG"): plane / "transitions.log",
         (runs.common, "RECONCILE_LOG"): plane / ".conduct" / "reconcile.log",
-        (runs.ops, "RESPAWN_BOOK"): plane / ".conduct" / "reconcile.respawns.json",
     }
 
 

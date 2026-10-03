@@ -44,8 +44,8 @@ from . import rig as _rig
 from . import variants as _variants
 from .checkpoints import Checkpoints
 from .surface import Surface, authorable
-from .fsm import (ENABLED, PHASE_TO_LOOP, IllegalTransition, Loop, Phase,
-                  Sealed, State, T, step)
+from .fsm import (ENABLED, LOOP_CLEARED_BY, LOOP_UNCHANGED_BY, PHASE_TO_LOOP,
+                  IllegalTransition, Loop, Phase, Sealed, State, T, step)
 from .verify import (RUN_OUT, Ctx, Verdict, _mutex_module as _load_mutex, run_verifier,
                      take_events)
 
@@ -712,6 +712,179 @@ class Cell:
                 return True
         except Busy:
             return False
+
+    # --- starting and stopping the cell's process --------------------------
+    # One process runs a cell (python -m fae.cell, process_argv). Whoever
+    # starts it — the run's admission, `cell spawn`, a respawn — readies the
+    # cell first (before_start); whoever ends it, ends it through stop() or
+    # take_down().
+
+    STOP_GRACE_S = int(os.environ.get("STOP_GRACE_S", 120))       # cooperative window
+    TERM_GRACE_S = int(os.environ.get("TERM_GRACE_S", 30))        # after SIGTERM
+    TEARDOWN_TIMEOUT_S = int(os.environ.get("TEARDOWN_TIMEOUT_S", 240))
+
+    def process_argv(self):
+        """The command that runs this cell's process."""
+        return [sys.executable, "-m", "fae.cell", self.task, self.variant, str(self.rep)]
+
+    def prestart_clean(self):
+        """Clear what a previous loop of this cell left that would collide or
+        lie: the agent container (a new attempt recreates it; a stale one
+        shadows liveness) and a corpse heartbeat. Never the infra, whose reuse
+        on resume is a designed path. Nothing when a loop runs."""
+        if self.loop_pid():
+            return
+        subprocess.run(["docker", "rm", "-f", _config.agent_container(self.cid)],
+                       capture_output=True)
+        if self.heartbeat() is not None:
+            self.clear_heartbeat()
+
+    def _last_loop_action(self):
+        """The last record in transitions.log that changes this cell's loop
+        (EPOCH-live for a re-anchor that found it running), or None."""
+        last = None
+        try:
+            for line in self._transitions_log().read_text(errors="replace").splitlines():
+                f = line.split("\t")
+                if len(f) < 3 or f[2] != self.cid or f[1] in LOOP_UNCHANGED_BY:
+                    continue
+                last = "EPOCH-live" if f[1] == "EPOCH" and "loop=none" not in line else f[1]
+        except OSError:
+            pass
+        return last
+
+    def _crash_before_spawn(self):
+        """Record the Crash a dying loop could not record itself, before a new
+        loop starts: whoever held this cell before is gone, and if its last
+        loop-affecting record does not clear the loop, the replay would judge
+        the new Admit against a loop that is still running."""
+        last = self._last_loop_action()
+        if not last or last in LOOP_CLEARED_BY or self.loop_pid():
+            return False
+        self.crashed("pre-spawn: previous loop ended silently")
+        return True
+
+    def before_start(self, what="spawn"):
+        """Make the cell ready for its process to start: refused when sealed
+        (returns SEAL_EXIT, said why), else its pause lifted — starting it is
+        the decision to run it, and Spawn is enabled only on intent 'run' —
+        a silent end of its previous loop recorded, and what that loop left
+        cleared. None when it may start."""
+        if self.sealed:
+            print(f"refusing to {what} {self.cid}: SEALED — "
+                  f"{self.seal_record().replace(chr(9), ' ') or 'sealed'}")
+            print("  a terminal result is read-only; delete and requeue to redo it")
+            return self.SEAL_EXIT
+        self.unpause()
+        self._crash_before_spawn()
+        self.prestart_clean()
+        return None
+
+    def shared_resource_warning(self):
+        """What a start without slots risks for a variant with a lock, or None."""
+        if not self.arm:
+            return None
+        return (f"WARNING: {self.variant} uses the shared resource '{self.arm}'; started "
+                f"without its slot, other cells using it may run at the same time")
+
+    def request_pause(self, reason, who="operator"):
+        """Pause the cell unless a pause already stands (an operator's reason
+        is never overwritten) or it is done (a finished cell has no loop to
+        stop, and a pause on it would keep supervision from validating it).
+        True if it asked."""
+        if (self.pause_request() or PauseRequest(None, None, None, "")).reason \
+                or self.cancelled or self.terminal:
+            return False
+        self.pause(reason, who)
+        return True
+
+    def stop(self, cancel=False):
+        """Halt the cell now: its loop killed (Cell.kill), what it left torn
+        down. Resumable (paused 'stopped') unless `cancel`, the terminal intent
+        written before anything slow. Returns kill's outcome."""
+        self.request_pause("killed" if cancel else "stopped")
+        if cancel:
+            self.cancel()
+        outcome = self.kill(self.TERM_GRACE_S, self.TEARDOWN_TIMEOUT_S)
+        if outcome != "killed":
+            self.clean_up(self.TEARDOWN_TIMEOUT_S)
+        if outcome != "absent" and not cancel:
+            # a plain stop recorded Pause (intent only): the loop ending without
+            # a transition of its own is a Crash; a cancel's Kill already ends it
+            self.crashed("stopped-by-operator")
+        return outcome
+
+    def teardown_within(self, timeout):
+        """teardown() on a thread, waited on for `timeout` seconds. False when
+        it was still running then: abandoned (a daemon thread) rather than
+        left to wedge the caller."""
+        t = threading.Thread(target=self.teardown, daemon=True, name=f"teardown-{self.cid}")
+        t.start()
+        t.join(timeout)
+        return not t.is_alive()
+
+    def take_down(self, reason, grace=None, unblock_agent=False, who="conduct", log=None):
+        """End the cell's loop, cooperatively first, and tear its infra down
+        after it is gone. A lock guards provisioned infra, not a process, and
+        the kernel frees a slot the instant its holder dies: a kill without a
+        teardown hands the slot on while the infra is still up. Returns
+        cooperative | termed | killed | absent; `log` hears an abandoned
+        teardown."""
+        grace = self.STOP_GRACE_S if grace is None else grace
+        pid = self.loop_pid()
+        outcome = "absent"
+        if pid:
+            self.request_pause(reason, who)
+            # A loop inside the agent command notices nothing until the command
+            # returns; removing the agent's container (only that one) returns it.
+            if unblock_agent:
+                subprocess.run(["docker", "rm", "-f", _config.agent_container(self.cid)],
+                               capture_output=True)
+            if self._gone(pid, grace, poll=2):
+                outcome = "cooperative"
+            else:
+                outcome = self.kill(self.TERM_GRACE_S, self.TEARDOWN_TIMEOUT_S)
+                if outcome == "absent":
+                    outcome = "cooperative"
+        # Always, and after the loop is dead: idempotent, so the cooperative case
+        # re-runs a no-op.
+        if self.variant_cls is not None:
+            if not self.teardown_within(self.TEARDOWN_TIMEOUT_S) and log:
+                log(f"{self.cid} variant teardown still running after "
+                    f"{self.TEARDOWN_TIMEOUT_S}s — abandoned (inspect the "
+                    f"{self.variant} infra by hand)")
+            boxes = [i for k, i in self.variant_cls.INFRA.identities(self.cid) if k == "container"]
+        else:
+            boxes = []
+        subprocess.run(["docker", "rm", "-f", "-v", _config.agent_container(self.cid), *boxes],
+                       capture_output=True)
+        return outcome
+
+    def refresh_creds(self):
+        """Copy the agent's current credentials into this cell's own agent home,
+        for a claude agent whose home the cell already staged."""
+        agent = self.cid.split("_", 1)[0]
+        conf = _config.load(self.root, env=dict(os.environ, AGENT=agent))
+        if conf.get("AGENT_CLI") != "claude":
+            return False
+        creds = Path(conf.get("AGENT_HOME", "")) / ".credentials.json"
+        home = self.ws / self.AGENT_HOMES["claude"][0]
+        if not creds.is_file() or not home.is_dir():
+            return False
+        (home / ".credentials.json").write_bytes(creds.read_bytes())
+        return True
+
+    def agent_logs(self):
+        """The agent's transcripts, oldest first (by mtime)."""
+        return sorted(self.ws.glob("agent.attempt-*.log"), key=lambda p: p.stat().st_mtime)
+
+    def console_log(self):
+        """The cell's most recent story: the verify log if one exists, else the
+        variant hooks' log, else the console log; None when there is none."""
+        for name in ("verify.log", "hooks.log", "run_cell.log"):
+            if (self.ws / name).exists():
+                return self.ws / name
+        return None
 
     # --- transitions ------------------------------------------------------
     # transitions.log is written only here, and only by appending: one write

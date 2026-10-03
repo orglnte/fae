@@ -19,6 +19,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from fae.cell.cell import Cell
+
 from _ctx import ROOT, runs, OrchTmpCase
 
 class TestACrashIsRecordedBeforeTheRespawn(OrchTmpCase):
@@ -41,8 +43,8 @@ class TestACrashIsRecordedBeforeTheRespawn(OrchTmpCase):
         # Admit last => the model still has this cell at `agent`, slot held.
         # Admitting on top of that is not enabled.
         self.trace(("Admit", self.CID))
-        with mock.patch.object(runs.state, "loop_parents", return_value={}):
-            self.assertTrue(runs.ops._crash_before_spawn(self.CID))
+        with mock.patch.object(Cell, "loop_pid", return_value=None):
+            self.assertTrue(runs.common.cell(self.CID)._crash_before_spawn())
         self.assertEqual(self.actions()[-1], "Crash")
 
     def test_a_cleanly_ended_loop_is_not_crashed(self):
@@ -50,22 +52,21 @@ class TestACrashIsRecordedBeforeTheRespawn(OrchTmpCase):
         # Crash on top of it would be a transition that did not happen.
         self.trace(("Admit", self.CID),
                    ("ReleaseSlot", self.CID))
-        with mock.patch.object(runs.state, "loop_parents", return_value={}):
-            self.assertFalse(runs.ops._crash_before_spawn(self.CID))
+        with mock.patch.object(Cell, "loop_pid", return_value=None):
+            self.assertFalse(runs.common.cell(self.CID)._crash_before_spawn())
         self.assertNotIn("Crash", self.actions())
 
     def test_a_first_ever_spawn_is_not_crashed(self):
         self.trace()
-        with mock.patch.object(runs.state, "loop_parents", return_value={}):
-            self.assertFalse(runs.ops._crash_before_spawn(self.CID))
+        with mock.patch.object(Cell, "loop_pid", return_value=None):
+            self.assertFalse(runs.common.cell(self.CID)._crash_before_spawn())
 
     def test_a_LIVE_loop_is_never_declared_crashed(self):
         # Declaring a running cell dead desyncs every later event for it —
         # the same failure, pointed the other way.
         self.trace(("Admit", self.CID))
-        with mock.patch.object(runs.state, "loop_parents",
-                               return_value={self.CID: 4242}):
-            self.assertFalse(runs.ops._crash_before_spawn(self.CID))
+        with mock.patch.object(Cell, "loop_pid", return_value=4242):
+            self.assertFalse(runs.common.cell(self.CID)._crash_before_spawn())
         self.assertNotIn("Crash", self.actions())
 
     def test_it_runs_on_the_spawn_path_itself_not_only_in_supervision(self):
@@ -73,10 +74,12 @@ class TestACrashIsRecordedBeforeTheRespawn(OrchTmpCase):
         # readmission cycle, so supervision alone can never win this race.
         self.trace(("Admit", self.CID))
         (self.ws / self.CID).mkdir(parents=True)
-        with mock.patch.object(runs.state, "loop_parents", return_value={}), \
+        with mock.patch.object(Cell, "loop_pid", return_value=None), \
+             mock.patch.object(Cell, "prestart_clean"), \
+             mock.patch.object(runs.conduct.Conduct, "SPAWN_PROBE_S", 0), \
              mock.patch.object(runs.subprocess, "Popen") as popen:
             popen.return_value.poll.return_value = None
-            runs.ops._spawn_detached(["bash", "-c", "true"], {}, self.CID, "spawn")
+            runs.conduct.Conduct().launch(runs.common.named_cell(self.CID), "sonnet")
         self.assertEqual(self.actions()[-1], "Crash")
         self.assertLess(runs.supervise.AGENT_DEAD_GRACE, 3600)
 

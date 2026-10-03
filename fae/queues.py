@@ -412,6 +412,59 @@ class Queues:
         p.rename(dest)
         return dest
 
+    @_changes
+    def cancel_pending(self, pick, dry_run=False):
+        """Every pending spec whose cid `pick` accepts, cancelled (cancel), under
+        one stamp. [(agent, spec path, where it went — None on a dry run)]."""
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        hits = [(agent, p) for agent, p, _ in self.pending_specs() if pick(self.spec_cid(p))]
+        return [(agent, p, None if dry_run else self.cancel(p, agent, stamp))
+                for agent, p in hits]
+
+    def pending_cids(self, pick=lambda cid: True):
+        """The cids of every pending spec, parked lanes included, that `pick`
+        accepts."""
+        return sorted({self.spec_cid(p) for _, p, _ in self.pending_specs()
+                       if pick(self.spec_cid(p))})
+
+    @_changes
+    def shelve_cell(self, cid, why):
+        """Every spec of `cid`, pending or claimed, out of play (shelve), so
+        nothing admits the cell again. Returns how many."""
+        specs = self.specs_of(cid.split("_", 1)[0], cid)
+        for p in specs:
+            self.shelve(p, why)
+        return len(specs)
+
+    @_changes
+    def enqueue_matrix(self, agent, task, variants, reps, fresh=False):
+        """`reps` reps of every variant, rep-outer. (enqueued, asked)."""
+        specs = [dict(task=task, variant=v, rep=rep, fresh=fresh)
+                 for rep in range(1, reps + 1) for v in variants]
+        return sum(self.enqueue(agent, s) is not None for s in specs), len(specs)
+
+    @_changes
+    def top_up(self, agent, task, variants, to_rep, have, dry_run=False):
+        """Each variant's reps up to `to_rep`, rep-outer, skipping the reps in
+        `have` (variant -> reps that ran) and those already queued. Rep-outer
+        keeps every variant advancing together, so a partly drained queue still
+        yields comparable n. (need: variant -> reps to add, enqueued)."""
+        queued = set()
+        for p in self.queued_specs(agent):
+            try:
+                s = self.read_spec(p)
+            except (OSError, ValueError):
+                continue
+            queued.add((s["variant"], s["rep"]))
+        need = {v: [r for r in range(1, to_rep + 1)
+                    if r not in have.get(v, ()) and (v, r) not in queued]
+                for v in variants}
+        specs = [dict(task=task, variant=v, rep=rep, fresh=False)
+                 for rep in range(1, to_rep + 1) for v in variants if rep in need[v]]
+        if dry_run or not specs:
+            return need, 0
+        return need, sum(self.enqueue(agent, s) is not None for s in specs)
+
     # --- slots ----------------------------------------------------------------
 
     def _pool_dir(self, lock=None):

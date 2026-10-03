@@ -18,6 +18,8 @@ import sys
 from types import SimpleNamespace
 from unittest import mock
 
+from fae.cell.cell import Cell
+
 from _ctx import ROOT, runs, OrchTmpCase
 
 HARNESS = Path(ROOT) / "fae"
@@ -123,17 +125,18 @@ class TestNoLaunchPathStartsASealedCell(SealedFleetTestCase):
     def test_spawn_is_refused_and_no_process_is_started(self):
         self.cell(self.CID, self.GREEN, sealed="sealed=x\tverdict=green\n")
         with mock.patch.object(runs.subprocess, "Popen") as popen:
-            rc = runs.ops._spawn_detached([sys.executable, "-m", "fae.cell"], {},
-                                      self.CID, "spawn")
+            rc = runs.conduct.Conduct().launch(runs.common.named_cell(self.CID), "sonnet")
         popen.assert_not_called()
         self.assertEqual(rc, runs.SEAL_EXIT)
 
     def test_an_unsealed_cell_is_still_spawned(self):
         # The inverse: the guard must not refuse everything.
         self.cell(self.CID, self.OPEN)
-        with mock.patch.object(runs.subprocess, "Popen") as popen:
+        with mock.patch.object(runs.subprocess, "Popen") as popen, \
+             mock.patch.object(Cell, "prestart_clean"), \
+             mock.patch.object(runs.conduct.Conduct, "SPAWN_PROBE_S", 0):
             popen.return_value.poll.return_value = None
-            runs.ops._spawn_detached(["bash", "-c", "true"], {}, self.CID, "spawn")
+            runs.conduct.Conduct().launch(runs.common.named_cell(self.CID), "sonnet")
         popen.assert_called_once()
 
     def test_queueing_a_sealed_cell_is_refused(self):
@@ -165,31 +168,31 @@ class TestTheSealCommand(SealedFleetTestCase):
 
     def test_dry_by_default(self):
         self.cell("sonnet_high_beta_apidocs_T1_r1", self.GREEN)
-        runs.ops.seal(self.args())
+        runs.cli.seal(self.args())
         self.assertFalse((self.ws / "sonnet_high_beta_apidocs_T1_r1"
                           / ".sealed").exists())
 
     def test_apply_seals_a_green_cell(self):
         d = self.cell("sonnet_high_beta_apidocs_T1_r1", self.GREEN)
-        runs.ops.seal(self.args(apply=True))
+        runs.cli.seal(self.args(apply=True))
         self.assertIn("verdict=green", (d / ".sealed").read_text())
 
     def test_apply_seals_a_budget_exhausted_cell(self):
         # 30% of finished results are these; sealing only greens would leave
         # them unprotected.
         d = self.cell("sonnet_high_beta_apidocs_T1_r2", self.BUDGET)
-        runs.ops.seal(self.args(apply=True))
+        runs.cli.seal(self.args(apply=True))
         self.assertIn("verdict=budget", (d / ".sealed").read_text())
 
     def test_an_open_cell_is_left_alone(self):
         d = self.cell("sonnet_high_beta_apidocs_T1_r3", self.OPEN)
-        runs.ops.seal(self.args(apply=True))
+        runs.cli.seal(self.args(apply=True))
         self.assertFalse((d / ".sealed").exists())
 
     def test_a_cancelled_cell_is_not_a_result(self):
         d = self.cell("sonnet_high_beta_apidocs_T1_r4", self.OPEN)
         (d / ".cancelled").write_text("operator\n")
-        runs.ops.seal(self.args(apply=True))
+        runs.cli.seal(self.args(apply=True))
         self.assertFalse((d / ".sealed").exists())
 
     def test_a_cell_with_a_live_loop_seals_itself_instead(self):
@@ -197,13 +200,13 @@ class TestTheSealCommand(SealedFleetTestCase):
         (d / ".loop").write_text("pid=1 cid=x phase=verify attempt=1 ts=1\n")
         with mock.patch.object(runs.state, "loop_parents",
                                return_value={d.name: 4242}):
-            runs.ops.seal(self.args(apply=True))
+            runs.cli.seal(self.args(apply=True))
         self.assertFalse((d / ".sealed").exists())
 
     def test_an_already_sealed_cell_is_not_rewritten(self):
         d = self.cell("sonnet_high_beta_apidocs_T1_r6", self.GREEN,
                       sealed="sealed=ORIGINAL\tverdict=green\tattempts=1\n")
-        runs.ops.seal(self.args(apply=True))
+        runs.cli.seal(self.args(apply=True))
         self.assertIn("ORIGINAL", (d / ".sealed").read_text())
 
 

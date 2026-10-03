@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Grouped Typer front-end for the driver — 
 
-DESIGN: this is a CLI LAYER, not the orchestrator. Every command builds the
-namespace the target fae/driver/*.py function already expects and calls it
-directly — fae/driver/ is the library, this is its one client. That includes
-fae/driver/rig.py (the experiment's verbs: init, infra, smoke, prepare,
-verb; the rig's own: trace-reset), fae/driver/check.py (experiment check)
-and the tail/log pair folded into fae/driver/ops.py.
-No orchestration logic is duplicated here.
+DESIGN: this is a CLI LAYER, not the orchestrator. A command acting on the
+run calls the Conduct (fae/driver/conduct.py); one acting on cells selects
+them and asks each Cell; one on the work list asks the Queues. What stays here
+is selection and printing. fae/driver/rig.py (the experiment's verbs: init,
+infra, smoke, prepare, verb; the rig's own: trace-reset) and
+fae/driver/check.py (experiment check) are called the same way.
 
 GROUPS
   experiment  the experiment this root runs: set it up (init, check, infra,
@@ -37,8 +36,10 @@ callers that needed them).
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
@@ -51,10 +52,8 @@ ROOT = Path(__file__).resolve().parents[1]
 # file), it does not — so fae/driver/ needs this insert to be importable either way.
 sys.path.insert(0, str(ROOT))
 
-# fae/driver/ is the library; this file is the client of it. No orchestration
-# logic is duplicated here — every command builds the namespace the target
-# fae/driver/*.py function already expects and calls straight through.
-from fae.driver import ops, render, score, supervise, conduct, rig  # noqa: E402
+from fae.cell.cell import Busy  # noqa: E402
+from fae.driver import common, conduct, render, rig, score, state  # noqa: E402
 
 
 def _ns(**kw):
@@ -87,6 +86,390 @@ SEL = "cid, agent name, or a whole `_`-separated token run. Anchored: `r1` "
 SEL += "does not match `r10`."
 
 
+# --- the verbs on cells and specs: selection and printing ---------------------
+# Each takes the namespace its command builds. Acting is the owners': a Cell
+# for one cell, the Queues for the work list, the Conduct for the run.
+
+def _selectors(args):
+    """The verbs take `selectors` (several); a lone `selector` still works."""
+    sels = getattr(args, "selectors", None)
+    return list(sels) if sels is not None else [args.selector]
+
+
+def _one_cell(verb, sels, n, queued=None):
+    """Exactly ONE cell per cell verb: anything matching more goes through
+    the run's bulk verb, so there is one bulk path and one cap owner."""
+    if n + (queued or 0) > 1:
+        sys.exit(f"`{verb}` acts on exactly ONE cell; {' '.join(sels)!r} matches "
+                 + (str(n) if queued is None else f"{n} cell(s) + {queued} queued spec(s)")
+                 + f" — bulk {verb} goes through: experiment {verb} AGENT...|all")
+
+
+def spawn(args):
+    """Start one cell now, without slots: refused while the run is up unless
+    --dangerously-ignore-slots."""
+    try:
+        reps = [int(r.strip()) for r in str(args.rep).split(',')]
+    except ValueError:
+        sys.exit("invalid --rep format. Must be an integer or comma-separated integers.")
+    if len(reps) != 1:
+        sys.exit("`spawn` starts exactly ONE cell (operator rule, 2026-08-12); "
+                 "for several reps enqueue them (top-up / queue add) and let "
+                 "`experiment run` admit under its caps")
+    refusal = conduct.Conduct().refusal_while_up(
+        "spawn", getattr(args, "dangerously_ignore_slots", False))
+    if refusal:
+        sys.exit(refusal)
+    rep = reps[0]
+    # smoke= as prepare passes it: a SMOKE=1 spawn computing the unsmoke cid would
+    # guard one identity while the cell process runs under another
+    cid = common.cell_id(args.agent, args.variant, rep, args.task,
+                         smoke=bool(os.environ.get("SMOKE")))
+    live = state.loop_parents()
+    if cid in live:
+        print(f"refusing: loop already running for {cid} (pid {live[cid]}) — "
+              f"two loops on one workspace corrupt its logs")
+        return
+    if (common.WS / cid).is_dir() and not args.fresh:
+        c = common.cell(cid)
+        L = c.read_ledger()
+        if L["verdict"] in ("green", "failed", "revoked"):
+            at = f" @{L['green_at']}" if L["verdict"] == "green" else f" @{L['att']}"
+            print(f"skipping {cid}: already DONE·{L['verdict']}{at} — use --fresh to force a new run")
+            return
+        if c.cancelled:
+            print(f"skipping {cid}: already DONE·cancelled — use --fresh to force a new run")
+            return
+    cell = common.cell(cid, args.task, args.variant, rep, agent=args.agent)
+    if not cell.ready_image():
+        sys.exit(f"refusing: the agent image for {args.variant} could not be built "
+                 f"(the lines above say why)")
+    warning = cell.shared_resource_warning()
+    if warning:
+        print(warning)
+    cell.prestart_clean()
+    cell.prepare(fresh=args.fresh)
+    if args.agent == "human":
+        # the human pseudo-agent is interactive (the driver pauses on a tty each
+        # attempt): the command goes to the person's own terminal
+        print(f"HUMAN cell {cid} — run this in YOUR terminal (tmux for long sessions):\n")
+        print(f"  cd {common.ROOT} && {cell.IGNORE_SLOTS_ENV}=1 AGENT=human "
+              f"python3 -m fae.cell {args.task} {args.variant} {rep}\n")
+        print(f"Each attempt: edit workspaces*/{cid}/artifacts, press ENTER to "
+              f"verify (q to stop).")
+        return
+    if conduct.Conduct().launch(cell, args.agent, what="spawn") is None:
+        print(f"spawned {cid}")
+
+
+def pause(args):
+    """Queue a pause of ONE cell for the run to act on. Returns the cid, or None."""
+    sels = _selectors(args)
+    cids = common.select_cells(*sels)
+    if not cids:
+        print(f"no cells match {' '.join(sels)!r}")
+        return None
+    _one_cell("pause", sels, len(cids))
+    common.queues().request(cids[0], "pause", reason=args.reason, who="operator")
+    print(f"pause requested [{args.reason}] for {cids[0]}")
+    return cids[0]
+
+
+def stop_cells(args):
+    """Queue a stop of ONE cell for the run to act on (Conduct.stop_cell).
+    Resumable — PAUSED·stopped — unless --cancel, the terminal verdict. A spec
+    with no workspace is the queue's alone and is shelved here. Returns the
+    cids queued."""
+    sels = _selectors(args)
+    cids = common.select_cells(*sels)
+    # specs with no workspace are invisible to the selection; a stop that
+    # ignored them would leave the cell to be admitted later
+    q_only = common.queued_cids(*sels)
+    if not cids and not q_only:
+        print(f"no cells match {' '.join(sels)!r}")
+        return None
+    _one_cell("stop", sels, len(cids), len(q_only))
+    cancel = getattr(args, "cancel", False)
+    if getattr(args, "dry_run", False):
+        verb = "cancel" if cancel else "stop"
+        for cid in cids:
+            st = state.cell_state(common.WS / cid, state.loop_pids(), state.containers())
+            print(f"would {verb} {cid}" + (f" ({st['state']}·{st['why']})" if st else ""))
+        for cid in q_only:
+            print(f"would drop queued spec {cid} (no workspace; backed up)")
+        print(f"— {len(cids)} cell(s), {len(q_only)} queued spec(s). Nothing done (--dry-run).")
+        return None
+    # never cancel a finished verdict: a stop halts runs, it does not relabel data
+    done = [c for c in cids
+            if (st := state.cell_state(common.WS / c, {}, set())) and st["state"] == "DONE"]
+    cids = [c for c in cids if c not in set(done)]
+    for c in done:
+        print(f"  {c}: already DONE — left untouched")
+    if not cids and not q_only:
+        print("nothing to stop (all matches are DONE)")
+        return None
+    qs = common.queues()
+    n = sum(qs.shelve_cell(c, "cancelled" if cancel else "stopped") for c in q_only)
+    if n:
+        print(f"  {n} spec(s) out of the backlog (restore from .queues/backups/)")
+    for cid in cids:
+        qs.request(cid, "stop", cancel=cancel)
+        print(f"{'cancel' if cancel else 'stop'} requested for {cid}")
+    return cids
+
+
+def resume(args):
+    """Make ONE cell run again, whatever stopped it: its pause lifted, its
+    flag cleared, its respawn budget reset, and its loop respawned without
+    slots when it has none (never fresh). A blanket selection leaves standing
+    operator decisions (roster/manual pauses, a cancel) alone."""
+    qs = common.queues()
+    sels = _selectors(args)
+    matches = common.select_cells(*sels)
+    _one_cell("resume", sels, len(matches))
+    blanket = common.is_blanket(sels)
+    parents = state.loop_parents()
+    run = conduct.Conduct()
+    touched = 0
+    for cid in matches:
+        st = state.cell_state(common.WS / cid, state.loop_pids(), state.containers())
+        if st is None:
+            continue
+        c = common.cell(cid)
+        if c.sealed:
+            print(f"{cid}: SEALED — {common.seal_reason(cid)}; not restartable")
+        reason = state.pause_lock(cid)
+        # before the DONE/loop-alive branch: a pause is cooperative, so "paused
+        # but still alive" is the normal state for a long window
+        if reason in ("roster", "manual") and blanket:
+            continue
+        if st["state"] == "DONE" or parents.get(cid):
+            # no respawn, but a standing pause is still lifted (a pause-pending
+            # loop would honour it after this resume) — except a cancel's
+            acts = []
+            if reason and reason != "killed":
+                c.unpause()
+                acts.append("pause lifted")
+            if st["state"] == "DONE":
+                agent = cid.split("_", 1)[0]
+                for q in qs.lane_specs(agent):
+                    if qs.spec_cid(q) == cid:
+                        try:
+                            qs.finish(agent, qs.claim(agent, q))
+                        except FileExistsError:
+                            qs.shelve(q, "done-duplicate")
+                        acts.append("spec retired (cell is DONE)")
+                        break
+            if acts:
+                print(f"  {cid}: {', '.join(acts)} (no respawn — "
+                      f"{'done' if st['state'] == 'DONE' else 'loop alive'})")
+                touched += 1
+            continue
+        if reason == "killed" and cid not in sels:
+            continue      # killed cells come back only when named exactly
+        acts = []
+        if reason:
+            c.unpause()
+            acts.append("pause lifted")
+        if c.unflag():
+            acts.append("flag cleared")
+        agent = cid.split("_", 1)[0]
+        # the per-agent cap holds on resume too, unless --force
+        if not getattr(args, "force", False):
+            live_m = sum(1 for x in state.loop_parents() if x.startswith(agent + "_"))
+            if live_m >= common.PER_AGENT_CAP:
+                touched += 1
+                acts.append(f"respawn DEFERRED — {agent} already has {live_m} live loop(s) "
+                            f"(cap {common.PER_AGENT_CAP}; --force overrides; resume again later)")
+                print(f"  {cid}: {', '.join(acts)}")
+                continue
+        if run.reset_respawn_budgets([cid]):
+            acts.append("respawn budget reset")
+        for other in common.select_cells(agent):
+            common.cell(other).refresh_creds()
+        # claim before spawning: claim() is one rename and refuses an existing
+        # claim, so the run cannot admit the same spec meanwhile
+        claimed = None
+        if not run.is_claimed(cid):
+            for q in qs.lane_specs(agent):
+                if qs.spec_cid(q) == cid:
+                    try:
+                        claimed = qs.claim(agent, q)
+                        acts.append("spec claimed")
+                    except (FileExistsError, OSError):
+                        pass
+                    break
+        if run.respawn(st, dry=False,
+                       ignore_slots=getattr(args, "dangerously_ignore_slots", False)):
+            acts.append("respawned")
+        elif claimed is not None:
+            qs.release(agent, claimed, front=True)
+            acts.append("spec returned to the lane front")
+        touched += 1
+        print(f"  {cid}: {', '.join(acts)}")
+    if not touched:
+        print(f"nothing to resume for {' '.join(sels)!r} (already running or done)")
+
+
+SEALABLE = {"green": "green", "failed": "budget", "revoked": "revoked"}
+
+
+def seal(args):
+    """Make terminal cells read-only (.sealed). Dry by default: sealing has
+    no inverse, so writing the markers is an explicit act (--apply)."""
+    loops, boxes, live = state.loop_pids(), state.containers(), state.loop_parents()
+    todo, already, skipped = [], 0, {}
+    for cid in common.select_cells(args.selector):
+        st = state.cell_state(common.WS / cid, loops, boxes)
+        if st is None:
+            continue
+        if common.is_sealed(cid):
+            already += 1
+            continue
+        why = st.get("why", "")
+        if live.get(cid):
+            # a verdict and a live loop at once: the loop is between its ITER
+            # and its own seal; it seals itself
+            skipped[cid] = "loop alive"
+        elif st["state"] != "DONE" or why not in SEALABLE:
+            skipped[cid] = why or st["state"].lower()
+        else:
+            todo.append((cid, SEALABLE[why], st["att"]))
+    for cid, verdict, att in todo:
+        if args.apply:
+            try:
+                common.cell(cid).seal(verdict, att, by="cli.py seal")
+            except Busy:
+                print(f"skipped       {cid}  (held by another process)")
+                continue
+        print(f"{'sealed' if args.apply else 'would seal'}  {cid}  {verdict} attempts={att}")
+    if args.verbose:
+        for cid, why in sorted(skipped.items()):
+            print(f"skipped       {cid}  ({why})")
+    print(f"\n{'sealed' if args.apply else 'would seal'} {len(todo)} cell(s); "
+          f"{already} already sealed; {len(skipped)} not terminal"
+          + ("" if args.apply else "  — re-run with --apply to write"))
+
+
+def reverify(args):
+    """Re-run the shape gate on finished cells without touching their result:
+    everything lands under <ws>/reverify/<ts>/ (Cell.reverify)."""
+    cids = common.select_cells(*_selectors(args))
+    if not cids:
+        sys.exit("no cells match")
+    if len(cids) > 1 and not args.all:
+        sys.exit(f"{len(cids)} cells match — re-verify takes the rig for "
+                 f"~15 minutes each. Name one, or pass --all.")
+    pid = conduct.Conduct().pid()
+    if pid:
+        print(f"WARNING: conduct is running (pid {pid}); this re-verify queues for the "
+              f"verify lock behind its cells and holds it for the whole gate", flush=True)
+    stamp = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
+    for cid in cids:
+        c = common.cell(cid)
+        if not c.terminal:
+            print(f"skipping {cid}: not finished ({c.verdict or 'open'}) — "
+                  f"re-verify applies to a recorded result")
+            continue
+        print(f"reverify {cid} -> reverify/{stamp}/  (recorded verdict: {c.verdict})", flush=True)
+        try:
+            results = c.reverify(stamp=stamp)
+        except Busy:
+            print(f"  skipped: {cid} is held by another process")
+            continue
+        want = c.gate_def.arity
+        ok = all(r.green for r in results) and len(results) == want
+        print(f"  {'UPHELD' if ok else 'DIFFERS'}: "
+              f"{sum(r.green for r in results)}/{want} arrangement(s) green"
+              + ("" if ok else f" — first failure: "
+                               f"{results[-1].shape} ({results[-1].stage_failed})"))
+        print(f"  evidence: {c.ws / 'reverify' / stamp}")
+
+
+def tail(args):
+    """The agent transcript of the cell's latest attempt."""
+    logs = common.cell(args.cell).agent_logs()
+    if not logs:
+        sys.exit("no attempt logs")
+    subprocess.run(["tail", *(["-f"] if args.follow else ["-n", "40"]), str(logs[-1])])
+
+
+def log(args):
+    """The cell's most recent story (Cell.console_log)."""
+    c = common.cell(args.cell)
+    path = c.console_log()
+    if path is None:
+        print(f"no log under {c.ws}")
+        return
+    print(f"== {path.name}", flush=True)
+    subprocess.run(["tail", "-n", "60", str(path)])
+
+
+def _variants(variants):
+    """The variants named, each one of the experiment's; none named: every
+    active one."""
+    d = common.definition()
+    for v in variants:
+        if v not in d.variants:
+            sys.exit(f"unknown variant '{v}' — valid: {', '.join(d.active)}")
+    return list(variants) or list(d.active)
+
+
+def spawn_matrix(args):
+    """Every active variant, --reps reps each, rep-outer."""
+    n, asked = common.queues().enqueue_matrix(args.agent, args.task, common.definition().active,
+                                              args.reps, fresh=args.fresh)
+    print(f"enqueued {n} runs for {args.agent} — `experiment run` admits them "
+          f"(start it if not running: python3 cli.py experiment run)"
+          + (f"; {asked - n} already pending" if n < asked else ""))
+
+
+def top_up(args):
+    """Fill each selected variant's missing reps up to --to-rep (Queues.top_up).
+    A rep counts as had when its cell RAN (a verdict, or an attempt in
+    flight); a workspace prepared but never launched holds no attempt and
+    would cap the variant below target. Nothing is started."""
+    variants = _variants(getattr(args, "variants", []))
+    have, unstarted = {}, {}
+    for cid in common.select_cells(args.agent):
+        p = common.parse_cell_id(cid)
+        if p[0] != args.agent or p[2] != args.task:
+            continue
+        c = common.cell(cid)
+        ran = c.read_ledger()["iters"] or c.heartbeat() is not None
+        (have if ran else unstarted).setdefault(p[1], set()).add(int(p[3]))
+    need, n = common.queues().top_up(args.agent, args.task, variants, args.to_rep, have,
+                                     dry_run=args.dry_run)
+    for v in variants:
+        idle = sorted(unstarted.get(v, set()) & set(need[v]))
+        print(f"{args.agent:7} {v:24} have={sorted(have.get(v, ()))} add={need[v]}"
+              + (f"  (of which {idle} were prepared but never ran)" if idle else ""))
+    todo = sum(len(r) for r in need.values())
+    if not todo:
+        print("nothing to add — every selected variant is at target or queued")
+    elif args.dry_run:
+        print(f"[dry-run] would enqueue {todo} spec(s) for {args.agent}")
+    else:
+        print(f"enqueued {n} spec(s) for {args.agent} (nothing started)")
+
+
+def cancel_pending(args):
+    """Take pending specs out of the queue before admission (Queues.cancel_pending):
+    moved aside, never deleted; running and done specs are never touched."""
+    hits = common.queues().cancel_pending(
+        lambda cid: any(common.matches(cid, s) for s in args.selectors), dry_run=args.dry_run)
+    if not hits:
+        print("cancel: no pending spec matches")
+        return []
+    qs = common.queues()
+    for agent, p, dest in hits:
+        if dest is None:
+            print(f"  would cancel  {agent:10s} {qs.spec_cid(p)}")
+        else:
+            print(f"  cancelled     {agent:10s} {qs.spec_cid(p)}  -> {dest.parent}")
+    return hits
+
+
 # --- cell -------------------------------------------------------------------
 
 @cell_app.command("spawn")
@@ -102,7 +485,7 @@ def cell_spawn(
 ):
     """Start one cell now, without slots. Refuses while the run is up, which
     admits cells with their slots, unless --dangerously-ignore-slots."""
-    ops.spawn(_ns(agent=agent, variant=variant, rep=rep,
+    spawn(_ns(agent=agent, variant=variant, rep=rep,
                   task=task, fresh=fresh, dangerously_ignore_slots=dangerously_ignore_slots))
 
 
@@ -113,7 +496,7 @@ def cell_pause(selectors: list[str] = typer.Argument(..., help=SEL + " Must matc
     """Ask ONE cell to stop at its next safe point: the run signals its loop,
     which records the pause and stands down there. Bulk pause is
     `experiment pause`."""
-    if ops.pause(_ns(selectors=list(selectors), reason=reason)):
+    if pause(_ns(selectors=list(selectors), reason=reason)):
         conduct.Conduct().act_on_requests()
 
 
@@ -128,7 +511,7 @@ def cell_resume(selectors: list[str] = typer.Argument(..., help=SEL + " Must mat
     without slots. The respawn defers at the per-agent cap (--force pushes
     past it) and refuses while the run is up unless --dangerously-ignore-slots.
     Bulk resume is `experiment resume`."""
-    ops.resume(_ns(selectors=list(selectors), force=force,
+    resume(_ns(selectors=list(selectors), force=force,
                    dangerously_ignore_slots=dangerously_ignore_slots))
 
 
@@ -142,7 +525,7 @@ def cell_stop(selectors: list[str] = typer.Argument(..., help=SEL + " Must match
     tears its infra down and removes its queued specs (backed up).
     Resumable — PAUSED·stopped — unless --cancel. Files are never touched.
     Bulk stop is `experiment stop`."""
-    if ops.stop_cells(_ns(selectors=list(selectors), cancel=cancel, dry_run=dry_run)):
+    if stop_cells(_ns(selectors=list(selectors), cancel=cancel, dry_run=dry_run)):
         conduct.Conduct().act_on_requests()
 
 
@@ -150,13 +533,13 @@ def cell_stop(selectors: list[str] = typer.Argument(..., help=SEL + " Must match
 def cell_tail(cid: str, follow: bool = typer.Option(False, "-f", "--follow",
                                                    help="stream as it grows")):
     """The agent transcript of the latest attempt."""
-    ops.tail(_ns(cell=cid, follow=follow))
+    tail(_ns(cell=cid, follow=follow))
 
 
 @cell_app.command("log")
 def cell_log(cid: str):
     """The run_cell console log."""
-    ops.log(_ns(cell=cid))
+    log(_ns(cell=cid))
 
 
 @cell_app.command("seal")
@@ -167,7 +550,7 @@ def cell_seal(selector: str = typer.Argument("all", help=SEL),
                                            help="also list cells left alone, and why")):
     """Make terminal cells read-only. No unseal: redo a cell by deleting and
     requeueing it."""
-    ops.seal(_ns(selector=selector, apply=apply, verbose=verbose))
+    seal(_ns(selector=selector, apply=apply, verbose=verbose))
 
 
 @cell_app.command("reverify")
@@ -176,7 +559,7 @@ def cell_reverify(selectors: Optional[list[str]] = typer.Argument(None, help=SEL
                                             help="accept a selector matching more than one cell")):
     """Re-run the shape gate on a finished cell WITHOUT touching its recorded
     result (writes under <ws>/reverify/<ts>/)."""
-    ops.reverify(_ns(selectors=list(selectors) if selectors else ["all"], all=all_))
+    reverify(_ns(selectors=list(selectors) if selectors else ["all"], all=all_))
 
 
 # --- queue: the work list ---------------------------------------------------
@@ -207,10 +590,10 @@ def queue_add(
     if not matrix and to_rep is None:
         raise typer.BadParameter("choose --matrix or --to-rep N")
     if to_rep is not None:
-        ops.top_up(_ns(agent=agent, to_rep=to_rep, variants=list(variant),
+        top_up(_ns(agent=agent, to_rep=to_rep, variants=list(variant),
                        task=task, dry_run=dry_run))
         return
-    ops.spawn_matrix(_ns(agent=agent, reps=reps, task=task, fresh=fresh))
+    spawn_matrix(_ns(agent=agent, reps=reps, task=task, fresh=fresh))
 
 
 @queue_app.command("list")
@@ -228,7 +611,7 @@ def queue_cancel(selectors: list[str] = typer.Argument(..., help=SEL + " `all`: 
     """Take pending specs out of the queue before admission. They are moved
     aside (.queues/.to_be_deleted/<ts>/queue/), never deleted; running cells
     are not touched (that is `cell stop`)."""
-    ops.queue_cancel(_ns(selectors=list(selectors), dry_run=dry_run))
+    cancel_pending(_ns(selectors=list(selectors), dry_run=dry_run))
 
 
 # --- experiment: the run ----------------------------------------------------

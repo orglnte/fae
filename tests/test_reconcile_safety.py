@@ -18,6 +18,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
+from fae.cell.cell import Cell
+
 from _ctx import runs, ROOT, patch_plane
 
 TS = "2026-07-30T09:00:00Z"
@@ -429,24 +431,25 @@ class TestDryRunWritesNothing(unittest.TestCase):
         """reconcile.flagged makes every future reconcile skip the cell until a
         human resumes it. A preview that writes it disables supervision of a
         cell the operator only meant to look at."""
-        runs.ops.RESPAWN_BOOK.write_text(
-            '{"%s": %d}' % (self.cid, runs.ops.MAX_RESPAWNS))
-        runs.ops._respawn(self.st(), dry=True)
+        run = runs.conduct.Conduct()
+        run.respawn_book.write_text('{"%s": %d}' % (self.cid, runs.conduct.MAX_RESPAWNS))
+        run.respawn(self.st(), dry=True)
         self.assertFalse((self.ws / self.cid / "reconcile.flagged").exists())
 
     def test_real_run_does_write_reconcile_flagged(self):
-        runs.ops.RESPAWN_BOOK.write_text(
-            '{"%s": %d}' % (self.cid, runs.ops.MAX_RESPAWNS))
-        runs.ops._respawn(self.st(), dry=False)
+        run = runs.conduct.Conduct()
+        run.respawn_book.write_text('{"%s": %d}' % (self.cid, runs.conduct.MAX_RESPAWNS))
+        run.respawn(self.st(), dry=False)
         self.assertTrue((self.ws / self.cid / "reconcile.flagged").exists())
 
     def test_dry_run_does_not_spawn_or_charge_the_respawn_budget(self):
-        before = runs.ops.respawn_count(self.cid)
-        runs.ops._respawn(self.st(), dry=True)
-        self.assertEqual(runs.ops.respawn_count(self.cid), before)
+        run = runs.conduct.Conduct()
+        before = run.respawn_count(self.cid)
+        run.respawn(self.st(), dry=True)
+        self.assertEqual(run.respawn_count(self.cid), before)
 
     def test_dry_run_writes_no_transition(self):
-        runs.ops._respawn(self.st(), dry=True)
+        runs.conduct.Conduct().respawn(self.st(), dry=True)
         self.assertFalse(runs.common.TRANSITIONS_LOG.exists(),
                          "a preview wrote to the trace the TLA+ check replays")
 
@@ -462,22 +465,26 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         patch_plane(self, Path(self._tmp.name))
-        self._probe = runs.ops.SPAWN_PROBE_S
-        runs.ops.SPAWN_PROBE_S = 0.4
+        for p in (mock.patch.object(runs.conduct.Conduct, "SPAWN_PROBE_S", 0.4),
+                  mock.patch.object(Cell, "prestart_clean")):
+            p.start()
+            self.addCleanup(p.stop)
 
     def tearDown(self):
-        runs.ops.SPAWN_PROBE_S = self._probe
         self._tmp.cleanup()
 
+    def spawn(self, argv, cid):
+        """Conduct.launch, the cell's process being `argv`."""
+        with mock.patch.object(Cell, "process_argv", return_value=argv):
+            return runs.conduct.Conduct().launch(runs.common.named_cell(cid), "sonnet")
+
     def test_immediate_failure_returns_the_exit_code(self):
-        rc = runs.ops._spawn_detached(
-            ["bash", "-c", 'echo "FATAL prepare_cell: wrong seed doc" >&2; exit 3'],
-            dict(os.environ), "cell-x", "spawn")
+        rc = self.spawn(
+            ["bash", "-c", 'echo "FATAL prepare_cell: wrong seed doc" >&2; exit 3'], "cell-x")
         self.assertEqual(rc, 3)
 
     def test_a_live_child_keeps_its_stderr_sink(self):
-        rc = runs.ops._spawn_detached(["bash", "-c", "sleep 5"],
-                                  dict(os.environ), "cell-y", "spawn")
+        rc = self.spawn(["bash", "-c", "sleep 5"], "cell-y")
         self.assertIsNone(rc)
         self.assertTrue((self.conduct / "cell.cell-y.err").exists(),
                         "a surviving driver has nowhere to write a traceback")
@@ -486,9 +493,7 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         # The regression that mattered: the child outlives the probe, then
         # writes. Deleting the file on survival sent that into an unlinked
         # inode.
-        runs.ops._spawn_detached(
-            ["bash", "-c", 'sleep 0.8; echo "died later" >&2'],
-            dict(os.environ), "cell-w", "spawn")
+        self.spawn(["bash", "-c", 'sleep 0.8; echo "died later" >&2'], "cell-w")
         kept = self.conduct / "cell.cell-w.err"
         for _ in range(40):
             if "died later" in kept.read_text():
@@ -497,8 +502,7 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         self.assertIn("died later", kept.read_text())
 
     def test_stderr_is_kept_for_inspection_on_failure(self):
-        runs.ops._spawn_detached(["bash", "-c", 'echo "boom" >&2; exit 43'],
-                             dict(os.environ), "cell-z", "spawn")
+        self.spawn(["bash", "-c", 'echo "boom" >&2; exit 43'], "cell-z")
         kept = self.conduct / "cell.cell-z.err"
         self.assertTrue(kept.exists())
         self.assertIn("boom", kept.read_text())
@@ -516,7 +520,7 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         log = runs.common.TRANSITIONS_LOG
         with log.open("a") as f:
             f.write(f"{TS}\tPause\t{cid}\treason=stopped\n")
-        runs.ops._spawn_detached(["bash", "-c", "exit 0"], dict(os.environ), cid, "spawn")
+        self.spawn(["bash", "-c", "exit 0"], cid)
         self.assertEqual([l.split("\t")[1] for l in log.read_text().splitlines()
                           if l.split("\t")[2] == cid], ["Pause", "Resume"])
         self.assertFalse((runs.common.WS / cid / ".paused").exists())
@@ -529,7 +533,7 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         (runs.common.WS / cid / ".cancelled").write_text("by=operator\n")
         with runs.common.TRANSITIONS_LOG.open("a") as f:
             f.write(f"{TS}\tKill\t{cid}\treason=killed\n")
-        runs.ops._spawn_detached(["bash", "-c", "exit 0"], dict(os.environ), cid, "spawn")
+        self.spawn(["bash", "-c", "exit 0"], cid)
         self.assertNotIn("\tResume\t", runs.common.TRANSITIONS_LOG.read_text())
         self.assertTrue((runs.common.WS / cid / ".paused").exists())
 
@@ -537,8 +541,7 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         # The sink must not be minted under WS: a spawn precedes prepare, so
         # writing there invents a workspace for a cell that never ran — and
         # every scanner that walks WS then sees it.
-        runs.ops._spawn_detached(["bash", "-c", "exit 3"],
-                             dict(os.environ), "cell-never", "spawn")
+        self.spawn(["bash", "-c", "exit 3"], "cell-never")
         self.assertFalse((runs.common.WS / "cell-never").exists())
 
 
@@ -563,7 +566,7 @@ class SweepCase(unittest.TestCase):
             # teardown_cell waits for the loop to exit, and these suites
             # patch os.kill with a bare Mock — every pid then looks alive
             # forever and the full grace is burned in a unit test.
-            mock.patch.object(runs.ops, "_await_exit", return_value=True),
+            mock.patch.object(Cell, "_gone", return_value=True),
             mock.patch.object(runs.common, "WS", self.ws),
             mock.patch.object(runs.state, "loop_pids", return_value={}),
         ]
@@ -633,7 +636,7 @@ class TestSweepClassification(SweepCase):
         kill.assert_not_called()
 
     def _crashed_sweeps(self, *, queued, n):
-        with mock.patch.object(runs.ops, "is_claimed", return_value=False), \
+        with mock.patch.object(runs.queues_module.Queues, "is_claimed", return_value=False), \
              mock.patch.object(runs.queues_module.Queues, "lane_has", return_value=queued):
             for _ in range(n):
                 self.sweep(self.st(state="CRASHED", why="loop", events=5))
@@ -867,7 +870,7 @@ class TestVerifyWedgedStandsTheCellDown(SweepCase):
         self._acquire(held_s)
         with mock.patch.object(runs.supervise, "VERIFY_HELD_ALERT_S", self.ALERT_S), \
              mock.patch.object(runs.supervise, "VERIFY_WEDGED_S", self.WEDGE_S), \
-             mock.patch.object(runs.ops, "teardown_cell") as td, \
+             mock.patch.object(Cell, "take_down") as td, \
              mock.patch.object(runs.supervise, "_reclaim"):
             self.sweep(self.st(state="RUNNING", why="verify"), dry=dry)
         return td
@@ -879,7 +882,7 @@ class TestVerifyWedgedStandsTheCellDown(SweepCase):
     def test_past_the_wedge_threshold_the_cell_is_torn_down(self):
         td = self._sweep_wedged(self.WEDGE_S + 60)
         td.assert_called_once()
-        self.assertEqual(td.call_args.kwargs["reason"], "verify-wedged")
+        self.assertEqual(td.call_args.args[0], "verify-wedged")
         body = (self.cell / "iterations.log").read_text()
         self.assertIn("VERIFY-WEDGED", body)
         self.assertIn("this attempt is lost", body)
@@ -900,7 +903,7 @@ class TestVerifyWedgedStandsTheCellDown(SweepCase):
         self._acquire(self.WEDGE_S + 60)
         with mock.patch.object(runs.supervise, "VERIFY_HELD_ALERT_S", self.ALERT_S), \
              mock.patch.object(runs.supervise, "VERIFY_WEDGED_S", self.WEDGE_S), \
-             mock.patch.object(runs.ops, "teardown_cell") as td, \
+             mock.patch.object(Cell, "take_down") as td, \
              mock.patch.object(runs.supervise, "_reclaim"):
             for _ in range(3):
                 self.sweep(self.st(state="RUNNING", why="verify"))
@@ -924,7 +927,7 @@ class TestArmStuckMeasuresProgressNotLiveness(SweepCase):
              mock.patch.object(runs.state, "heartbeat",
                                return_value={"phase_age": phase_age,
                                              "age": 1.0, "phase": phase}), \
-             mock.patch.object(runs.ops, "teardown_cell") as td, \
+             mock.patch.object(Cell, "take_down") as td, \
              mock.patch.object(runs.supervise, "_reclaim"):
             self.sweep(st)
         return td
@@ -934,7 +937,7 @@ class TestArmStuckMeasuresProgressNotLiveness(SweepCase):
         td = self._sweep_arm(slot_age=runs.supervise.ARM_HELD_ALERT_S + 60,
                              phase_age=runs.supervise.ARM_STALL_S + 60)
         td.assert_called_once()
-        self.assertEqual(td.call_args.kwargs["reason"], "arm-stuck")
+        self.assertEqual(td.call_args.args[0], "arm-stuck")
 
     def test_a_queued_cell_is_waiting_not_stalled(self):
         """The wait phases are someone else's time: the verify-lock holder,
@@ -1106,7 +1109,7 @@ class TestSpawnTagsSmokeCells(unittest.TestCase):
 
     def test_the_spawn_cid_carries_the_smoke_flag(self):
         import inspect
-        src = inspect.getsource(runs.ops.spawn)
+        src = inspect.getsource(runs.cli.spawn)
         m = re.search(r"cid = common\.cell_id\(([^)]*)\)", src)
         self.assertIsNotNone(m)
         self.assertIn("smoke=", m.group(1))
@@ -1119,10 +1122,10 @@ class TestRespawnKeepsTheCellsImplementation(unittest.TestCase):
 
     def test_the_respawn_argv_comes_from_the_recorded_impl(self):
         import inspect
-        self.assertIn("start_cell(cell,", inspect.getsource(runs.ops._respawn))
-        self.assertIn("_cell_argv(cell.task, cell.variant, cell.rep)",
-                      inspect.getsource(runs.ops.start_cell))
-        self.assertIn('"-m", "fae.cell"', inspect.getsource(runs.ops._cell_argv))
+        self.assertIn("self.launch(cell,", inspect.getsource(runs.conduct.Conduct.respawn))
+        self.assertIn("cell.process_argv()", inspect.getsource(runs.conduct.Conduct.launch))
+        self.assertIn('"-m", "fae.cell", self.task, self.variant, str(self.rep)',
+                      inspect.getsource(Cell.process_argv))
 
     def test_the_cell_reads_its_impl(self):
         with tempfile.TemporaryDirectory() as d:

@@ -11,7 +11,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from fae.cell.cell import Cell
+
 from _ctx import runs, OrchTmpCase, ROOT, patch_plane
+
+_PAUSE_LOCK = runs.state.pause_lock
 
 
 class ConductCase(OrchTmpCase):
@@ -25,9 +29,9 @@ class ConductCase(OrchTmpCase):
                             {"CONDUCT_LOG_DIR": self._tmp.name}),
             mock.patch.object(runs.state, "loop_parents", side_effect=lambda: dict(self.live)),
             mock.patch.object(runs.state, "containers", return_value=set()),
-            mock.patch.object(runs.ops, "prestart_clean", lambda cid: None),
+            mock.patch.object(Cell, "prestart_clean"),
             mock.patch.object(runs.state, "pause_lock", side_effect=lambda cid: None),
-            mock.patch.object(runs.ops, "_spawn_detached", side_effect=self._spawn),
+            mock.patch.object(runs.conduct.Conduct, "_spawn", side_effect=self._spawn),
             mock.patch.object(runs.time, "sleep", self._tick),
         ]
         for p in self.patches:
@@ -199,7 +203,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         with contextlib.redirect_stdout(out), \
                 mock.patch.object(runs.state, "loop_parents", return_value={}), \
                 mock.patch.object(runs.state, "containers", return_value=set()):
-            runs.ops.resume(SimpleNamespace(selectors=[cid], force=False))
+            runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
         self.assertIn("spec retired", out.getvalue())
         self.assertEqual(runs.queues.lane_specs(m), [])
 
@@ -219,10 +223,9 @@ class TestFinishedSpecsAreRetired(ConductCase):
         with contextlib.redirect_stdout(io.StringIO()), \
                 mock.patch.object(runs.state, "loop_parents", return_value={}), \
                 mock.patch.object(runs.state, "containers", return_value=set()), \
-                mock.patch.object(runs.ops, "refresh_cell_creds"), \
-                mock.patch.object(runs.ops, "prestart_clean"), \
-                mock.patch.object(runs.ops, "_spawn_detached", return_value=None):
-            runs.ops.resume(SimpleNamespace(selectors=[cid], force=False))
+                mock.patch.object(Cell, "refresh_creds"), \
+                mock.patch.object(runs.conduct.Conduct, "_spawn", return_value=None):
+            runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
         self.assertEqual(runs.queues.lane_specs(m), [], "spec still in the lane")
         self.assertTrue((runs.common.QUEUES / "running" / m / f"{cid}.json").exists())
 
@@ -239,10 +242,9 @@ class TestFinishedSpecsAreRetired(ConductCase):
         with contextlib.redirect_stdout(io.StringIO()), \
                 mock.patch.object(runs.state, "loop_parents", return_value={}), \
                 mock.patch.object(runs.state, "containers", return_value=set()), \
-                mock.patch.object(runs.ops, "refresh_cell_creds"), \
-                mock.patch.object(runs.ops, "prestart_clean"), \
-                mock.patch.object(runs.ops, "_spawn_detached", return_value=3):
-            runs.ops.resume(SimpleNamespace(selectors=[cid], force=False))
+                mock.patch.object(Cell, "refresh_creds"), \
+                mock.patch.object(runs.conduct.Conduct, "_spawn", return_value=3):
+            runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
         self.assertEqual(len(runs.queues.lane_specs(m)), 1, "spec was not returned")
         self.assertFalse((runs.common.QUEUES / "running" / m / f"{cid}.json").exists())
 
@@ -437,7 +439,7 @@ class TestClaims(ConductCase):
         (self.ws / "aaa_high_beta_apidocs_T1_r1").mkdir(parents=True)
         self.q("aaa", [self.spec()])
         self.run_conduct()
-        for _ in range(runs.ops.MAX_RESPAWNS + 1):
+        for _ in range(runs.conduct.MAX_RESPAWNS + 1):
             self.live.clear()
             self.max_rounds, self.rounds = 2, 0
             out = self.run_conduct()
@@ -507,7 +509,7 @@ class TestAInfraHaltSpendsARepair(ConductCase):
         self.assertIn("infra HALT at admission", out)
         self.assertNotIn("FROZEN", out)
         cid = self.spawned[0]
-        self.assertGreaterEqual(runs.ops.respawn_count(cid), 1)
+        self.assertGreaterEqual(runs.conduct.Conduct().respawn_count(cid), 1)
 
 
 class TestAGenericCrashSpendsARepair(ConductCase):
@@ -523,7 +525,7 @@ class TestAGenericCrashSpendsARepair(ConductCase):
         self.assertIn("crash at admission", out)
         self.assertNotIn("FROZEN", out)
         cid = self.spawned[0]
-        self.assertGreaterEqual(runs.ops.respawn_count(cid), 1)
+        self.assertGreaterEqual(runs.conduct.Conduct().respawn_count(cid), 1)
 
 class TestSystemicFreeze(ConductCase):
     def test_immediate_systemic_death_freezes_the_lane(self):
@@ -693,24 +695,33 @@ class TestReapingBelongsToConduct(unittest.TestCase):
         self.assertNotIn("ZOMBIES", printed)
 
     def test_a_spawn_does_not_sweep_the_fleet(self):
-        with mock.patch.object(runs.state, "containers", return_value=set()), \
-             mock.patch.object(runs.state, "loop_parents", return_value={}), \
+        ran = []
+        with mock.patch.object(Cell, "loop_pid", return_value=None), \
+             mock.patch.object(runs.subprocess, "run",
+                               side_effect=lambda a, **k: ran.append(a)), \
              mock.patch.object(runs.subprocess, "Popen") as popen:
-            runs.ops.prestart_clean("some_cell")
+            runs.common.cell("some_cell").prestart_clean()
         popen.assert_not_called()
+        self.assertEqual(ran, [["docker", "rm", "-f", "fae-agent-some_cell"]],
+                         "only the cell's own agent container")
+
+    def test_a_cell_with_a_running_loop_is_left_alone(self):
+        ran = []
+        with mock.patch.object(Cell, "loop_pid", return_value=4242), \
+             mock.patch.object(runs.subprocess, "run",
+                               side_effect=lambda a, **k: ran.append(a)):
+            runs.common.cell("some_cell").prestart_clean()
+        self.assertEqual(ran, [])
 
     def test_a_spawn_still_clears_its_own_leftovers(self):
         cid = "some_cell"
         (self.ws / cid).mkdir(parents=True)
         (self.ws / cid / ".loop").write_text("pid=999999 phase=agent\n")
         removed = []
-        with mock.patch.object(runs.state, "containers",
-                               return_value={f"fae-agent-{cid}"}), \
-             mock.patch.object(runs.state, "loop_parents", return_value={}), \
-             mock.patch.object(runs.state, "heartbeat", return_value=None), \
+        with mock.patch.object(Cell, "loop_pid", return_value=None), \
              mock.patch.object(runs.subprocess, "run",
                                side_effect=lambda a, **k: removed.append(a)):
-            runs.ops.prestart_clean(cid)
+            runs.common.cell(cid).prestart_clean()
         self.assertIn(["docker", "rm", "-f", f"fae-agent-{cid}"], removed)
         self.assertFalse((self.ws / cid / ".loop").exists())
 
@@ -834,7 +845,7 @@ class TestSpawnAndAdoptEdges(ConductCase):
 
         patches = [mock.patch.object(Cell, "prepare",
                                      side_effect=lambda fresh=False: seen.update(fresh=fresh)),
-                   mock.patch.object(runs.ops, "_spawn_detached", side_effect=spawn)]
+                   mock.patch.object(runs.conduct.Conduct, "_spawn", side_effect=spawn)]
         if take is not None:
             patches.append(mock.patch.object(Cell, "take_slots", return_value=take))
         with contextlib.ExitStack() as st:
@@ -863,7 +874,7 @@ class TestSpawnAndAdoptEdges(ConductCase):
         from fae.cell import Cell
         cell = runs.conduct.Conduct._cell(self.CID, self.spec(), "aaa")
         with mock.patch.object(Cell, "prepare", side_effect=RuntimeError("no reference")), \
-                mock.patch.object(runs.ops, "_spawn_detached") as spawned, \
+                mock.patch.object(runs.conduct.Conduct, "_spawn") as spawned, \
                 contextlib.redirect_stdout(io.StringIO()):
             rc = runs.conduct.Conduct().admit(cell, "aaa")
         self.assertEqual(rc, "no-prepare")
@@ -928,8 +939,11 @@ class TestConductLiftsItsOwnStandDowns(ConductCase):
         self.q("aaa", [self.spec()])
 
     def run_lift(self, conductor=None):
+        # the cell's own pause decides admission here: the run starts a cell
+        # only once its stand-down is lifted
         with mock.patch.object(runs.common, "TRANSITIONS_LOG",
-                               self.plane / "transitions.log"):
+                               self.plane / "transitions.log"), \
+             mock.patch.object(runs.state, "pause_lock", _PAUSE_LOCK):
             return self.run_conduct(conductor=conductor)
 
     def test_a_cooled_stand_down_is_lifted_and_costs_a_repair(self):
@@ -940,7 +954,7 @@ class TestConductLiftsItsOwnStandDowns(ConductCase):
         self.assertIn("lifted", out)
         self.assertFalse((self.ws / self.CID / ".paused").exists())
         self.assertEqual(self.spawned, [self.CID])
-        self.assertEqual(runs.ops.respawn_count(self.CID), 1)
+        self.assertEqual(runs.conduct.Conduct().respawn_count(self.CID), 1)
         self.assertNotIn(self.CID, c.alerts.arm)
 
     def test_a_fresh_stand_down_waits_out_the_cool_off(self):
@@ -977,8 +991,8 @@ class TestConductLiftsItsOwnStandDowns(ConductCase):
 
     def test_a_spent_budget_flags_instead_of_lifting(self):
         self.stood_down()
-        for _ in range(runs.ops.MAX_RESPAWNS):
-            runs.ops.respawn_count(self.CID, bump=True)
+        for _ in range(runs.conduct.MAX_RESPAWNS):
+            runs.conduct.Conduct().respawn_count(self.CID, bump=True)
         out = self.run_lift()
         self.assertIn("FLAGGED", out)
         self.assertTrue((self.ws / self.CID / ".paused").exists())

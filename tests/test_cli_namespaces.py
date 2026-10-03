@@ -26,9 +26,8 @@ runner = CliRunner()
 def invoke(fn_name, argv, mod):
     """Run one cli command with <mod>.<fn_name> mocked; return its call.
 
-    `mod` names the fae/driver/ submodule that owns fn_name (e.g. `cli.ops` for
-    the verbs fae/driver/ops.py holds) — every verb lives in fae/driver/ now, so
-    there is no bare-runs fallback to default to."""
+    `mod` names the module that owns fn_name: `cli` for the verbs on cells and
+    specs it holds itself, a fae/driver/ submodule for the rest."""
     with mock.patch.object(mod, fn_name) as m:
         result = runner.invoke(cli.app, argv)
     if result.exit_code != 0:
@@ -41,37 +40,37 @@ def invoke(fn_name, argv, mod):
 class TestCellCommands(unittest.TestCase):
     def test_spawn(self):
         (ns,), _ = invoke("spawn", ["cell", "spawn", "sonnet", "beta_apidocs",
-                                    "-r", "2", "--fresh"], mod=cli.ops)
+                                    "-r", "2", "--fresh"], mod=cli)
         self.assertEqual(vars(ns), dict(agent="sonnet", variant="beta_apidocs", rep="2", task="T1",
                                         fresh=True, dangerously_ignore_slots=False))
 
     def test_spawn_dangerously_ignore_slots(self):
         (ns,), _ = invoke("spawn", ["cell", "spawn", "sonnet", "beta_apidocs",
-                                    "--dangerously-ignore-slots"], mod=cli.ops)
+                                    "--dangerously-ignore-slots"], mod=cli)
         self.assertTrue(ns.dangerously_ignore_slots)
 
     def test_pause_takes_several_selectors(self):
         (ns,), _ = invoke("pause", ["cell", "pause", "sonnet", "haiku",
-                                    "--reason", "roster"], mod=cli.ops)
+                                    "--reason", "roster"], mod=cli)
         self.assertEqual(vars(ns), dict(selectors=["sonnet", "haiku"],
                                         reason="roster"))
 
     def test_resume(self):
-        (ns,), _ = invoke("resume", ["cell", "resume", "haiku"], mod=cli.ops)
+        (ns,), _ = invoke("resume", ["cell", "resume", "haiku"], mod=cli)
         self.assertEqual(vars(ns), dict(selectors=["haiku"], force=False,
                                         dangerously_ignore_slots=False))
 
     def test_resume_force(self):
-        (ns,), _ = invoke("resume", ["cell", "resume", "haiku", "--force"], mod=cli.ops)
+        (ns,), _ = invoke("resume", ["cell", "resume", "haiku", "--force"], mod=cli)
         self.assertTrue(ns.force)
 
     def test_stop(self):
-        (ns,), _ = invoke("stop_cells", ["cell", "stop", "r10", "--dry-run"], mod=cli.ops)
+        (ns,), _ = invoke("stop_cells", ["cell", "stop", "r10", "--dry-run"], mod=cli)
         self.assertEqual(vars(ns), dict(selectors=["r10"], cancel=False,
                                         dry_run=True))
 
     def test_stop_cancel(self):
-        (ns,), _ = invoke("stop_cells", ["cell", "stop", "r10", "--cancel"], mod=cli.ops)
+        (ns,), _ = invoke("stop_cells", ["cell", "stop", "r10", "--cancel"], mod=cli)
         self.assertTrue(ns.cancel)
 
     def test_kill_is_gone(self):
@@ -120,14 +119,14 @@ class TestTheRunCommands(unittest.TestCase):
 
     def test_queue_add_matrix(self):
         (ns,), _ = invoke("spawn_matrix", ["queue", "add", "opus",
-                                           "--matrix", "--reps", "5"], mod=cli.ops)
+                                           "--matrix", "--reps", "5"], mod=cli)
         self.assertEqual(vars(ns), dict(agent="opus", reps=5, task="T1",
                                         fresh=False))
 
     def test_queue_add_to_rep(self):
         (ns,), _ = invoke("top_up", ["queue", "add", "opus",
                                      "--to-rep", "10",
-                                     "--variant", "beta_apidocs", "--dry-run"], mod=cli.ops)
+                                     "--variant", "beta_apidocs", "--dry-run"], mod=cli)
         self.assertEqual(vars(ns), dict(agent="opus", to_rep=10, variants=["beta_apidocs"],
                                         task="T1", dry_run=True))
 
@@ -197,7 +196,7 @@ class TestQueueCommands(unittest.TestCase):
         self.assertEqual(vars(ns), dict(agents=["opus"], done=True))
 
     def test_cancel_takes_selectors_and_dry_run(self):
-        (ns,), _ = invoke("queue_cancel", ["queue", "cancel", "opus_r1", "--dry-run"], mod=cli.ops)
+        (ns,), _ = invoke("cancel_pending", ["queue", "cancel", "opus_r1", "--dry-run"], mod=cli)
         self.assertEqual(vars(ns), dict(selectors=["opus_r1"], dry_run=True))
 
 
