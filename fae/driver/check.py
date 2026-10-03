@@ -79,7 +79,7 @@ def _last_line(e):
 
 # --- the steps ------------------------------------------------------------
 
-def _host(ctx):
+def _prerequisites(ctx):
     out = []
     v = sys.version_info
     out.append(Finding(v >= (3, 11), f"Python {v.major}.{v.minor}",
@@ -91,17 +91,15 @@ def _host(ctx):
         except ImportError:
             out.append(Finding(False, f"{mod} not installed",
                                f"python3 -m pip install {mod}"))
+    if not ctx.static:
+        try:
+            ok = subprocess.run(["docker", "info"], capture_output=True,
+                                timeout=30).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            ok = False
+        out.append(Finding(ok, "docker daemon " + ("answers" if ok else "unreachable"),
+                           "start Docker, then `docker info` must succeed"))
     return out
-
-
-def _docker(ctx):
-    try:
-        ok = subprocess.run(["docker", "info"], capture_output=True,
-                            timeout=30).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        ok = False
-    return [Finding(ok, "docker daemon " + ("answers" if ok else "unreachable"),
-                    "start Docker, then `docker info` must succeed")]
 
 
 def _config(ctx):
@@ -356,63 +354,48 @@ def _pipeline(ctx):
 
 
 STEPS = (
-    Step("host", "This machine",
-         "The engine needs Python 3.11+ and two packages; nothing else runs on\n"
-         "the host.",
-         "§1", _host),
-    Step("config", "The config and the definition",
-         "fae.toml is machine-local and says where the experiment is; the engine\n"
-         "loads that directory's __init__.py as the experiment's definition.",
-         "§3, §7", _config, needs=("host",)),
-    Step("definition", "What the experiment declares",
-         "Its variants (one file each under variants/), the verifier and the\n"
-         "image it runs in, and the gate every attempt must pass.",
+    Step("prerequisites", "prerequisites",
+         "python >= 3.11, typer, ujson; docker daemon (skipped with --static)",
+         "§1", _prerequisites),
+    Step("config", "config",
+         "fae.toml; the experiment definition loads",
+         "§3, §7", _config, needs=("prerequisites",)),
+    Step("definition", "definition",
+         "variants/*.toml, verifier class and image, gate",
          "§3, §6", _definition, needs=("config",)),
-    Step("variants", "Each variant",
-         "What the agent may write ([authoring] surface), how the engine tells\n"
-         "its infra is alive, and that the agent is handed TODO.md.",
+    Step("variants", "variants",
+         "authoring surface, infra liveness probe, inputs include TODO.md",
          "§5", _variants, needs=("definition",)),
-    Step("seeds", "Seeding every variant",
-         "Prepares each variant, and its reference, into a throwaway\n"
-         "workspace root: the same prepare() a real cell runs.",
+    Step("seeds", "seeds",
+         "prepare() of every variant and its reference into a temp root",
          "§4, §5", _seeds, needs=("definition",)),
-    Step("invariants", "The engine's and the corpus's invariants",
-         "The engine's own functions, a shell that names cells as the scheduler\n"
-         "does, the experiment's own checks, and every finished cell's record.",
+    Step("invariants", "invariants",
+         "engine functions, cell-id derivation, the experiment's selftest, sealed cells' records",
          "§12", _invariants, needs=("definition",)),
-    Step("docker", "The docker daemon",
-         "Every agent, verifier and program under test runs in a container of\n"
-         "this daemon.",
-         "§1", _docker, docker=True),
-    Step("infra", "This host can carry each variant",
-         "Each variant's own preflight (its infra's ok()) and the verify image,\n"
-         "built now if missing, so no cell pays for the build.",
-         "§7", _infra, needs=("seeds", "docker"), docker=True),
-    Step("agents", "The agents' images",
-         "The agents' base image (their CLIs) and each variant's tools layer\n"
-         "over it, built now if missing; a CLI behind upstream is reported.",
-         "§10", _agent_images, needs=("definition", "docker"), docker=True),
-    Step("leftovers", "No leftovers of dead cells",
-         "Containers, clusters and heartbeats whose cell is gone hold host\n"
-         "capacity the next measurement needs.",
-         "§11", _leftovers, needs=("docker",), docker=True),
-    Step("trace", "The fleet's transitions replay against the model",
-         "Every recorded transition of every cell is replayed against the\n"
-         "TLA+ model of the cell lifecycle.",
+    Step("infra", "infra",
+         "infra ok() per variant; verify image, built if missing",
+         "§7", _infra, needs=("seeds", "prerequisites"), docker=True),
+    Step("agents", "agents",
+         "agent base image and each variant's tools layer, built if missing; CLIs vs upstream",
+         "§10", _agent_images, needs=("definition", "prerequisites"), docker=True),
+    Step("leftovers", "leftovers",
+         "containers, clusters, heartbeats of dead cells",
+         "§11", _leftovers, needs=("prerequisites",), docker=True),
+    Step("tla-trace", "tla-trace",
+         "transitions.log replayed against the TLA+ cell-lifecycle model",
          "§11", _trace, needs=("config",), opt_in="--tla-trace"),
-    Step("pipeline", "The reference passes the gate",
-         "One reference cell per way of judging, no agent, one arrangement:\n"
-         "proves the verifier judges the known answer green before any agent runs.",
+    Step("pipeline", "pipeline",
+         "one reference cell per judging path, one arrangement, no agent",
          "§8", _pipeline, needs=("infra",), docker=True, opt_in="--smoke"),
 )
 
 NEXT = (
-    ("the reference, every arrangement", "python3 cli.py experiment smoke --full-gate"),
-    ("a scripted agent (fail, then green)",
+    ("reference, all arrangements", "python3 cli.py experiment smoke --full-gate"),
+    ("scripted agent (fail, then green)",
      "TESTAGENT_PLAN=fail,green python3 cli.py cell spawn testagent <variant> --rep 1"),
-    ("one real agent", "python3 cli.py cell spawn <agent> <variant> --rep 1"),
-    ("the fleet", "python3 cli.py queue add <agent> --matrix --reps 3 && "
-                  "python3 cli.py experiment run -n 2 --per-agent 1"),
+    ("one agent, one variant", "python3 cli.py cell spawn <agent> <variant> --rep 1"),
+    ("queue every variant for an agent", "python3 cli.py queue add <agent> --matrix --reps 3"),
+    ("run what is queued", "python3 cli.py experiment run -n 2 --per-agent 1"),
 )
 
 
@@ -445,7 +428,7 @@ def run(ctx, steps=STEPS, walk=False, smoke=False, tla_trace=False, ask=input, o
             out(f"{head}: skip (needs {', '.join(blocked)})")
             continue
         if walk:
-            out(f"\n{head}  (HOWTO {step.howto})\n{step.why}")
+            out(f"\n{head}\n{step.why}")
             a = ask("[Enter] run · s skip · q quit > ").strip().lower()
             if a == "q":
                 break
@@ -487,7 +470,7 @@ def _summary(steps, status, out):
             f"({HOWTO} {', '.join(sorted({h.strip() for s in failed for h in s.howto.split(',')}))}).")
         return 1
     if all(status.get(s.key) == "ok" for s in steps):
-        out("\nREADY. Next:")
+        out("\nREADY. next:")
         for what, cmd in NEXT:
             out(f"  {what}:\n    {cmd}")
     else:

@@ -38,17 +38,22 @@ class CheckCase(unittest.TestCase):
 class TestTheFixtureIsReady(CheckCase):
     def test_every_static_step_passes_and_the_docker_ones_are_skipped(self):
         self.assertEqual(self.run_check(), 0)
-        for title in ("This machine", "The config and the definition", "What the experiment declares",
-                      "Each variant", "Seeding every variant"):
+        for title in ("prerequisites", "config", "definition", "variants", "seeds"):
             self.assertIn(f"  ok      {title}", self.lines)
-        self.assertIn("  skip    The docker daemon", self.lines)
+        self.assertIn("  skip    infra", self.lines)
         self.assertIn("No failure; the skipped steps are not checked.", self.text())
 
     def test_a_ready_run_with_docker_prints_the_next_commands(self):
-        with mock.patch.object(check, "_docker", return_value=[check.Finding(True, "docker")]), \
-                mock.patch.object(check, "_infra", return_value=[check.Finding(True, "variants")]):
-            self.assertEqual(self.run_check(check.Ctx(root=self.root)), 0)
-        self.assertIn("READY. Next:", self.text())
+        ok = [check.Finding(True, "ok")]
+        with mock.patch.object(check, "_prerequisites", return_value=ok), \
+                mock.patch.object(check, "_infra", return_value=ok), \
+                mock.patch.object(check, "_agent_images", return_value=ok), \
+                mock.patch.object(check, "_leftovers", return_value=ok):
+            steps = tuple(check.Step(s.key, s.title, s.why, s.howto, getattr(check, s.run.__name__),
+                                     s.needs, s.docker, s.opt_in) for s in check.STEPS)
+            self.assertEqual(self.run_check(check.Ctx(root=self.root), steps=steps), 0)
+        self.assertIn("READY. next:", self.text())
+        self.assertIn("python3 cli.py experiment run -n 2 --per-agent 1", self.text())
         self.assertIn("python3 cli.py experiment smoke --full-gate", self.text())
 
     def test_the_seeds_leave_nothing_under_the_root(self):
@@ -66,7 +71,7 @@ class TestEachFailureNamesItsFix(CheckCase):
         with mock.patch.object(check.common, "definition", side_effect=NameError("name 'GAET' is not defined")):
             self.assertEqual(self.run_check(), 1)
         self.assertIn("raised NameError: name 'GAET' is not defined", self.text())
-        self.assertIn("  skip    What the experiment declares", self.lines)
+        self.assertIn("  skip    definition", self.lines)
 
     def test_an_unreadable_variant_file(self):
         from fae.cell.variants import files
@@ -276,16 +281,16 @@ class TestTheFoldedSteps(CheckCase):
 
     def test_static_skips_the_docker_steps_and_the_trace_is_opt_in(self):
         self.run_check()
-        self.assertIn("  skip    The agents' images", self.lines)
-        self.assertIn("  skip    No leftovers of dead cells", self.lines)
-        self.assertNotIn("The fleet's transitions replay against the model", self.text())
+        self.assertIn("  skip    agents", self.lines)
+        self.assertIn("  skip    leftovers", self.lines)
+        self.assertNotIn("tla-trace", self.text())
         self.lines.clear()
         with mock.patch.object(check, "_trace", return_value=[check.Finding(True, "replayed")]):
-            steps = tuple(s if s.key != "trace" else check.Step(s.key, s.title, s.why, s.howto,
+            steps = tuple(s if s.key != "tla-trace" else check.Step(s.key, s.title, s.why, s.howto,
                                                                  check._trace, s.needs, s.docker,
                                                                  s.opt_in) for s in check.STEPS)
             self.run_check(steps=steps, tla_trace=True)
-        self.assertIn("  ok      The fleet's transitions replay against the model", self.lines)
+        self.assertIn("  ok      tla-trace", self.lines)
 
 
 if __name__ == "__main__":
