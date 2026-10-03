@@ -965,7 +965,7 @@ class Cell:
     @property
     def queues(self):
         """The queues (fae/queues.py): this cell's slots live there."""
-        return Queues(_plane.queues(self.root))
+        return Queues(_plane.queues(self.root), locks=_plane.locks(self.root))
 
     def verify_lock_acquire(self, poll=5.0):
         """The fleet-wide verify lock: gates are serialized WHOLE, so one

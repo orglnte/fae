@@ -9,7 +9,7 @@ adoption, no settle window and no orphan grace.
 
 The holders are the cell driver (fae/queues.py's acquire_slots for the work
 and lock slots, Cell.verify_lock_acquire, Cell.loop_lock,
-Cell.exclusive_acquire) and fae/driver/common.py's fs_lock. Each keeps the open file
+Cell.exclusive_acquire) and fs_lock below. Each keeps the open file
 OBJECT for as long as it holds the lock; closing it is the release.
 
 TWO RULES THAT BREAK MUTUAL EXCLUSION SILENTLY IF VIOLATED:
@@ -124,6 +124,52 @@ def open_lock(path):
             f"and flock locks do not exclude each other at all, so a tree "
             f"holding both has no mutual exclusion. Drain and remove it.")
     return open(p, "a+")
+
+
+class fs_lock:
+    """Python side of THE mutex — flock(2) on a file, held for the with-block.
+
+    THE FILE OBJECT IS THE LOCK. It is stored on self, not in a local: a
+    garbage-collected file object closes its fd, and closing the fd releases
+    the flock. Losing exclusion that way is silent, not a crash, which is why
+    it is spelled out rather than left to `with open(...)`.
+
+    If this process dies the kernel releases the lock; that is the whole
+    recovery story. Python opens fds O_CLOEXEC by default, so no subprocess of
+    ours can pin the lock past our death the way an inheriting shell child can.
+    """
+
+    def __init__(self, d, poll=0.25, timeout=None):
+        self.path = Path(d)
+        self.poll, self.timeout = poll, timeout
+        self._f = None
+
+    def __enter__(self):
+        self._f = open_lock(self.path)
+        # Polled LOCK_NB rather than a blocking LOCK_EX: an operator running
+        # cli.py interactively must be able to Ctrl-C out of a queue behind a
+        # 25-minute verify, and a blocking flock offers no cadence to do it in.
+        t0 = time.monotonic()
+        while True:
+            try:
+                fcntl.flock(self._f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                note_holder(self.path, f"runspy-{os.getpid()}", os.getpid())
+                return self
+            except OSError:
+                if self.timeout is not None and time.monotonic() - t0 > self.timeout:
+                    self._f.close()
+                    self._f = None
+                    raise TimeoutError(
+                        f"{self.path} held by "
+                        f"{holder_name(self.path) or '?'}")
+                time.sleep(self.poll)
+
+    def __exit__(self, *exc):
+        try:
+            clear_holder(self.path)
+        finally:
+            self._f.close()          # closing the fd IS the release
+            self._f = None
 
 
 def probe_held(path):

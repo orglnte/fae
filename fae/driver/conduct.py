@@ -625,7 +625,7 @@ def conduct_resume(args):
             print(f"  {cid}: {', '.join(acted)}")
     if budget_resets:
         common.CONDUCT.mkdir(parents=True, exist_ok=True)
-        with common.fs_lock(common.CONDUCT / "respawn-book.lock"):
+        with common.mutex.fs_lock(common.CONDUCT / "respawn-book.lock"):
             book = {}
             if ops.RESPAWN_BOOK.exists():
                 try:

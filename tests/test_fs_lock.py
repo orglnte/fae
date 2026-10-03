@@ -76,37 +76,37 @@ class FsLockTestCase(unittest.TestCase):
 
 class TestAcquireRelease(FsLockTestCase):
     def test_the_lock_file_is_created_and_kept(self):
-        with deadline(), runs.common.fs_lock(self.lock):
+        with deadline(), runs.mutex.fs_lock(self.lock):
             self.assertTrue(self.lock.exists())
         # The FILE outlives the holder on purpose: removing and recreating it
         # would put two holders on two inodes.
         self.assertTrue(self.lock.exists())
 
     def test_it_is_released_on_exit(self):
-        with deadline(), runs.common.fs_lock(self.lock):
+        with deadline(), runs.mutex.fs_lock(self.lock):
             pass
         self.assertFalse(runs.mutex.probe_held(self.lock))
 
     def test_it_is_held_inside_the_block(self):
-        with deadline(), runs.common.fs_lock(self.lock):
+        with deadline(), runs.mutex.fs_lock(self.lock):
             self.assertTrue(runs.mutex.probe_held(self.lock))
 
     def test_sequential_acquisitions_of_the_same_lock(self):
         for _ in range(3):
-            with deadline(), runs.common.fs_lock(self.lock):
+            with deadline(), runs.mutex.fs_lock(self.lock):
                 pass
 
     def test_the_file_object_outlives_enter(self):
         """The file object IS the lock: if it were a local in __enter__ the
         fd would close on return and the lock would be silently released."""
-        with deadline(), runs.common.fs_lock(self.lock) as lk:
+        with deadline(), runs.mutex.fs_lock(self.lock) as lk:
             self.assertIsNotNone(lk._f)
             self.assertTrue(runs.mutex.probe_held(self.lock))
 
     def test_a_mkdir_era_lock_directory_is_refused_loudly(self):
         self.lock.mkdir()
         with self.assertRaises(IsADirectoryError):
-            with runs.common.fs_lock(self.lock):
+            with runs.mutex.fs_lock(self.lock):
                 pass
 
 
@@ -114,14 +114,14 @@ class TestContention(FsLockTestCase):
     def test_a_live_holder_is_respected(self):
         self.holder_process()
         with self.assertRaises(TimeoutError):
-            with runs.common.fs_lock(self.lock, timeout=1.0):
+            with runs.mutex.fs_lock(self.lock, timeout=1.0):
                 pass
 
     def test_the_timeout_names_the_holder(self):
         self.holder_process()
         runs.mutex.note_holder(self.lock, "cell-xyz", 4242)
         with self.assertRaises(TimeoutError) as e:
-            with runs.common.fs_lock(self.lock, timeout=1.0):
+            with runs.mutex.fs_lock(self.lock, timeout=1.0):
                 pass
         self.assertIn("cell-xyz", str(e.exception))
 
@@ -137,7 +137,7 @@ class TestDeathReleases(FsLockTestCase):
         end = time.monotonic() + 1.0
         while time.monotonic() < end and runs.mutex.probe_held(self.lock):
             time.sleep(0.02)
-        with deadline(5), runs.common.fs_lock(self.lock):
+        with deadline(5), runs.mutex.fs_lock(self.lock):
             pass
 
 
