@@ -675,8 +675,8 @@ turns a directory of scored cells into the results table.
   A variant that needs more (a compiler, a load generator) names its own
   layer, `[verify] image_dir`, a Dockerfile built `FROM $BASE`, the
   verifier's image.
-- **Taint rules, grading, reporting.** `taint_rules`,
-  `reference_workspace`, `POOLED_MODELS` on the definition; see
+- **Taint rules, reporting.** `taint_rules`, `POOLED_MODELS` on the
+  definition; see
   `experiment/__init__.py` for a full-size example and `AGENTS.md` for
   what each invariant protects.
 
@@ -694,7 +694,7 @@ variant files against all of the below, without docker.
 | `GATE` | no | `Gate()`: one arrangement |
 | `CONFIG` | no | `{}` |
 | `fingerprint_trees(conf)` | no | `[]` |
-| `taint_rules`, `report_text`, `reference_workspace`, `POOLED_MODELS`, `verbs()` | no | none |
+| `taint_rules`, `report_text`, `POOLED_MODELS`, `verbs()` | no | none |
 
 **Variant file** (`<EXPERIMENT_DIR>/variants/<id>.toml`, read by
 `fae/cell/variants/files.py`; paths relative to the experiment directory,

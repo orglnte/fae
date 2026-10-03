@@ -40,9 +40,7 @@ took (iterations to green), `SLoC` the lines they wrote. `MIN` is the agent's
 authoring time in minutes up to green, summed over its attempts, and `MIN/ATT`
 the mean per attempt; each cell's `score.json` keeps the seconds of every
 attempt. `E2E` is the share of the verifier's end-to-end checks passed, `-`
-when the verifier reports none (the calculator's does not). Until `results
-grade` has judged the cells, `results score` warns that the graded metrics (consistency defects) are missing; the
-counted ones above do not need it.
+when the verifier reports none (the calculator's does not).
 
 ## Try it in five minutes
 

@@ -146,10 +146,6 @@ never auto-requeued), scores each cell into `<cell>/score.json` (per-cell
 table and writes `workspaces.nosync/results.csv` + `results.json`
 (schema: `fae/scoring/SCHEMA.md`).
 
-`results grade` runs the experiment's defect taxonomy through the judge model
-twice per cell (`--judge-model` is required, no default); the taxonomy, the
-evidence extractor and the reply merger are the experiment's.
-
 ---
 
 ## Repo map
@@ -171,7 +167,7 @@ fae/                the engine package: cli.py, driver/, cell/, scoring/,
                      plane.py (where the scheduling plane lives),
                      agent-container/
 fae/scoring/             score_cell.py, aggregate.py, surface_filter.py,
-                     grader_agreement.py, SCHEMA.md
+                     SCHEMA.md
 tests/               the engine's unittest suite (locks, queues, scoring), on
                      tests/fixture_experiment/
 .tla/                TLA+ model of the run lifecycle (tla_verify replays

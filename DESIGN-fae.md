@@ -33,9 +33,6 @@ A cell yields:
    distribution per (agent, variant), read as a reliability curve.
 2. **The authored surface**: the lines, files and languages the agent wrote,
    counted from content, not from file names.
-3. **Graded defects**, when a grading pass is run: codes from the
-   experiment's taxonomy, assigned twice per cell by a named judge model and
-   reported with their agreement (Cohen's κ).
 
 ## 2. Why the numbers can be trusted
 
@@ -170,8 +167,7 @@ an agent of a variant reads is therefore named in that variant's file.
 4. **Fingerprint trees** (`fingerprint_trees`): source outside the
    experiment directory that a verdict depends on, such as an SDK.
 5. **Taint rules, reporting and verbs**: how a rig fault shows in this
-   experiment's evidence, the reference workspace the grader compares
-   against, how model ids pool into scoreboard rows, the experiment's own
+   experiment's evidence, how model ids pool into scoreboard rows, the experiment's own
    reading of the results table, and its reference cell and self-test.
 6. **The agents' base image** (`Dockerfile.agent-base` at the root): the
    engine's clients and what every variant's agent needs.
@@ -260,7 +256,6 @@ against a baseline; the aggregate also groups by each factor the variant
 files declare. It can cut the table to one driver and compare it with its
 predecessor. The engine's table names no experiment's variants or metrics;
 the experiment's `report_summary` adds its own reading.
-Grading is a separate, explicit step with a named judge model.
 
 ## 10. Trust and limits
 
@@ -328,11 +323,6 @@ answer as charged.**
    study of the same model and variant, run at different times, is reported
    with the framework. How much of a difference between two rows is noise
    is left to each experiment's statistics.
-9. **Grader reliability.** `fae/scoring/grader_agreement.py` computes
-   Cohen's kappa between two independent judge runs over the same cells. No
-   result is reported in the repository, and agreement between the LLM
-   judge and human graders has not been measured. The counted metrics
-   (green, attempts, minutes, lines) do not depend on a judge.
-10. **External validity.** That attempts and minutes to green on these
+9. **External validity.** That attempts and minutes to green on these
     tasks predict how hard an approach is for agents on real work is an
     assumption of each experiment, not something the framework establishes.

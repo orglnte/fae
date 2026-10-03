@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
-"""THE definition of "does this file count as agent-authored surface".
+"""THE definition of "does this file count as agent-authored surface",
+used by score_cell.py for the authored-lines metric.
 
-There used to be two: score_cell.py's (which feeds AUTH_LINES in the
-scoreboard) and count_defects.py's (which feeds the judge's evidence pack).
-They disagreed — count_defects shipped .git/ internals to the judge — and a
-metric whose definition depends on which script asked is not a metric.
-
-Both lists were also purely NAME-based, which cannot work: an agent may
-download and unpack a vendor tree into its workspace at runtime, and a
-compiled binary counted by its newline bytes scores as a million authored
-lines. No name list catches a directory the agent invents; binary content
-must be detected as binary.
+Names alone cannot decide it: an agent may download and unpack a vendor tree
+into its workspace at runtime, and a compiled binary counted by its newline
+bytes scores as a million authored lines. No name list catches a directory
+the agent invents; binary content must be detected as binary.
 """
 from __future__ import annotations
 

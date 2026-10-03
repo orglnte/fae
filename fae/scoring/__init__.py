@@ -1,2 +1,2 @@
-"""The scoreboard (aggregate), the per-cell scorer (score_cell), the judge
-agreement report and the authored-surface filter."""
+"""The scoreboard (aggregate), the per-cell scorer (score_cell) and the
+authored-surface filter."""

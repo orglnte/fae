@@ -1,9 +1,5 @@
-"""fae/scoring/aggregate.py — the metrics that reach the paper.
-
-The defect count is the PRIMARY metric (H1a), produced by an LLM judge over
-graded cells. What it averages over is therefore a methodological choice, not
-an implementation detail, and it had never been pinned by a test.
-"""
+"""fae/scoring/aggregate.py — the metrics that reach the paper. What each one
+averages over is a methodological choice, not an implementation detail."""
 import importlib.util as _ilu
 import json
 import re
@@ -19,63 +15,15 @@ aggregate = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(aggregate)
 
 
-def cell(green, defects=None, lines=100, itg=None, e2e=(7, 7)):
+def cell(green, lines=100, itg=None, e2e=(7, 7)):
     """One row in the shape summarise() consumes."""
     return {
         "green": green,
-        "consistency_defect_count": defects,
         "iterations_to_green": itg,
         "e2e_pass": e2e[0], "e2e_total": e2e[1], "e2e_green": green,
         "revoked": False, "budget_exhausted": not green,
         "author_surface": {"files": 3, "language_count": 1, "lines": lines},
     }
-
-
-class TestDefectsAreGreenOnly(unittest.TestCase):
-    """A non-green cell's files are whatever its last failed attempt left —
-    possibly mid-edit. Averaging those against delivered implementations
-    couples H1a to the success metric, which the hypothesis needs independent.
-
-    Same rule _load_error_rate already applied to load errors; this metric
-    simply never got it.
-    """
-
-    def test_non_green_cells_are_excluded_from_the_mean(self):
-        cells = [cell(True, defects=0), cell(True, defects=0),
-                 cell(False, defects=9), cell(False, defects=9)]
-        s = aggregate.cell_metrics(cells)
-        self.assertEqual(s["mean_consistency_defects"], 0.0,
-                         "a non-green cell's defects reached the mean")
-
-    def test_failing_early_cannot_lower_the_mean(self):
-        """The specific perverse incentive: a cell that authored almost
-        nothing before dying must not make an arm look cleaner."""
-        honest = aggregate.cell_metrics([cell(True, defects=2), cell(True, defects=2)])
-        gamed = aggregate.cell_metrics([cell(True, defects=2), cell(True, defects=2),
-                                     cell(False, defects=0), cell(False, defects=0)])
-        self.assertEqual(honest["mean_consistency_defects"],
-                         gamed["mean_consistency_defects"])
-
-    def test_n_green_graded_reports_the_real_denominator(self):
-        """Reps counts cells; the defect mean is over a SUBSET of them, so the
-        denominator has to travel with the number or a mean over one cell
-        reads like a rate."""
-        cells = [cell(True, defects=1), cell(True, defects=None),
-                 cell(False, defects=5)]
-        s = aggregate.cell_metrics(cells)
-        self.assertEqual(s["n_green_graded"], 1)
-        self.assertEqual(s["mean_consistency_defects"], 1.0)
-
-    def test_no_graded_green_cells_yields_None_not_zero(self):
-        """0.0 would claim 'no defects found'. None says 'not measured'."""
-        s = aggregate.cell_metrics([cell(True, defects=None), cell(False, defects=3)])
-        self.assertIsNone(s["mean_consistency_defects"])
-        self.assertEqual(s["n_green_graded"], 0)
-
-    def test_ungraded_green_cells_do_not_count_as_zero(self):
-        s = aggregate.cell_metrics([cell(True, defects=2), cell(True, defects=None)])
-        self.assertEqual(s["mean_consistency_defects"], 2.0)
-        self.assertEqual(s["n_green_graded"], 1)
 
 
 class TestOtherMetricsStillSpanAllCells(unittest.TestCase):
@@ -191,10 +139,9 @@ class TestTableColumns(unittest.TestCase):
     """Header and rows must stay in step — a silently misaligned column is a
     number attributed to the wrong metric."""
 
-    def test_header_order_is_itg_then_loc_no_defects(self):
+    def test_header_order_is_itg_then_loc(self):
         hdrs = [h for h, _ in aggregate.table_columns(None)]
         self.assertLess(hdrs.index("ITG mn/avg/mx"), hdrs.index("SLoC avg -mn/+mx"))
-        self.assertNotIn("DEFECTS", hdrs)
 
     def test_row_order_matches_the_header(self):
         src = (Path(ROOT) / "fae" / "scoring" / "aggregate.py").read_text()
@@ -740,7 +687,7 @@ class TestTheScoreboardRunsEndToEnd(unittest.TestCase):
         d.mkdir()
         (d / "score.json").write_text(json.dumps({
             "cell_id": cid, "model": "m-1", "task": "T1", "variant": "beta_apidocs", "factors": {"docs": "apidocs"}, "impl": "py", "repeat": 1,
-            "attempt_budget": 10, "consistency_defect_count": None, "codes": [],
+            "attempt_budget": 10,
             "deploy_ok": True, "e2e_pass": 7, "e2e_total": 7, "e2e_green": green,
             "load_errors": 0, "load_total": 100, "load_ran": True, "k6_available": True,
             "verify_stage_failed": None, "iterations_to_green": 2 if green else None,

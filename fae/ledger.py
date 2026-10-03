@@ -2,13 +2,10 @@
 """THE iterations.log library — one parser, one outcome derivation.
 
 The ledger is the experiment's file of record: TAB-separated events, one per
-line, `<ts> <EVENT> <...fields>`. Before this module there were five
-independent parsers (runs.py cell_state, run_cell's awk, reverify's
-metrics.json dissenter, score_cell, count_defects) and every historical
-data-integrity incident was two of them disagreeing — revoked greens scored
-as green, mid-gate resumes nearly minting ungated greens, stranded reverifies
-leaving the reverification population silently. One derivation, imported
-everywhere, makes a verdict bug a one-file fix.
+line, `<ts> <EVENT> <...fields>`. Every reader of a cell's outcome (the
+cell's state, reverify, scoring) derives it here: two parsers that disagree
+score a revoked green as green or mint an ungated green, and one derivation,
+imported everywhere, makes a verdict bug a one-file fix.
 
 Event vocabulary (v1, implicit — no header line):
   START    attempt began

@@ -34,8 +34,6 @@ The definition's `__init__.py` declares, all optional:
                             own rules beside it)
     report_text(ws)      -> the verifier's per-attempt reports, concatenated,
                             for the taint rules ("" by default)
-    reference_workspace(variant) -> the workspace name the grader compares a
-                            green cell against, or None
     POOLED_MODELS        {model id: scoreboard row label} for the results table
     report_summary(cells, metrics_of, delta, metrics) -> {key: value} the
                             experiment adds to the aggregate's summary (its
@@ -182,10 +180,6 @@ class Definition:
     def report_text(self, ws):
         fn = getattr(self.module, "report_text", None)
         return fn(ws) if fn else ""
-
-    def reference_workspace(self, vid):
-        fn = getattr(self.module, "reference_workspace", None)
-        return fn(vid) if fn else None
 
     @property
     def pooled_models(self):

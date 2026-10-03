@@ -17,7 +17,7 @@ GROUPS
   cell     exactly ONE named cell: spawn, pause, resume, stop, tail, log,
            seal, reverify
   results  what the experiment produced, and whether to trust it: score,
-           grade, validate, aggregate
+           validate, aggregate
   rig      the harness itself, not the experiment: trace-reset, and tool
            (an instrument run standalone for debugging; the harness calls
            them in-process, verify.py, never through here)
@@ -401,27 +401,6 @@ def results_run_report(
     iterations-to-green) and the cells still working."""
     from fae.scoring import run_report
     run_report.cli(since)
-
-
-@results_app.command("grade")
-def results_grade(
-    judge_model: Optional[str] = typer.Option(None, "--judge-model",
-                                              help="REQUIRED unless --no-judge; recorded per cell as grader_model ($JUDGE_MODEL)"),
-    force: bool = typer.Option(False, "--force", help="redo every cell ($FORCE=1)"),
-    no_judge: bool = typer.Option(False, "--no-judge",
-                                  help="mechanical extraction only ($JUDGE=0)"),
-    cells: Optional[list[str]] = typer.Option(None, "--cells",
-                                              help="restrict the scan to these cell ids ($CELLS)"),
-    limit: Optional[int] = typer.Option(None, "--limit", help="stop after N cells scanned ($LIMIT)"),
-    cost_log: Optional[str] = typer.Option(None, "--cost-log", help="per-call usage TSV ($COST_LOG)"),
-    grade_inflight: bool = typer.Option(False, "--grade-inflight",
-                                        help="also grade non-terminal cells ($GRADE_INFLIGHT=1)"),
-):
-    """Defect scan: one defects.json per terminal cell, graded twice by the
-    judge model; restartable per pass."""
-    score.grade(_ns(judge_model=judge_model, force=force, no_judge=no_judge,
-                    cells=list(cells) if cells else None, limit=limit,
-                    cost_log=cost_log, grade_inflight=grade_inflight))
 
 
 @results_app.command("validate")
