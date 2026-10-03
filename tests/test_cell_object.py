@@ -815,6 +815,37 @@ class TestReverifyIsInvisibleToTheModel(CellTestCase):
         c, before, _ = self.reverified()
         self.assertEqual((c.ws / "iterations.log").read_text(), before)
 
+    def test_every_arrangement_runs_under_the_verify_lock(self):
+        c = self.cell(sealed=self.SEAL)
+        c.setup = lambda: (0, {})
+        c.teardown = lambda: None
+        events = []
+
+        class Lock:
+            def close(self):
+                events.append("release")
+
+        c.verify_lock_acquire = lambda: events.append("acquire") or Lock()
+
+        def v(shape=None, out_dir=None):
+            events.append("verify")
+            return cell.VerifyResult(green=True, shape=shape)
+
+        c.verify = v
+        c.reverify(stamp="t3")
+        self.assertEqual(events, ["acquire"] + ["verify"] * len(SHAPES) + ["release"])
+
+    def test_a_paused_cell_is_not_reverified(self):
+        c = self.cell(sealed=self.SEAL)
+        c.setup = lambda: (0, {})
+        torn = []
+        c.teardown = lambda: torn.append(True)
+        c.verify_lock_acquire = lambda: None
+        c.verify = lambda **k: self.fail("verified while paused")
+        with self.assertRaises(RuntimeError):
+            c.reverify(stamp="t4")
+        self.assertEqual(torn, [True])
+
     def test_the_evidence_lands_under_reverify(self):
         c, _, _ = self.reverified()
         self.assertTrue((c.ws / "reverify" / "t" / "reverify.json").is_file())

@@ -157,6 +157,16 @@ def mem_pressure():
             "swap_used_mb": su, "swap_total_mb": su + sf}
 
 
+def conduct_pid():
+    """The live scheduler's pid, or None when no conduct is running."""
+    try:
+        pid = int((CONDUCT / "conduct.pid").read_text().partition(" ")[0])
+        os.kill(pid, 0)
+        return pid
+    except (OSError, ValueError):
+        return None
+
+
 def cell_id(agent, variant, rep, task="T1", effort="high", smoke=False):
     # effort="" (not just unset) disables the suffix. THE one implementation:
     # fae/cell/__main__.py and fae/cell/prepare.py import this rather than
