@@ -29,7 +29,7 @@ class TestOneJudgmentPerAttempt(unittest.TestCase):
         # Premise of the test above: ONE ITER writer, and it appends whenever
         # it is called. If that changes, the `continue` is no longer the
         # protection.
-        rec = (HARNESS / "ledger.py").read_text()
+        rec = (HARNESS / "cell" / "ledger.py").read_text()
         writers = rec[rec.index("# --- writing"):]
         self.assertEqual(writers.count('append(ws, "ITER"'), 1,
                          "more than one ITER writer")

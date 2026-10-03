@@ -1,6 +1,6 @@
 """Low-level primitives every other driver module imports: paths, the shell
 helper, the cell-id grammar, the shared constants, and the one-per-language
-ledger/mutex/faults modules loaded by path.
+mutex/faults modules loaded by path.
 
 This is the leaf of the runs/ package split: it depends on nothing else in
 fae/driver/, so importing it can never cycle. The parametric WORKSPACE root (WS)
@@ -62,10 +62,10 @@ PER_AGENT_CAP = int(os.environ.get("PER_AGENT_CAP", 1))
 # "raise the budget and resume" path would be a standing exception to sealing.
 ATTEMPT_BUDGET = 10
 
-# THE ledger parser, THE filesystem mutex, THE provider-fault vocabulary:
-# one module each, imported (the driver decides "retry this attempt" and
-# faults decides "cool this lane" on one text).
-from fae import ledger, mutex  # noqa: E402
+# THE filesystem mutex, THE provider-fault vocabulary: one module each,
+# imported (the driver decides "retry this attempt" and faults decides "cool
+# this lane" on one text).
+from fae import mutex  # noqa: E402
 from fae.cell import faults  # noqa: E402
 
 # The experiment definition (fae/cell/experiment.py) and its variants are

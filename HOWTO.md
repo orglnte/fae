@@ -607,7 +607,7 @@ so an interrupted scheduler neither loses nor duplicates work.
 
 ## 12. Reading what came out
 
-The ledger, `iterations.log`, is the file of record; `fae/ledger.py` is
+The ledger, `iterations.log`, is the file of record; `fae/cell/ledger.py` is
 its only parser. Each attempt is one `ITER` line:
 
 ```

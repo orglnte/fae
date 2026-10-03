@@ -1,11 +1,10 @@
-#!/usr/bin/env python3
 """THE iterations.log library — one parser, one outcome derivation.
 
 The ledger is the experiment's file of record: TAB-separated events, one per
 line, `<ts> <EVENT> <...fields>`. Every reader of a cell's outcome (the
-cell's state, reverify, scoring) derives it here: two parsers that disagree
-score a revoked green as green or mint an ungated green, and one derivation,
-imported everywhere, makes a verdict bug a one-file fix.
+cell's state, reverify, scoring) gets it from Cell, which derives it here:
+two parsers that disagree score a revoked green as green or mint an ungated
+green, and one derivation makes a verdict bug a one-file fix.
 
 Event vocabulary (v1, implicit — no header line):
   START    attempt began
@@ -284,31 +283,3 @@ def alert(ws, cid: str, detail: str) -> str:
     """Supervision's channel: written ABOUT a cell, by the supervisor, when the
     cell is wedged or its process is gone and cannot report for itself."""
     return append(ws, "ALERT", cid, detail)
-
-
-def main(argv=None):
-    """CLI: python3 fae/ledger.py CELL_ID RESULT [note]."""
-    import os
-    import sys
-    a = argv if argv is not None else sys.argv[1:]
-    if len(a) < 2:
-        print("usage: CELL_ID RESULT [note]", file=sys.stderr)
-        return 1
-    cid, result, note = a[0], a[1], (a[2] if len(a) > 2 else "")
-    ws_dir = os.environ.get("WORKSPACES_DIR")
-    if not ws_dir:
-        from fae import paths
-        root = paths.root()
-        from fae.cell import config as _config
-        ws_dir = _config.load(root).get("WORKSPACES_DIR")
-    try:
-        record_iter(Path(ws_dir) / cid, result, note)
-    except (ValueError, FileNotFoundError) as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        return 1
-    return 0
-
-
-if __name__ == "__main__":
-    import sys
-    sys.exit(main())

@@ -1,4 +1,4 @@
-"""fae/ledger.py — the single verdict derivation.
+"""fae/cell/ledger.py — the single verdict derivation.
 
 Before this module there were five independent parsers and every historical
 data-integrity incident was two of them disagreeing: revoked greens scored as
@@ -14,9 +14,9 @@ import unittest
 from pathlib import Path
 
 from _ctx import ROOT
-# By package name: the module under test is fae/ledger.py itself, not
+# By package name: the module under test is fae/cell/ledger.py itself, not
 # fae/driver/common's path-loaded copy of it.
-from fae import ledger
+from fae.cell import ledger
 
 TS = "2026-07-30T09:00:00Z"
 CID = "sonnet_high_beta_apidocs_T1_r1"

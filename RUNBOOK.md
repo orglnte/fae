@@ -114,7 +114,7 @@ and, on a green, the attempt/gate detail (`GREEN cid (attempt 4/4, gate
 6/6)`).
 
 Cells live under `workspaces.nosync/<cell_id>/` (gitignored): `PROMPT.md`,
-`artifacts/`, `iterations.log` (the ledger — `fae/ledger.py` is the only
+`artifacts/`, `iterations.log` (the ledger — `fae/cell/ledger.py` is the only
 parser), `metrics.json`, `score.json`, `validation.json`, per-attempt logs.
 
 ---
@@ -159,10 +159,10 @@ cli.py               operator CLI (noun groups); the only entry point
 fae/driver/              the orchestrator's library: spawn/queues/conduct/
                      reconcile/validate/score/rig, one module per concern
 fae/cell/           the Python cell driver: attempt loop, the Variant
-                     interface + registry, verify, config, the contract base,
-                     contrib/ and infra/ blocks
+                     interface + registry, verify, config, the ledger (the
+                     one parser), the contract base, contrib/ and infra/ blocks
 fae/                the engine package: cli.py, driver/, cell/, scoring/,
-                     ledger.py (the one parser), mutex.py (the one flock),
+                     mutex.py (the one flock),
                      queues.py (the only code touching .queues/),
                      plane.py (where the scheduling plane lives),
                      agent-container/

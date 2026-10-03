@@ -363,7 +363,7 @@ class TestTheGateReportsItsProgress(CellTestCase):
         c.verify = lambda shape=None, out_dir=None: cell.VerifyResult(
             green=next(seq), shape=shape)
         c.gate(attempt=1)
-        from fae import ledger
+        from fae.cell import ledger
         self.assertEqual(ledger.parse(c.ws)["live_shape_pass"], 6)
 
     def test_a_failure_names_the_arrangement_and_stops(self):

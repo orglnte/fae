@@ -14,8 +14,8 @@ plane (`QUEUES`, `CONDUCT`, `LOCKS`, `TRANSITIONS_LOG`; `fae/plane.py`) at impor
 time, and the fleet reads those paths while it runs. A test that wrote a pause file or a queue line
 under them would act on live cells.
 
-So: importing `runs` is safe (import is side-effect free — path construction
-plus `exec_module` of `fae/ledger.py`, no writes), but **any test that
+So: importing `runs` is safe (import is side-effect free — path construction,
+no writes), but **any test that
 exercises a function which writes must redirect the target into a
 `TemporaryDirectory` first**, by passing an explicit path or by patching
 `runs.common.WS` and the plane (`_ctx.patch_plane`, or `OrchTmpCase`). No test in this suite reads or writes the real
@@ -28,7 +28,7 @@ workspace tree.
 | `test_cell_id.py` | `cell_id` / `parse_cell_id` — the id format, round-trips, rejection of retired arm tokens |
 | `test_seed_doc.py` | `EXPECTED_SEED_DOC` / `resolve_seed_doc` — the study's independent variable |
 | `test_mount_logic.py` | `mount_counts_seen`, `never_mounted`, `mounts_matched` — the taint discriminators |
-| `test_ledger.py` | `fae/ledger.py` `parse` / `hist` — the single verdict derivation |
+| `test_ledger.py` | `fae/cell/ledger.py` `parse` / `hist` — the single verdict derivation |
 | `test_helpers.py` | `_tail_hist`, `never_started`, `parse_reset` |
 | `test_fs_lock.py` | `fs_lock` — the filesystem mutex, including the stale-holder steal path |
 

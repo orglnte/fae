@@ -1,4 +1,4 @@
-"""fae/ledger.py — what the parser and the writers do to a real file.
+"""fae/cell/ledger.py — what the parser and the writers do to a real file.
 
 tests/test_ledger.py pins the verdict rules; this file pins the record they
 are derived from: every field of `parse()`, the line-level contract (tabs,
@@ -15,9 +15,9 @@ from pathlib import Path
 from unittest import mock
 
 from _ctx import ROOT  # noqa: F401 — puts the tree on sys.path
-# By package name: the module under test is fae/ledger.py itself, not
+# By package name: the module under test is fae/cell/ledger.py itself, not
 # fae/driver/common's path-loaded copy of it.
-from fae import ledger
+from fae.cell import ledger
 
 TS = "2026-07-30T09:00:00Z"
 CID = "sonnet_high_beta_apidocs_T1_r1"

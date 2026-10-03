@@ -237,7 +237,7 @@ def author_surface(artifacts_dir: Path, cache: dict | None = None) -> dict:
 
 
 def parse_iterations(L: dict) -> dict:
-    """iterations-to-green from the parsed ledger (fae/ledger.py), the same
+    """iterations-to-green from the parsed ledger (fae/cell/ledger.py), the same
     derivation the orchestrator renders and the worker consults: one shared
     derivation keeps a revoked green from scoring as green."""
     green = L["verdict"] == "green"

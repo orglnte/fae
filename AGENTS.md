@@ -133,7 +133,7 @@ variant's cells stay readable and resume, and none is minted.
 ## 2. The ledger is the file of record
 
 `<workspace>/iterations.log` — TAB-separated, one event per line.
-**`fae/ledger.py` is the only parser.** Two parsers disagreeing is how a
+**`fae/cell/ledger.py` is the only parser, and only Cell calls it.** Two parsers disagreeing is how a
 revoked green scores as green, a mid-gate resume mints an ungated green, or
 a stranded reverify leaves the population.
 
@@ -629,8 +629,8 @@ every prior agent's memory — cross-run leakage invisible in the results.
   `crashed`, `retired`, `reanchor`): one write per record.
 - **A cell's files are read and written only through `Cell`** (`env`,
   `read_ledger`, `ledger_text`, `read_metrics`, `read_derived`, `mtimes`,
-  `pause_request`, `paused`, `cancelled`, `flagged`, `heartbeat`, `sealed_at`;
-  `fae/ledger.py` is the ledger's format and is opened through Cell too).
+  `pause_request`, `paused`, `cancelled`, `flagged`, `heartbeat`, `sealed_at`,
+  `history`; the ledger's format, `fae/cell/ledger.py`, is called only by Cell).
   Constructing one is cheap (it reads `cell.env` and replays the ledger).
   `tests/test_cell_files_owner.py` fails on a cell file named outside
   `fae/cell`, a ledger opened outside it, or a write to `transitions.log`

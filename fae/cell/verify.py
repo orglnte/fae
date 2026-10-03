@@ -75,9 +75,8 @@ _inst_lock = threading.Lock()
 
 
 def _load_instrument(name, instruments=None):
-    """Load <instruments>/<name>.py once, by path — the same way ledger.py and
-    mutex.py are loaded, because the instruments dir is a directory of tools,
-    not a package. Cached: the import cost is paid once per cell."""
+    """Load <instruments>/<name>.py once, by path, because the instruments dir
+    is a directory of tools, not a package. Cached: the import cost is paid once per cell."""
     base = Path(instruments) if instruments else INSTRUMENTS
     key = (str(base), name)
     with _inst_lock:

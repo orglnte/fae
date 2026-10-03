@@ -3,7 +3,7 @@ rate + mean iterations-to-green) and the cells still working.
 
 The run boundary is `conduct.pid`'s mtime — the moment the live scheduler
 started — so "this run" means "since conduct last came up", overridable with
-`--since`. Verdicts come through `fae/ledger.py`, the one ledger parser, so
+`--since`. Verdicts come through Cell's ledger (`fae/cell/ledger.py`, the one parser), so
 this report cannot disagree with the scoreboard about what a cell did.
 """
 from __future__ import annotations

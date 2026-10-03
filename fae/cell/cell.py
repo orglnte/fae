@@ -110,7 +110,7 @@ def _append(log, text):
         os.close(fd)
 
 
-from fae import ledger  # noqa: E402
+from fae.cell import ledger  # noqa: E402
 from fae import metrics as _metrics  # noqa: E402
 
 
@@ -314,8 +314,13 @@ class Cell:
         return (self.ws / "iterations.log").exists()
 
     def read_ledger(self, gate_n=6):
-        """The ledger as it is now (fae/ledger.py's parse)."""
+        """The ledger as it is now (fae/cell/ledger.py's parse)."""
         return ledger.parse(self.ws, gate_n=gate_n)
+
+    def history(self, parsed=None):
+        """The last attempt's stage token, as status shows it; `parsed` is a
+        ledger already read with read_ledger."""
+        return ledger.hist(parsed if parsed is not None else self.read_ledger())
 
     def ledger_text(self):
         """The ledger's raw text, "" when there is none."""

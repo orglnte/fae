@@ -8,7 +8,7 @@ from unittest import mock
 
 from _ctx import runs
 
-from fae import ledger
+from fae.cell import ledger
 from fae.driver.validate import rig_output_findings
 
 CID = "m_high_arm_cond_T1_r1"

@@ -19,7 +19,7 @@ from pathlib import Path
 
 from fae.driver import common
 from fae.driver.common import (
-    parse_cell_id, awake_age, ledger, faults,
+    parse_cell_id, awake_age, faults,
 )
 
 def loop_pids():
@@ -352,7 +352,7 @@ def _cell_state(ws, loops, boxes):
     mver = env.get("AGENT_MODEL") or "-"
     st = dict(cid=ws.name, agent=agent, variant=variant,
               task=task, rep=int(rep), att=L["att"], budget=budget,
-              hist=ledger.hist(L), events=L["events"], agent_model=mver,
+              hist=c.history(L), events=L["events"], agent_model=mver,
               # `prepared` is read by never_started: with the v2 PREPARED birth
               # event, events==0 no longer identifies a workspace that was
               # prepared but never launched, and reconcile must not respawn one.

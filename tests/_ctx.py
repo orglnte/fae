@@ -55,8 +55,9 @@ exp1 = importlib.import_module("experiment.exp1") if (_EXPERIMENT / "exp1.py").i
 from fae.driver import validate as taint            # noqa: E402
 from fae.driver.common import (                     # noqa: E402
     ROOT as _COMMON_ROOT, AUTH_HINTS, LIMIT_HINTS, PAUSE_EXIT_RC,
-    cell_id, ledger, mutex, parse_cell_id,
+    cell_id, mutex, parse_cell_id,
 )
+from fae.cell import ledger  # noqa: E402
 
 # The facade every test file imports as `runs`: a real module object (not a
 # SimpleNamespace) so `mock.patch.object(runs.common, "WS", ...)` and
