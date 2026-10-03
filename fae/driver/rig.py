@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,10 +28,11 @@ from fae.driver.common import (
 
 
 def tla_verify_path():
-    """The TLA+ trace checker: $FAE_TLA_VERIFY, else `tla_verify` on PATH;
-    None when neither names a file."""
-    p = os.environ.get("FAE_TLA_VERIFY") or shutil.which("tla_verify")
-    return p if p and Path(p).is_file() else None
+    """The TLA+ trace checker: $FAE_TLA_VERIFY, else the one fae ships
+    (fae/utils/tla_verify.py); None when the variable names no file."""
+    p = os.environ.get("FAE_TLA_VERIFY") or str(Path(__file__).resolve().parent.parent
+                                                 / "utils" / "tla_verify.py")
+    return p if Path(p).is_file() else None
 
 
 from fae import paths as _paths  # noqa: E402

@@ -613,9 +613,9 @@ every prior agent's memory — cross-run leakage invisible in the results.
   load errors are the measured failure when the policy never scaled, and only
   unexplained errors taint. Parsers of recorded verdict text are pinned by
   selftest cases taken verbatim from real `metrics.json`.
-- **TLA+ conformance.** `.tla/Runs.tla` plus `tla_verify` (`$FAE_TLA_VERIFY`,
-  else `tla_verify` on `PATH`; with neither, the check names the missing
-  checker): `--tla-trace` replays
+- **TLA+ conformance.** `.tla/Runs.tla` plus `tla_verify`, the checker fae
+  ships (`fae/utils/tla_verify.py` on the PlusPy interpreter in
+  `fae/utils/pluspy/`; `$FAE_TLA_VERIFY` names another): `--tla-trace` replays
   one cell's ledger per attempt at verify-end; `--live-trace` replays the
   global `workspaces.nosync/transitions.log` against the spec (`cli.py experiment check
   --tla-trace`). A

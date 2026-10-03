@@ -31,12 +31,13 @@ def _leading(node):
 
 
 def _owners(root, engine):
-    """Files allowed to name the cell's files: the cell package, and the
-    ledger's own format module."""
+    """Files allowed to name the cell's files: the cell package, the ledger's
+    own format module, and the TLA+ checker fae ships (a standalone tool that
+    replays a workspace it is pointed at)."""
     if not engine:
         return set()
     base = Path(root)
-    return {p for p in base.rglob("*.py") if "cell" in p.relative_to(base).parts[:1]} \
+    return {p for p in base.rglob("*.py") if p.relative_to(base).parts[0] in ("cell", "utils")} \
         | {base / "ledger.py"}
 
 

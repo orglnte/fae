@@ -170,8 +170,8 @@ fae/scoring/             score_cell.py, aggregate.py, surface_filter.py,
                      SCHEMA.md
 tests/               the engine's unittest suite (locks, queues, scoring), on
                      tests/fixture_experiment/
-.tla/                TLA+ model of the run lifecycle (tla_verify replays
-                     ledgers/transitions against it; see AGENTS.md)
+.tla/                TLA+ model of the run lifecycle (fae/utils/tla_verify.py
+                     replays ledgers/transitions against it; see AGENTS.md)
 (an experiment's root holds its own fae.toml, experiment/ and
 workspaces.nosync/ — per-cell workspaces + the scheduling plane: .queues/,
 .conduct/, .locks/, transitions.log)

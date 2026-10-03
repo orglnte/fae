@@ -41,54 +41,35 @@ class TestTheLogReadersSeeANewCell(OrchTmpCase):
         self.assertIn("Retire", runs.common.LOOP_CLEARED_BY)
 
 
-class TestTheCheckerIsFoundByEnvOrPath(unittest.TestCase):
-    """No machine's layout is baked in: the environment names the checker,
-    else PATH does, else there is none and the replay is skipped."""
-
-    def _checker(self, d, name="tla_verify"):
-        p = Path(d) / name
-        p.write_text("#!/usr/bin/env python3\n")
-        p.chmod(0o755)
-        return str(p)
+class TestTheCheckerIsTheEnvsElseFaes(unittest.TestCase):
+    """The environment may name another checker; else fae's own runs, and
+    no PATH lookup can pick up a different one."""
 
     def test_the_env_var_wins(self):
         import os
         import tempfile
         from unittest import mock
         with tempfile.TemporaryDirectory() as d:
-            env_one = self._checker(d, "mine")
-            on_path = tempfile.mkdtemp(dir=d)
-            self._checker(on_path)
-            with mock.patch.dict(os.environ, {"FAE_TLA_VERIFY": env_one, "PATH": on_path}):
-                self.assertEqual(runs.rig.tla_verify_path(), env_one)
+            mine = Path(d) / "mine"
+            mine.write_text("#!/usr/bin/env python3\n")
+            with mock.patch.dict(os.environ, {"FAE_TLA_VERIFY": str(mine)}):
+                self.assertEqual(runs.rig.tla_verify_path(), str(mine))
 
-    def test_else_path(self):
+    def test_else_the_one_fae_ships(self):
         import os
-        import tempfile
         from unittest import mock
-        with tempfile.TemporaryDirectory() as d:
-            found = self._checker(d)
-            env = {k: v for k, v in os.environ.items() if k != "FAE_TLA_VERIFY"}
-            with mock.patch.dict(os.environ, dict(env, PATH=d), clear=True):
-                self.assertEqual(runs.rig.tla_verify_path(), found)
-
-    def test_else_none(self):
-        import os
-        import tempfile
-        from unittest import mock
-        with tempfile.TemporaryDirectory() as d:
-            env = {k: v for k, v in os.environ.items() if k != "FAE_TLA_VERIFY"}
-            with mock.patch.dict(os.environ, dict(env, PATH=d), clear=True):
-                self.assertIsNone(runs.rig.tla_verify_path())
+        env = {k: v for k, v in os.environ.items() if k != "FAE_TLA_VERIFY"}
+        with mock.patch.dict(os.environ, dict(env, PATH="/nonexistent"), clear=True):
+            self.assertEqual(Path(runs.rig.tla_verify_path()),
+                             Path(ROOT) / "fae" / "utils" / "tla_verify.py")
 
     def test_a_named_file_that_does_not_exist_is_none(self):
         import os
         from unittest import mock
-        with mock.patch.dict(os.environ, {"FAE_TLA_VERIFY": "/nonexistent/tla_verify", "PATH": "/nonexistent"}):
+        with mock.patch.dict(os.environ, {"FAE_TLA_VERIFY": "/nonexistent/tla_verify"}):
             self.assertIsNone(runs.rig.tla_verify_path())
 
 
-@unittest.skipUnless(TLA_VERIFY, "no tla_verify (FAE_TLA_VERIFY or PATH)")
 class TestTheReplayJudgesTheNewCellFromInit(unittest.TestCase):
 
     def replay(self, rows, tmp):

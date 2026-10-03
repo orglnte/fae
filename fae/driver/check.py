@@ -293,7 +293,7 @@ def _trace(ctx):
     tool = rig.tla_verify_path()
     if tool is None:
         return [Finding(False, "no TLA+ trace checker",
-                        "set FAE_TLA_VERIFY to tla_verify, or put tla_verify on PATH")]
+                        "unset FAE_TLA_VERIFY to use fae/utils/tla_verify.py, or point it at a file")]
     log = common.TRANSITIONS_LOG
     if not (log.exists() and log.stat().st_size):
         return [Finding(True, "no transitions recorded yet: nothing to replay")]
