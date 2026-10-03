@@ -17,6 +17,7 @@ import time
 import ujson as json
 from datetime import datetime, timezone
 
+from fae.cell.cell import Busy
 from fae.driver import common
 from fae.driver import ops
 from fae.driver import state
@@ -363,6 +364,8 @@ def supervise_pass(alerts, dry=False, only=""):
                 # the cell stays unvalidated, is reported once, and is retried
                 try:
                     doc = taint._validate_cell(ws)
+                except Busy:
+                    pass                      # its loop is ending: next pass
                 except Exception as e:
                     if alerts.validation.get(cid) != repr(e):
                         alerts.validation[cid] = repr(e)
@@ -400,7 +403,7 @@ def supervise_pass(alerts, dry=False, only=""):
                                  f"{VERIFY_HELD_ALERT_S}s (lock held {int(_held or 0)}s)"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
-                            common.ledger.alert(ws, cid, f"VERIFY-SLOW no progress for {int(_slow)}s > {VERIFY_HELD_ALERT_S}s (global verify-lock held {int(_held or 0)}s) — every other lane queues behind it")
+                            common.cell(cid).alert(f"VERIFY-SLOW no progress for {int(_slow)}s > {VERIFY_HELD_ALERT_S}s (global verify-lock held {int(_held or 0)}s) — every other lane queues behind it")
                             alerts.verify_slow[cid] = _key
                     # Past the wedge threshold, end it. The alert above is
                     # report-only, and a global lock nobody frees stalls every
@@ -411,7 +414,7 @@ def supervise_pass(alerts, dry=False, only=""):
                                  f"{VERIFY_WEDGED_S}s -> stand down"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
-                            common.ledger.alert(ws, cid, f"VERIFY-WEDGED held the global verify-lock {int(_held)}s > {VERIFY_WEDGED_S}s — standing it down; this attempt is lost")
+                            common.cell(cid).alert(f"VERIFY-WEDGED held the global verify-lock {int(_held)}s > {VERIFY_WEDGED_S}s — standing it down; this attempt is lost")
                             alerts.verify_wedged[cid] = _ts
                             ops.teardown_cell(cid, st["variant"],
                                            reason="verify-wedged",
@@ -436,7 +439,7 @@ def supervise_pass(alerts, dry=False, only=""):
                                  f"{int(_pa)}s > {_alert_s}s"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
-                            common.ledger.alert(ws, cid, f"{_kind} '{_ph}' unchanged {int(_pa)}s > {_alert_s}s")
+                            common.cell(cid).alert(f"{_kind} '{_ph}' unchanged {int(_pa)}s > {_alert_s}s")
                             alerts.phase.add(_key)
                     if _kill_s is not None and _pa > _kill_s:
                         common._rec_log(f"{cid} ALERT — phase '{_ph}' unchanged "
@@ -480,7 +483,7 @@ def supervise_pass(alerts, dry=False, only=""):
                                  f"{int(_silent)}s -> stand down"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
-                            common.ledger.alert(ws, cid, f"ARM-STUCK held the {_arm} arm {int(_slot)}s with no progress for {int(_silent)}s — standing it down")
+                            common.cell(cid).alert(f"ARM-STUCK held the {_arm} arm {int(_slot)}s with no progress for {int(_silent)}s — standing it down")
                             alerts.arm.add(cid)
                             ops.teardown_cell(cid, st["variant"],
                                            reason="arm-stuck", unblock_agent=True)
@@ -498,7 +501,10 @@ def supervise_pass(alerts, dry=False, only=""):
                 common._rec_log(f"{cid} stranded reverify ({st['shape']}) -> ledger repair"
                          + (" [dry-run]" if dry else ""))
                 if not dry:
-                    common.ledger.append(ws, "REVERIFY", cid, f"ERROR[rig]: stranded mid-gate (no reverify process) — repaired by reconcile; green intact, re-run the gate")
+                    try:
+                        common.cell(cid).repair_stranded_reverify()
+                    except Busy:
+                        common._rec_log(f"{cid} stranded reverify: cell held, repair next pass")
             if terminal and loop_pid:
                 # A loop alive on a DONE cell is normal for the teardown
                 # window: END is written BEFORE the EXIT trap deletes the

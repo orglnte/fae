@@ -311,7 +311,9 @@ def _reference_cell(cid, vid, rep, workspaces):
     with its known answer laid over, no agent), constructed only: prepare()
     seeds it."""
     from fae.cell import Cell
-    return Cell.new(cid, "T1", vid, rep, reference=True, workspaces=workspaces, root=ROOT)
+    return Cell.new(cid, "T1", vid, rep, reference=True, workspaces=workspaces, root=ROOT,
+                    queues=common.queues(), locks=common.LOCKS,
+                    transitions=common.TRANSITIONS_LOG)
 
 
 def smoke_variants():
@@ -439,27 +441,23 @@ def init(args):
 
 def prepare(args):
     """Seed the whole matrix's workspaces for AGENT (--reps reps) and launch
-    nothing — fae/cell/prepare.py's prepare(), the same call the driver
-    makes at every start. FRESH=1 in the environment moves an existing
-    workspace aside first (safe_wipe; never a delete)."""
+    nothing: each cell prepares itself (Cell.prepare), as at every start.
+    FRESH=1 in the environment moves an existing workspace aside first
+    (safe_wipe; never a delete)."""
     agent = args.agent or os.environ.get("AGENT")
     if not agent:
         sys.exit("prepare: --agent AGENT (or AGENT in the environment) is required")
-    sys.path.insert(0, str(ROOT))
-    from fae.cell import prepare as _prepare
-    from fae.cell import config as _config
-    from fae.cell import Cell as _Cell
-    cfg = _config.load(ROOT)
+    from fae.cell.cell import Busy
+    fresh = bool(os.environ.get("FRESH"))
     n = 0
     for rep in range(1, args.reps + 1):
         for vid in common.definition().active:
             cid = cell_id(agent, vid, rep, args.task)
-            ws = _prepare.prepare(cid, args.task, vid, rep,
-                                  workspaces=common.WS, root=ROOT,
-                                  fresh=bool(os.environ.get("FRESH")),
-                                  impl=_Cell.IMPL,
-                                  agent_model=cfg.get("AGENT_MODEL") or agent,
-                                  cfg=cfg)
+            try:
+                ws = common.cell(cid, args.task, vid, rep, agent=agent).prepare(fresh=fresh)
+            except Busy:
+                print(f"  skipped {cid}: held by another process")
+                continue
             print(f"  prepared {ws}")
             n += 1
     print(f"Prepared every active variant: {n} workspace(s).")

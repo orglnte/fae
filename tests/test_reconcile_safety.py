@@ -511,18 +511,13 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         (runs.common.WS / cid).mkdir(parents=True, exist_ok=True)
         self.addCleanup(shutil.rmtree, runs.common.WS / cid, True)
         (runs.common.WS / cid / ".paused").write_text("stopped by=operator\n")
-        emitted = []
         # The Resume is gated on the LEDGER pause, exactly as replay judges
-        # it — so the fixture seeds the Pause `stop` emits, into a patched
-        # log (the live ledger must stay clean).
-        with mock.patch.object(runs.common, "TRANSITIONS_LOG",
-                               self.plane / "transitions.log"):
-            runs.common._emit_transition("Pause", cid, "reason=stopped")
-            with mock.patch.object(runs.common, "_emit_transition",
-                                   side_effect=lambda a, c, *r: emitted.append((a, c))):
-                runs.ops._spawn_detached(["bash", "-c", "exit 0"], dict(os.environ),
-                                     cid, "spawn")
-        self.assertIn(("Resume", cid), emitted)
+        # it — so the fixture seeds the Pause `stop` emits.
+        log = runs.common.TRANSITIONS_LOG
+        runs.common._emit_transition("Pause", cid, "reason=stopped")
+        runs.ops._spawn_detached(["bash", "-c", "exit 0"], dict(os.environ), cid, "spawn")
+        self.assertEqual([l.split("\t")[1] for l in log.read_text().splitlines()
+                          if l.split("\t")[2] == cid], ["Pause", "Resume"])
         self.assertFalse((runs.common.WS / cid / ".paused").exists())
 
     def test_a_cancelled_cell_is_never_resumed_by_a_spawn(self):
@@ -531,12 +526,9 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         self.addCleanup(shutil.rmtree, runs.common.WS / cid, True)
         (runs.common.WS / cid / ".paused").write_text("killed by=operator\n")
         (runs.common.WS / cid / ".cancelled").write_text("by=operator\n")
-        emitted = []
-        with mock.patch.object(runs.common, "_emit_transition",
-                               side_effect=lambda a, c, *r: emitted.append((a, c))):
-            runs.ops._spawn_detached(["bash", "-c", "exit 0"], dict(os.environ),
-                                 cid, "spawn")
-        self.assertNotIn(("Resume", cid), emitted)
+        runs.common._emit_transition("Kill", cid, "reason=killed")
+        runs.ops._spawn_detached(["bash", "-c", "exit 0"], dict(os.environ), cid, "spawn")
+        self.assertNotIn("\tResume\t", runs.common.TRANSITIONS_LOG.read_text())
         self.assertTrue((runs.common.WS / cid / ".paused").exists())
 
     def test_it_never_creates_a_workspace(self):

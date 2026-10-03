@@ -20,6 +20,7 @@ import ujson as json
 from pathlib import Path
 from datetime import datetime, timezone
 
+from fae.cell.cell import Busy
 from fae.driver import common
 from fae.driver import state
 from fae.driver import zombies
@@ -40,7 +41,7 @@ def prestart_clean(cid):
                        capture_output=True)
     ws = common.WS / cid
     if (ws / ".loop").exists() and state.heartbeat(ws) is None:
-        (ws / ".loop").unlink(missing_ok=True)
+        common.cell(cid).clear_heartbeat()
 
 
 SPAWN_PROBE_S = 2.0
@@ -107,7 +108,7 @@ def _spawn_detached(argv, env, cid, what="spawn", pass_fds=()):
     # prepare and no Resume is ever recorded, so every later event on the cell
     # replays as an illegal transition. unpause is a no-op when no pause
     # exists, and refuses to lift a cancellation.
-    state.unpause(cid)
+    common.cell(cid).unpause()
     _crash_before_spawn(cid)
     common.CONDUCT.mkdir(parents=True, exist_ok=True)
     # The driver's stderr for its whole life, not just the probe window: a
@@ -249,7 +250,6 @@ def request_pause(cids, reason, who="operator"):
     Nothing is signalled. The old pause SIGSTOPped loops, which is not a pause
     at all — a frozen loop still holds the per-arm lock, so pausing one agent
     would deadlock that arm for every other agent until a human noticed."""
-    stamp = f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}"
     written = []
     for cid in cids:
         if state.pause_lock(cid):
@@ -269,13 +269,8 @@ def request_pause(cids, reason, who="operator"):
         _st = state.cell_state(common.WS / cid, {}, set())
         if _st and _st["state"] == "DONE":
             continue
-        state._pause_file(cid).write_text(f"{reason} by={who} at={stamp}\n")
+        common.cell(cid).request_pause(reason, who)
         written.append(cid)
-        # Kill routes through request_pause(reason="killed") — tag it
-        # distinctly from a plain Pause so live-trace replay picks Kill(c),
-        # not Pause(c), matching .tla/Runs.tla's action set.
-        common._emit_transition("Kill" if reason == "killed" else "Pause", cid,
-                          f"reason={reason} by={who}")
     return written
 
 
@@ -344,10 +339,11 @@ def seal(args):
             todo.append((cid, SEALABLE[why], st["att"]))
     for cid, verdict, att in todo:
         if args.apply:
-            p = common.WS / cid / common.SEAL_MARKER
-            p.write_text(f"sealed={datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}\t"
-                         f"verdict={verdict}\tattempts={att}\tby=cli.py seal\n")
-            p.chmod(0o444)
+            try:
+                common.cell(cid).seal(verdict, att, by="cli.py seal")
+            except Busy:
+                print(f"skipped       {cid}  (held by another process)")
+                continue
         print(f"{'sealed' if args.apply else 'would seal'}  {cid}  "
               f"{verdict} attempts={att}")
     if args.verbose:
@@ -374,8 +370,6 @@ def reverify(args):
     re-verify a sample, diff, repeat — impossible while the only way to re-run
     was to overwrite.
     """
-    sys.path.insert(0, str(common.ROOT))
-    from fae.cell import Cell             # noqa: E402  (heavy; only here)
     cids = select_cells_many(_selector_list(args))
     if not cids:
         sys.exit("no cells match")
@@ -389,14 +383,18 @@ def reverify(args):
               f"verify lock behind its cells and holds it for the whole gate", flush=True)
     stamp = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
     for cid in cids:
-        c = Cell(cid, workspaces=common.WS, root=common.ROOT)
+        c = common.cell(cid)
         if not c.terminal:
             print(f"skipping {cid}: not finished ({c.verdict or 'open'}) — "
                   f"re-verify applies to a recorded result")
             continue
         print(f"reverify {cid} -> reverify/{stamp}/  "
               f"(recorded verdict: {c.verdict})", flush=True)
-        results = c.reverify(stamp=stamp)
+        try:
+            results = c.reverify(stamp=stamp)
+        except Busy:
+            print(f"  skipped: {cid} is held by another process")
+            continue
         want = c.gate_def.arity
         ok = all(r.green for r in results) and len(results) == want
         print(f"  {'UPHELD' if ok else 'DIFFERS'}: "
@@ -462,7 +460,7 @@ def resume(args):
             # must not soften it.
             done_acts = []
             if state.pause_lock(cid) and state.pause_lock(cid) != "killed":
-                state.unpause(cid)
+                common.cell(cid).unpause()
                 done_acts.append("pause lifted")
             # A terminal cell's spec is finished work: retire it here rather
             # than leave the lane reporting it as backlog and naming it as
@@ -492,9 +490,10 @@ def resume(args):
             # cell to lift these.
             continue
         acted = []
+        c = common.cell(cid)
         if state.pause_lock(cid):
-            state.unpause(cid); acted.append("pause lifted")
-        if unflag(cid):
+            c.unpause(); acted.append("pause lifted")
+        if c.unflag():
             acted.append("flag cleared")
         # Per-agent cap holds on resume too: locks are lifted above either
         # way, but the RESPAWN defers while the agent already has a live
@@ -642,11 +641,8 @@ def _variant_teardown(variant, cid, timeout=None):
         return
 
     def run():
-        sys.path.insert(0, str(common.ROOT))
-        from fae.cell import Cell
         p = common.parse_cell_id(cid)
-        c = Cell.new(cid, p[2] if p else "T1", variant, p[3] if p else 1,
-                     workspaces=common.WS, root=common.ROOT)
+        c = common.cell(cid, p[2] if p else "T1", variant, p[3] if p else 1)
         try:
             c.teardown()
         except Exception as e:           # Cell.teardown already ALERTs; a
@@ -786,8 +782,7 @@ def stop_cells(args):
     # is respawned (.tla/Runs.tla, KilledStaysDead).
     if cancel:
         for cid in cids:
-            (common.WS / cid / ".cancelled").write_text(
-                f"killed by=operator at={datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}\n")
+            common.cell(cid).cancel()
     # Scrub the queue for BOTH: cells we just cancelled, and specs that never
     # had a workspace to cancel. `queues` was pruned by the selector: a full
     # cid or agent name touches only its own lane's file.
@@ -943,9 +938,7 @@ def spawn(args):
             if (ws / ".cancelled").exists():
                 print(f"skipping {cid}: already DONE·cancelled — use --fresh to force a new run")
                 continue
-        from fae.cell import Cell
-        cell = Cell.new(cid, args.task, args.variant, rep, agent=args.agent,
-                        workspaces=common.WS, root=common.ROOT, queues=common.queues())
+        cell = common.cell(cid, args.task, args.variant, rep, agent=args.agent)
         if not cell.ready_image():
             sys.exit(f"refusing: the agent image for {args.variant} could not be built "
                      f"(the lines above say why)")
@@ -1010,23 +1003,6 @@ def reset_respawn_budgets(cids):
         return n
 
 
-def flag(cid):
-    """Quarantine a cell for a human. A cell with no workspace has nowhere to
-    carry the flag."""
-    ws = common.WS / cid
-    if ws.is_dir():
-        (ws / "reconcile.flagged").touch()
-
-
-def unflag(cid):
-    """Lift the quarantine; True if there was one."""
-    f = common.WS / cid / "reconcile.flagged"
-    if not f.exists():
-        return False
-    f.unlink()
-    return True
-
-
 def _respawn(st, dry, ignore_slots=False):
     """Resume a cell: same spawn as `spawn`, NEVER --fresh (attempts persist).
 
@@ -1056,9 +1032,7 @@ def _respawn(st, dry, ignore_slots=False):
         common._rec_log(f"{cid} {refusal}")
         print(refusal)
         return False
-    from fae.cell import Cell
-    cell = Cell.new(cid, st["task"], st["variant"], st["rep"], agent=st["agent"],
-                    workspaces=common.WS, root=common.ROOT, queues=common.queues())
+    cell = common.cell(cid, st["task"], st["variant"], st["rep"], agent=st["agent"])
     if not cell.ready_image():
         common._rec_log(f"{cid} respawn FAILED: its agent image could not be built")
         return False

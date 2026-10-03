@@ -146,12 +146,9 @@ def load_cache(ws: Path) -> dict:
         return {}
 
 
-def save_cache(ws: Path, cache: dict) -> None:
+def cache_text(cache: dict) -> str:
     cache["version"] = CACHE_VERSION
-    try:
-        (ws / "score-cache.json").write_text(json.dumps(cache))
-    except OSError:
-        pass
+    return json.dumps(cache)
 
 
 def cached_input(cache: dict, key: str, path: Path, parse):
@@ -336,11 +333,15 @@ def main() -> int:
     return score_one(sys.argv[1])
 
 
-def score_one(cell_id: str) -> int:
+def score_one(cell_id: str, cell=None) -> int:
     """Score one cell in-process. fae/driver/score.py's `score()` path-loads this
     module once and calls it per cell so a 300-cell sweep pays
-    interpreter+import startup once, not per cell."""
-    ws = WORKSPACES / cell_id
+    interpreter+import startup once, not per cell. The record is written
+    through the cell (`cell`, else the one in WORKSPACES)."""
+    if cell is None:
+        from fae.cell.cell import Cell
+        cell = Cell(cell_id, workspaces=WORKSPACES, root=REPO_ROOT)
+    ws = cell.ws
     if not ws.is_dir():
         print(f"ERROR: no such cell '{cell_id}' at {ws}", file=sys.stderr)
         return 1
@@ -434,10 +435,12 @@ def score_one(cell_id: str) -> int:
         "grader_model": defects_data.get("grader_model"),
     }
 
-    out = ws / "score.json"
-    out_text = json.dumps(record, indent=2)
-    out.write_text(out_text + "\n")
-    save_cache(ws, cache)
+    with cell.changing():
+        cell.write_derived("score.json", json.dumps(record, indent=2) + "\n")
+        try:
+            cell.write_derived("score-cache.json", cache_text(cache))
+        except OSError:
+            pass                    # the cache only saves work; scoring stands without it
     return 0
 
 

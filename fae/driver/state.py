@@ -4,10 +4,9 @@ all read.
 
 loop_pids/loop_parents/containers are the process-table facts; heartbeat reads
 a workspace's own declared state; cell_state combines both into one row.
-Everything here is a query — nothing writes except pause_lock/unpause (the
-pause-request file the driver's EXIT trap reads) and the two small caches
+Everything here is a query: nothing writes but the two small caches
 (_LPCACHE, _PIDCACHE), which exist only to bound how often the process table
-is swept.
+is swept. A cell's folder is changed through its Cell.
 """
 from __future__ import annotations
 
@@ -21,7 +20,6 @@ from pathlib import Path
 from fae.driver import common
 from fae.driver.common import (
     parse_cell_id, awake_age, VALIDATION, ledger, faults,
-    _ledger_intent,
 )
 
 def loop_pids():
@@ -166,31 +164,6 @@ def pause_detail(cid):
     except OSError:
         return ""
     return lines[1][:120] if len(lines) > 1 else ""
-
-
-def _pause_file(cid):
-    return common.WS / cid / ".paused"
-
-
-def unpause(cid):
-    # Emit Resume ONLY when a pause actually existed. This used to fire
-    # unconditionally, so `resume` over a fleet logged a Resume for every cell
-    # it merely looked at — 16 of them in one sweep on 2026-07-25. Against
-    # .tla/Runs.tla those are not enabled (Resume requires intent='paused'),
-    # so each one desynced its cell in the live-trace replay and produced a
-    # cascade of follow-on false violations. A transition log that records
-    # transitions that did not happen is worse than no log.
-    # A CANCELLED cell keeps both markers, and lifting its pause would emit a
-    # Resume while the intent stays 'killed' — a transition the model does not
-    # admit, and a cell nobody asked to restart. Cancellation outranks a pause.
-    if (common.WS / cid / ".cancelled").exists():
-        return
-    _pause_file(cid).unlink(missing_ok=True)
-    # The LEDGER, not the file, gates the Resume: an operator who removed the
-    # file by hand starves the file test, and a Resume without a ledger Pause
-    # is a transition the model does not admit — both ways the replay breaks.
-    if _ledger_intent(cid) == "paused":
-        common._emit_transition("Resume", cid)
 
 
 def flagged(cid):
