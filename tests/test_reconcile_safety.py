@@ -169,7 +169,7 @@ class TestTheEpochSeedIsComplete(unittest.TestCase):
     def test_every_model_variable_is_written(self):
         c = dict(cid="x", outcome="green", intent="run", loop="verify",
                  attempts=3, slot=True, verify=True)
-        self.assertEqual(runs.rig._epoch_fields(c),
+        self.assertEqual(runs.experiment._epoch_fields(c),
                          "outcome=green intent=run loop=verify attempts=3 "
                          "slot=true verify=true")
 
@@ -178,15 +178,15 @@ class TestTheEpochSeedIsComplete(unittest.TestCase):
         # holding it can never legally reach `agent` — and every verify it
         # then runs replays as illegal.
         for phase in ("agent", "verify-lock", "limit", "setup", ""):
-            self.assertEqual(runs.rig._loop_of_phase(phase, True), "agent", phase)
+            self.assertEqual(runs.experiment._loop_of_phase(phase, True), "agent", phase)
 
     def test_verify_is_its_own_state(self):
-        self.assertEqual(runs.rig._loop_of_phase("verify", True), "verify")
+        self.assertEqual(runs.experiment._loop_of_phase("verify", True), "verify")
 
     def test_no_slot_is_the_idle_window(self):
         # A loop without a slot has not been admitted.
         for phase in ("setup", ""):
-            self.assertEqual(runs.rig._loop_of_phase(phase, False), "idle", phase)
+            self.assertEqual(runs.experiment._loop_of_phase(phase, False), "idle", phase)
 
     def test_lock_holders_are_read_from_the_mutex_files(self):
         with tempfile.TemporaryDirectory() as d, \
@@ -199,16 +199,28 @@ class TestTheEpochSeedIsComplete(unittest.TestCase):
             (slots / "slot-1.holder").write_text("cell-a 4242 123\n")
             (slots / "slot-2").touch()
             (slots / "slot-2.holder").write_text("cell-c 4243 123\n")
-            (Path(d) / "verify-lock").mkdir()
-            (Path(d) / "verify-lock" / "holder").write_text("cell-b\n99\n123\n")
-            self.assertEqual(runs.rig._slot_holders(), {"cell-a"})
-            self.assertEqual(runs.rig._verify_holder(), "cell-b")
+            vlock = open(Path(d) / "verify-lock", "a+")
+            self.addCleanup(vlock.close)
+            fcntl.flock(vlock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            (Path(d) / "verify-lock.holder").write_text("cell-b 99 123\n")
+            exp = runs.common.experiment()
+            self.assertEqual(exp.slot_holders(), {"cell-a"})
+            self.assertEqual(exp.verify_holder(), "cell-b")
+
+    def test_a_released_verify_lock_names_no_holder(self):
+        # the holder note outlives the release; the kernel decides
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.multiple(runs.common, QUEUES=Path(d), CONDUCT=Path(d), LOCKS=Path(d)):
+            (Path(d) / "verify-lock").touch()
+            (Path(d) / "verify-lock.holder").write_text("cell-b 99 123\n")
+            self.assertEqual(runs.common.experiment().verify_holder(), "")
 
     def test_no_locks_held_reads_empty(self):
         with tempfile.TemporaryDirectory() as d, \
                 mock.patch.multiple(runs.common, QUEUES=Path(d), CONDUCT=Path(d), LOCKS=Path(d)):
-            self.assertEqual(runs.rig._slot_holders(), set())
-            self.assertEqual(runs.rig._verify_holder(), "")
+            exp = runs.common.experiment()
+            self.assertEqual(exp.slot_holders(), set())
+            self.assertEqual(exp.verify_holder(), "")
 
 
 class TestTheConformanceWindow(unittest.TestCase):
@@ -220,17 +232,17 @@ class TestTheConformanceWindow(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "conformance-since"
             f.write_text(body)
-            with mock.patch.object(runs.rig, "CONFORMANCE_SINCE", f):
-                return runs.rig.conformance_since()
+            with mock.patch.object(runs.check, "CONFORMANCE_SINCE", f):
+                return runs.check.conformance_since()
 
     def test_a_declared_instant_is_passed_through(self):
         self.assertEqual(self._since("# why\n2026-08-13T17:04:00Z\n"),
                          ["--since", "2026-08-13T17:04:00Z"])
 
     def test_no_file_means_the_whole_trace(self):
-        with mock.patch.object(runs.rig, "CONFORMANCE_SINCE",
+        with mock.patch.object(runs.check, "CONFORMANCE_SINCE",
                                Path("/nonexistent/conformance-since")):
-            self.assertEqual(runs.rig.conformance_since(), [])
+            self.assertEqual(runs.check.conformance_since(), [])
 
     def test_comments_only_means_the_whole_trace(self):
         self.assertEqual(self._since("# nothing declared yet\n"), [])

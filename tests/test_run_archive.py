@@ -11,7 +11,7 @@ from unittest import mock
 from _ctx import ROOT
 
 from fae.cell import cell
-from fae.cell import experiment as _experiment
+from fae import experiment as _experiment
 from fae.cell.verify import Verdict
 
 

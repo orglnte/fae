@@ -20,7 +20,7 @@ class TestAgentCliSelection(unittest.TestCase):
     fae.toml only says where each one's credentials are."""
 
     def definition(self):
-        from fae.cell import experiment
+        from fae import experiment
         return experiment.current()
 
     def test_each_agent_is_its_declared_cli_and_model(self):

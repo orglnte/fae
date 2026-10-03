@@ -46,11 +46,11 @@ _EXPERIMENT = Path(os.environ.get("FAE_TEST_EXPERIMENT") or _TREE / "tests" / "f
 os.environ["EXPERIMENT_DIR"] = str(_EXPERIMENT)
 
 from fae.driver import (        # noqa: E402
-    common, conduct, render, rig, score, state, supervise, zombies,
+    check, common, conduct, render, score, state, supervise, zombies,
 )
 from fae import cli as _cli     # noqa: E402
 from fae import queues as _queues_module  # noqa: E402
-from fae.cell import experiment as _experiment  # noqa: E402
+from fae import experiment as _experiment  # noqa: E402
 _experiment.load(_EXPERIMENT)
 exp1 = importlib.import_module("experiment.exp1") if (_EXPERIMENT / "exp1.py").is_file() else None
 from fae.driver import validate as taint            # noqa: E402
@@ -88,7 +88,8 @@ from fae.cell.cell import Cell as _Cell  # noqa: E402
 _Cell.ready_image = lambda self, log=print: True
 runs.queues_module = _queues_module
 runs.render = render
-runs.rig = rig
+runs.check = check
+runs.experiment = _experiment
 runs.score = score
 runs.state = state
 runs.supervise = supervise

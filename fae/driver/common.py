@@ -68,15 +68,15 @@ ATTEMPT_BUDGET = 10
 from fae import mutex  # noqa: E402
 from fae.cell import faults  # noqa: E402
 
-# The experiment definition (fae/cell/experiment.py) and its variants are
-# read through definition(); nothing here copies them.
+# The experiment definition (fae/experiment.py) and its variants are read
+# through definition(); nothing here copies them.
+from fae import experiment as _experiment  # noqa: E402
 
 
 def definition():
-    """The loaded experiment definition (fae/cell/experiment.py)."""
+    """The loaded experiment definition (fae/experiment.py)."""
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
-    from fae.cell import experiment as _experiment
     return _experiment.load(experiment_dir())
 
 
@@ -222,17 +222,25 @@ def _queue_refusal(cid):
 TRANSITIONS_LOG = _plane.transitions_log(ROOT)
 
 
+def workspace(path=None):
+    """The workspace (fae/experiment.py) as the driver sees it: WS unless
+    `path` names another root, on the plane (QUEUES, CONDUCT, LOCKS,
+    TRANSITIONS_LOG), the cell-id grammar deciding what is a cell."""
+    return _experiment.Workspace(ROOT, path or WS, parse=parse_cell_id, queues=queues(),
+                                 conduct=CONDUCT, locks=LOCKS, transitions=TRANSITIONS_LOG)
+
+
+def experiment():
+    """The experiment this root runs (fae/experiment.py), on the driver's workspace."""
+    return _experiment.Experiment(ROOT, workspace())
+
+
 def cell(cid, task=None, variant=None, rep=1, agent=None, reference=False,
          workspaces=None):
-    """The cell `cid` as the driver sees the plane (ROOT, the queues, LOCKS,
-    TRANSITIONS_LOG), in WS unless `workspaces` names another root. Named by
-    what it runs (`variant`), it may not exist yet: what a start prepares."""
-    from fae.cell.cell import Cell
-    plane = dict(workspaces=workspaces or WS, root=ROOT, queues=queues(), locks=LOCKS,
-                 transitions=TRANSITIONS_LOG)
-    if variant is None:
-        return Cell(cid, **plane)
-    return Cell.new(cid, task or "T1", variant, rep, agent=agent, reference=reference, **plane)
+    """The cell `cid` on the driver's workspace (workspace()), or on the root
+    `workspaces` names. Named by what it runs (`variant`), it may not exist
+    yet: what a start prepares."""
+    return workspace(workspaces).cell(cid, task, variant, rep, agent=agent, reference=reference)
 
 
 def named_cell(cid, variant=None):
@@ -243,23 +251,13 @@ def named_cell(cid, variant=None):
 
 
 # --- selecting cells ----------------------------------------------------------
-# One selector language for every verb: `all`, a whole cid, or a run of whole
-# `_`-separated tokens (`sonnet`, an arm, `..._r1`). Anchored at token
-# boundaries, so `r1` never matches `r10` and `son` matches nothing.
-
-def matches(cid, sel):
-    if sel in ("all", "*") or cid == sel:
-        return True
-    return f"_{cid}_".find(f"_{sel}_") >= 0
+# One selector language for every verb (fae/experiment.py: matches).
+matches = _experiment.matches
 
 
 def select_cells(*selectors):
     """cids with a workspace that any selector matches, sorted."""
-    try:
-        cids = sorted(p.name for p in WS.iterdir() if p.is_dir() and parse_cell_id(p.name))
-    except OSError:
-        return []
-    return [c for c in cids if any(matches(c, s) for s in selectors)]
+    return workspace().select(*selectors)
 
 
 def queued_cids(*selectors):

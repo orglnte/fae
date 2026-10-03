@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config as _config
-from . import experiment as _experiment
+from fae import experiment as _experiment
 from .surface import Surface
 
 from fae import paths as _paths  # noqa: E402

@@ -1049,7 +1049,7 @@ class Cell:
     @property
     def gate_def(self):
         """The experiment's gate: the arrangements every attempt must pass."""
-        from . import experiment as _experiment
+        from fae import experiment as _experiment
         return _experiment.current().gate
 
     @property
@@ -1164,7 +1164,7 @@ class Cell:
             raise Sealed(f"{self.cid} is sealed; a verify that writes into the "
                          f"workspace would overwrite the recorded result. "
                          f"Pass out_dir=... to add evidence instead.")
-        from . import experiment as _experiment
+        from fae import experiment as _experiment
         out = Path(out_dir or self.ws)
         run_out = out / RUN_OUT
         run_out.mkdir(parents=True, exist_ok=True)
@@ -1294,7 +1294,7 @@ class Cell:
     def _missing_outputs(self, run_out, v, started):
         """The experiment's REQUIRED_OUTPUTS a verify that ran did not write:
         absent from its own directory, or left there by an earlier verify."""
-        from . import experiment as _experiment
+        from fae import experiment as _experiment
         cls = _experiment.current().verifier_class()
         if v.stage in cls.NOT_RUN_STAGES:
             return []
@@ -1314,7 +1314,7 @@ class Cell:
         recorded (only the allowed kinds, under this cell's id), then copy the
         verifier's declared outputs from its own directory up into `out`,
         where every reader expects them. A symlink is never followed."""
-        from . import experiment as _experiment
+        from fae import experiment as _experiment
         for stamp, event, fields in take_events(run_out):
             if record_events:
                 ledger.append(self.ws, event, self.cid, *fields, stamp=stamp)
@@ -1375,7 +1375,7 @@ class Cell:
                       files=v.files)
 
     def _archive(self, out, m, end, verdict, files=()):
-        from . import experiment as _experiment
+        from fae import experiment as _experiment
         cls = _experiment.current().verifier_class()
         names = list(dict.fromkeys((*(files or cls.FILES), *cls.FEEDBACK_LOGS,
                                     *cls.REQUIRED_OUTPUTS, "metrics.json")))
@@ -1551,7 +1551,7 @@ class Cell:
         return _variants.registry().get(self.variant)
 
     def _agent_images(self):
-        from . import experiment as _experiment
+        from fae import experiment as _experiment
         from .agent_image import AgentImage
         return AgentImage(self.root, _experiment.current(), self.conf)
 
@@ -2020,7 +2020,7 @@ class Cell:
         shutil.rmtree(dest, ignore_errors=True)
         dest.mkdir()
         staged = []
-        from . import experiment as _experiment
+        from fae import experiment as _experiment
         for name in _experiment.current().verifier_class().FEEDBACK_LOGS:
             src = src_root / name
             try:

@@ -5,11 +5,12 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from _ctx import ROOT  # noqa: F401  (sys.path, EXPERIMENT_DIR = the fixture)
 
-from fae.cell import experiment as _experiment
+from fae import experiment as _experiment
 from fae.cell.variants.base import Variant
 from fae.driver import check
 
@@ -176,7 +177,7 @@ class TestTheWalk(CheckCase):
         self.assertEqual(calls["a"], 0)
 
     def test_walk_without_a_terminal_is_refused(self):
-        args = check.SimpleNamespace(walk=True, static=True, smoke=False, variants="", task="T1")
+        args = SimpleNamespace(walk=True, static=True, smoke=False, variants="", task="T1")
         with mock.patch.object(check.sys, "stdin", io.StringIO("")):
             with self.assertRaisesRegex(SystemExit, "needs a terminal"):
                 check.main(args)
@@ -224,23 +225,21 @@ class TestTheFoldedSteps(CheckCase):
         self.assertIn("experiment repair", f.fix)
 
     def test_the_trace_names_a_missing_checker_and_an_empty_log_is_fine(self):
-        from fae.driver import rig
-        with mock.patch.object(rig, "tla_verify_path", return_value=None):
+        with mock.patch.object(check, "tla_verify_path", return_value=None):
             (f,) = self.findings(check._trace)
         self.assertFalse(f.ok)
         self.assertIn("FAE_TLA_VERIFY", f.fix)
         empty = self.root / "transitions.log"
         empty.write_text("")
-        with mock.patch.object(rig, "tla_verify_path", return_value="/x/tla_verify"), \
+        with mock.patch.object(check, "tla_verify_path", return_value="/x/tla_verify"), \
                 mock.patch.object(check.common, "TRANSITIONS_LOG", empty):
             (f,) = self.findings(check._trace)
         self.assertTrue(f.ok)
 
     def test_a_trace_that_breaks_the_model_is_a_failure(self):
-        from fae.driver import rig
         log = self.root / "transitions.log"
         log.write_text("2026-10-02T00:00:00Z\tSPAWN\tc\n")
-        with mock.patch.object(rig, "tla_verify_path", return_value="/x/tla_verify"), \
+        with mock.patch.object(check, "tla_verify_path", return_value="/x/tla_verify"), \
                 mock.patch.object(check.common, "TRANSITIONS_LOG", log), \
                 mock.patch.object(check.subprocess, "run",
                                   return_value=mock.Mock(returncode=1, stdout="Resume not ENABLED\n",

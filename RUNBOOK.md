@@ -156,8 +156,9 @@ RUNBOOK.md           this runbook
 AGENTS.md            rig contract: cells, ledger, locks, verdicts, delete rules,
                      and §0 the engine/experiment boundary
 cli.py               operator CLI (noun groups); the only entry point
-fae/driver/              the orchestrator's library: spawn/queues/conduct/
-                     reconcile/validate/score/rig, one module per concern
+fae/driver/          the orchestrator's library: conduct (admission,
+                     supervision), check, validate, score, state, zombies
+fae/experiment.py    the experiment: Definition, Workspace, Experiment
 fae/cell/           the Python cell driver: attempt loop, the Variant
                      interface + registry, verify, config, the ledger (the
                      one parser), the contract base, contrib/ and infra/ blocks

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from _ctx import ROOT, OrchTmpCase, runs
 
-TLA_VERIFY = runs.rig.tla_verify_path()
+TLA_VERIFY = runs.check.tla_verify_path()
 SPEC = Path(ROOT) / ".tla" / "Runs.tla"
 CID = "ref_high_smoke_beta_reference_T1_r1"
 
@@ -53,21 +53,21 @@ class TestTheCheckerIsTheEnvsElseFaes(unittest.TestCase):
             mine = Path(d) / "mine"
             mine.write_text("#!/usr/bin/env python3\n")
             with mock.patch.dict(os.environ, {"FAE_TLA_VERIFY": str(mine)}):
-                self.assertEqual(runs.rig.tla_verify_path(), str(mine))
+                self.assertEqual(runs.check.tla_verify_path(), str(mine))
 
     def test_else_the_one_fae_ships(self):
         import os
         from unittest import mock
         env = {k: v for k, v in os.environ.items() if k != "FAE_TLA_VERIFY"}
         with mock.patch.dict(os.environ, dict(env, PATH="/nonexistent"), clear=True):
-            self.assertEqual(Path(runs.rig.tla_verify_path()),
+            self.assertEqual(Path(runs.check.tla_verify_path()),
                              Path(ROOT) / "fae" / "utils" / "tla_verify.py")
 
     def test_a_named_file_that_does_not_exist_is_none(self):
         import os
         from unittest import mock
         with mock.patch.dict(os.environ, {"FAE_TLA_VERIFY": "/nonexistent/tla_verify"}):
-            self.assertIsNone(runs.rig.tla_verify_path())
+            self.assertIsNone(runs.check.tla_verify_path())
 
 
 class TestTheReplayJudgesTheNewCellFromInit(unittest.TestCase):

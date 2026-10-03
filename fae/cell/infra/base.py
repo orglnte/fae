@@ -209,7 +209,7 @@ class Infra:
 
     def image(self):
         """The image this cell is verified in, built when missing."""
-        from .. import experiment as _experiment
+        from fae import experiment as _experiment
         from .. import image as _image
         return _image.for_variant(self.variant, _experiment.current(), self.conf, self.log)
 

@@ -196,9 +196,10 @@ def agent_for(tag, definition, toml):
 
 def _fp_extra_files(root, trees):
     """The source files folded into the anti-gaming fingerprint beside the
-    experiment tree: the trees the experiment declares (its SDKs) and the
-    Python cell driver (a verify surface — an edit mid-cell would measure some
-    arrangements with one verify and the rest with another). FATAL if a tree
+    experiment tree: the trees the experiment declares (its SDKs), the Python
+    cell driver and the definition reader (verify surfaces — an edit mid-cell
+    would measure some arrangements with one verify and the rest with
+    another). FATAL if a tree
     exists but holds no .py, since a shrunk list silently shrinks the guarded
     surface; a tree absent from this machine is skipped."""
     parts = []
@@ -211,9 +212,12 @@ def _fp_extra_files(root, trees):
             raise RuntimeError(f"FATAL config: {d} exists but has no .py — the "
                                "fingerprint would silently shrink its guarded surface")
         parts += got
-    # the engine's own cell package, wherever it is — never under the root:
-    # an experiment repo imports the engine and does not contain it
-    parts += sorted(str(p) for p in Path(__file__).resolve().parent.rglob("*.py"))
+    # the engine's own cell package and the definition reader, wherever they
+    # are — never under the root: an experiment repo imports the engine and
+    # does not contain it
+    cell_pkg = Path(__file__).resolve().parent
+    parts += sorted(str(p) for p in cell_pkg.rglob("*.py"))
+    parts.append(str(cell_pkg.parent / "experiment.py"))
     return " ".join(parts)
 
 
@@ -228,7 +232,7 @@ _KEY_ENV = (
 
 
 def _definition(root, env, toml):
-    from . import experiment as _experiment
+    from fae import experiment as _experiment
     return _experiment.for_config(experiment_dir(root, env, toml.get("paths", {})))
 
 
@@ -440,7 +444,7 @@ def stage_agent(conf, cli, dest, root):
         from fae import paths
         shutil.copy(paths.ENGINE / "testagent.py",
                     Path(dest) / "testagent.py")
-        from . import experiment as _experiment
+        from fae import experiment as _experiment
         for vid, cls in _experiment.current().variants.items():
             if cls.REFERENCE is not None and Path(cls.REFERENCE).is_dir():
                 shutil.copytree(cls.REFERENCE, Path(dest) / "reference" / vid)

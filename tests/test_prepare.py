@@ -268,8 +268,8 @@ class TestIdempotence(PrepareTestCase):
 
 class TestOneImplementation(unittest.TestCase):
     """prepare() is the one seeding; the driver calls it directly and
-    `cli.py experiment prepare` (fae/driver/rig.py) calls the same function over
-    the variants."""
+    `cli.py experiment prepare` (Experiment.prepare) asks each cell of the
+    matrix to prepare itself."""
 
     def test_the_driver_calls_the_module(self):
         src = (ROOT / "fae" / "cell" / "cell.py").read_text()
@@ -277,8 +277,8 @@ class TestOneImplementation(unittest.TestCase):
         self.assertIn("_prepare.prepare(", body[:body.index("\n    def ")])
 
     def test_experiment_prepare_asks_each_cell_to_prepare_itself(self):
-        src = (ROOT / "fae" / "driver" / "rig.py").read_text()
-        body = src[src.index("def prepare(args):"):src.index("def verb_cmd(")]
+        src = (ROOT / "fae" / "experiment.py").read_text()
+        body = src[src.index("    def prepare(self"):src.index("    def init(self")]
         self.assertIn(".prepare(fresh=fresh)", body)
         self.assertNotIn("_prepare.prepare(", body)
         self.assertNotIn("subprocess", body)

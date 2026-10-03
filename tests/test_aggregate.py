@@ -247,13 +247,13 @@ class TestTheSummaryCarriesTheExperimentsEntries(unittest.TestCase):
         self.assertEqual(seen["metrics"], ["green_rate"])
 
     def test_a_definition_without_the_hook_adds_nothing(self):
-        from fae.cell import experiment as _experiment
+        from fae import experiment as _experiment
         self.assertEqual(aggregate.experiment_summary([cell(True)], ("green_rate",)), {})
         self.assertFalse(hasattr(_experiment.current().module, "report_summary"))
 
     def test_the_engine_names_no_arm_of_its_experiment(self):
         import re
-        from fae.cell import experiment as _experiment
+        from fae import experiment as _experiment
         d = _experiment.current()
         src = (Path(ROOT) / "fae" / "scoring" / "aggregate.py").read_text()
         for word in set(d.ids) | {f for c in d.variants.values() for f in c.FACTORS.values()}:

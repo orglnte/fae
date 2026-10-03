@@ -4,9 +4,10 @@
 DESIGN: this is a CLI LAYER, not the orchestrator. A command acting on the
 run calls the Conduct (fae/driver/conduct.py); one acting on cells selects
 them and asks each Cell; one on the work list asks the Queues. What stays here
-is selection and printing. fae/driver/rig.py (the experiment's verbs: init,
-infra, smoke, prepare, verb; the rig's own: trace-reset) and
-fae/driver/check.py (experiment check) are called the same way.
+is selection and printing. The verbs on the experiment as a whole (init,
+smoke, prepare, verb; the rig's trace-reset) are its Experiment's
+(fae/experiment.py); `experiment check` and `experiment infra` are
+fae/driver/check.py's.
 
 GROUPS
   experiment  the experiment this root runs: set it up (init, check, infra,
@@ -53,7 +54,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from fae.cell.cell import Busy  # noqa: E402
-from fae.driver import common, conduct, render, rig, score, state  # noqa: E402
+from fae.driver import check, common, conduct, render, score, state  # noqa: E402
 
 
 def _ns(**kw):
@@ -836,7 +837,14 @@ def experiment_init(experiment: str = typer.Option("", "--experiment",
                                                  "root or absolute); default `experiment`")):
     """Write fae.toml at the root with every key at its default; refuses to
     overwrite one that exists."""
-    rig.init(_ns(experiment=experiment))
+    common.experiment().init(experiment)
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print("next: `python3 cli.py experiment check --walk`, step by step through "
+              "what the experiment needs before a cell runs")
+        return
+    if input("Walk through the readiness check now? [Y/n] ").strip().lower() in ("", "y", "yes"):
+        check.main(_ns(walk=True, static=False, smoke=False, tla_trace=False, variants="",
+                       task="T1"))
 
 
 @experiment_app.command("check")
@@ -859,7 +867,6 @@ def experiment_check(walk: bool = typer.Option(False, "--walk",
     the definition, each variant, every cell's seed, the invariants, the
     infra, the agents' images, no leftovers. Exit 1 on any failure; each
     names its fix."""
-    from fae.driver import check
     check.main(_ns(walk=walk, static=static, smoke=smoke, tla_trace=tla_trace, variants=variants,
                    task=task))
 
@@ -868,7 +875,7 @@ def experiment_check(walk: bool = typer.Option(False, "--walk",
 def rig_trace_reset(dry_run: bool = typer.Option(False, "--dry-run",
                                                  help="preview the EPOCH lines, write nothing")):
     """Re-anchor transitions.log: append the recorded state of every cell (EPOCH)."""
-    rig.trace_reset(_ns(dry_run=dry_run))
+    common.experiment().reset_trace(dry_run=dry_run)
 
 
 @experiment_app.command("infra")
@@ -876,7 +883,7 @@ def experiment_infra():
     """Every variant's infra preflight (its infra's ok()) + a sweep
     of stale per-verify kind clusters. Creates nothing: each verify provisions
     its own infra."""
-    rig.infra(_ns())
+    check.infra(_ns())
 
 
 @experiment_app.command("smoke")
@@ -890,7 +897,7 @@ def experiment_smoke(variants: str = typer.Option("", "--variants",
                                                   "(default: the canonical one)")):
     """Pipeline check: one reference cell per variant through the driver
     (`-m fae.cell ... --stub`), in ws-test.nosync. Exit 0 iff all green."""
-    rig.smoke(_ns(variants=variants, only=only, rep=rep, full_gate=full_gate))
+    common.experiment().smoke(variants=variants, only=only, rep=rep, full_gate=full_gate)
 
 
 @experiment_app.command("prepare")
@@ -899,7 +906,10 @@ def experiment_prepare(agent: str = typer.Option("", "--agent", help="lane name 
                 task: str = typer.Option("T1", "--task", help="task id: T<n>, one the experiment's task/ carries")):
     """Seed the matrix's workspaces WITHOUT launching anything
     (fae/cell/prepare.py, the driver's own prepare)."""
-    rig.prepare(_ns(agent=agent, reps=reps, task=task))
+    agent = agent or os.environ.get("AGENT")
+    if not agent:
+        sys.exit("prepare: --agent AGENT (or AGENT in the environment) is required")
+    common.experiment().prepare(agent, reps, task, fresh=bool(os.environ.get("FRESH")))
 
 
 @experiment_app.command("verb", context_settings=_PASSTHROUGH)
@@ -908,7 +918,7 @@ def experiment_verb(ctx: typer.Context):
     definition's commands()), ARGS passed through untouched; no NAME lists
     them."""
     args = list(ctx.args)
-    raise SystemExit(rig.verb_cmd(args[0] if args else "", args[1:]) or 0)
+    raise SystemExit(common.experiment().verb(args[0] if args else "", args[1:]) or 0)
 
 
 # --- rig tool: an instrument, run standalone (debug/one-off) ----------------

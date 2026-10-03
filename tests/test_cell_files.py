@@ -126,8 +126,8 @@ class TestTraceResetAppends(OrchTmpCase):
                       slot=False, verify=False),
                  dict(cid="opus_high_beta_apidocs_T1_r2", outcome="none", intent="run",
                       loop="none", attempts=0, slot=False, verify=False)]
-        with mock.patch.object(runs.rig, "_observed_epoch", return_value=cells):
-            runs.rig.trace_reset(SimpleNamespace(dry_run=False))
+        with mock.patch.object(runs.experiment.Experiment, "observed_epoch", return_value=cells):
+            runs.common.experiment().reset_trace()
         lines = log.read_text().splitlines()
         self.assertEqual(lines[0].split("\t")[1], "Admit")
         self.assertEqual([l.split("\t")[1:3] for l in lines[2:]],

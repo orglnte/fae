@@ -77,7 +77,7 @@ def _factors(vid) -> dict:
         for p in (str(_paths.ROOT), str(_paths.ENGINE.parent)):
             if p not in sys.path:
                 sys.path.insert(0, p)
-        from fae.cell import experiment as _experiment
+        from fae import experiment as _experiment
         cls = _experiment.current().variant(vid)
     except (OSError, RuntimeError, ValueError, ImportError):
         return {}

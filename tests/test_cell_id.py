@@ -159,6 +159,6 @@ class TestTheVariantIsTheExperiments(unittest.TestCase):
         self.assertIsNone(runs.parse_cell_id("sonnet_high_apidocs_T1_r1"))
 
     def test_the_variants_come_from_the_definition_not_a_regex(self):
-        from fae.cell import experiment as _experiment
+        from fae import experiment as _experiment
         for vid in _experiment.current().ids:
             self.assertEqual(runs.parse_cell_id(f"m_high_{vid}_T1_r1")[1], vid)

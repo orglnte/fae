@@ -1,4 +1,4 @@
-"""fae/cell/experiment.py — the experiment definition the engine loads by
+"""fae/experiment.py — the experiment definition the engine loads by
 path, and the engine's only way of knowing the experiment: no engine module
 imports the `experiment` package by name."""
 import os
@@ -14,7 +14,7 @@ from unittest import mock
 from _ctx import ROOT
 
 sys.path.insert(0, str(ROOT))
-from fae.cell import experiment as exp  # noqa: E402
+from fae import experiment as exp  # noqa: E402
 
 ENGINE = ["cli.py", "driver", "harness", "scoring"]
 _IMPORT = re.compile(r"^\s*(from experiment[.\s]|import experiment[.\s]|import experiment$)", re.M)
@@ -50,7 +50,7 @@ class TestMinimalDefinition(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             _write_definition(td, body, variants)
             prog = ("import sys; sys.path.insert(0, %r)\n"
-                    "from fae.cell import experiment as exp\n"
+                    "from fae import experiment as exp\n"
                     "d = exp.load(%r)\n" % (str(ROOT), str(Path(td) / "experiment"))) + code
             r = subprocess.run([sys.executable, "-c", prog], capture_output=True, text=True,
                                cwd=td, env={**os.environ, "PYTHONPATH": str(ROOT)})
@@ -152,7 +152,7 @@ print(c.values["CALC_BIN"].endswith("/bin/calc"), c.values["CALC_CASES"] == str(
 
     def test_the_gate_is_the_definitions(self):
         out = self._run('''
-            from fae.cell.experiment import Gate
+            from fae.experiment import Gate
             GATE = Gate(("A", "B", "C"), rotate=False)
         ''', '''
 import os, tempfile
@@ -183,7 +183,7 @@ print(exp.load(other).name, "experiment" in sys.modules)
 
     def test_a_missing_definition_is_fatal(self):
         with tempfile.TemporaryDirectory() as td:
-            prog = ("import sys; sys.path.insert(0, %r)\nfrom fae.cell import experiment as exp\n"
+            prog = ("import sys; sys.path.insert(0, %r)\nfrom fae import experiment as exp\n"
                     "exp.load(%r)\n" % (str(ROOT), td))
             r = subprocess.run([sys.executable, "-c", prog], capture_output=True, text=True)
         self.assertNotEqual(r.returncode, 0)
@@ -205,10 +205,9 @@ class TestTheExperimentsOwnCommands(unittest.TestCase):
     experiment; it lists and runs what the definition's commands() declares."""
 
     def _with(self, commands):
-        from fae.driver import rig
         d = exp.current()
         return mock.patch.object(type(d), "commands", new_callable=mock.PropertyMock,
-                                 return_value=commands), rig
+                                 return_value=commands), exp.Experiment()
 
     def test_a_named_command_gets_its_arguments_and_its_exit_code_is_returned(self):
         seen = []
@@ -217,9 +216,9 @@ class TestTheExperimentsOwnCommands(unittest.TestCase):
             """Run the bench."""
             seen.append(argv)
             return 3
-        patch, rig = self._with({"bench": bench})
+        patch, e = self._with({"bench": bench})
         with patch:
-            self.assertEqual(rig.verb_cmd("bench", ("--reps", "2")), 3)
+            self.assertEqual(e.verb("bench", ("--reps", "2")), 3)
         self.assertEqual(seen, [["--reps", "2"]])
 
     def test_no_name_lists_each_command_with_its_first_doc_line(self):
@@ -227,15 +226,15 @@ class TestTheExperimentsOwnCommands(unittest.TestCase):
             """Run the bench.
 
             More."""
-        patch, rig = self._with({"bench": bench})
+        patch, e = self._with({"bench": bench})
         with patch, mock.patch("builtins.print") as p:
-            self.assertEqual(rig.verb_cmd("", []), 0)
+            self.assertEqual(e.verb("", []), 0)
         self.assertIn("Run the bench.", p.call_args_list[0].args[0])
 
     def test_an_unknown_name_is_refused_naming_the_known_ones(self):
-        patch, rig = self._with({"bench": lambda argv: 0})
+        patch, e = self._with({"bench": lambda argv: 0})
         with patch, self.assertRaisesRegex(SystemExit, "'nosuch' is not a command.*bench"):
-            rig.verb_cmd("nosuch", [])
+            e.verb("nosuch", [])
 
     def test_a_definition_without_commands_has_none(self):
         self.assertEqual(exp.current().commands, {})

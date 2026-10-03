@@ -15,7 +15,7 @@ from unittest import mock
 from _ctx import ROOT
 
 sys.path.insert(0, str(ROOT))
-from fae.cell import experiment as _experiment  # noqa: E402
+from fae import experiment as _experiment  # noqa: E402
 from fae.cell import image as _image  # noqa: E402
 from fae.cell import verify  # noqa: E402
 from fae.cell.verify import Ctx, Verdict, run_verifier, verify_argv  # noqa: E402

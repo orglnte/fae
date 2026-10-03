@@ -2,7 +2,7 @@
 one with an exclusive lock, six arrangements, a verifier that judges a text
 file. Nothing here provisions anything; the engine's locks, queues, loop and verdict paths run
 against it exactly as against a real experiment."""
-from fae.cell.experiment import Gate
+from fae.experiment import Gate
 
 NAME = "fixture"
 

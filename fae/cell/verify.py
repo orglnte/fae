@@ -374,7 +374,7 @@ def verify_mounts(ctx, root_reads=None):
     is left out."""
     from . import image as _image
     if root_reads is None:
-        from . import experiment as _experiment
+        from fae import experiment as _experiment
         root_reads = _experiment.current().verifier_class().ROOT_READS
     out = Path(ctx.out)
     root, ws = Path(ctx.root), Path(ctx.workspace)
@@ -449,7 +449,7 @@ def run_teardown(ctx, infra, timeout_s=900, log_dir=None):
     when no container could run (no image, no daemon). Best effort: the
     reaper covers what this leaves. `log_dir` holds verifier.log (the host's
     record of the run), default `ctx.out`."""
-    from . import experiment as _experiment
+    from fae import experiment as _experiment
     from . import image as _image
     work = Path(ctx.out) / WORKDIR
     out = Path(log_dir or ctx.out)
@@ -487,7 +487,7 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
     since what it started beside its container (the artifacts' runner, the
     infra, a store) does not die with it. `log_dir` holds verifier.log (the
     host's record of the run), default `ctx.out`."""
-    from . import experiment as _experiment
+    from fae import experiment as _experiment
     from . import image as _image
     work = Path(ctx.out) / WORKDIR
     out = Path(log_dir or ctx.out)
@@ -568,7 +568,7 @@ def main(argv=None):
     ctx = Ctx.from_json(Path(a.ctx).read_text())
     if ctx.root not in sys.path:
         sys.path.insert(0, ctx.root)
-    from . import experiment as _experiment
+    from fae import experiment as _experiment
     definition = _experiment.load(ctx.experiment_dir)
     if a.teardown:
         from .variants import _ShimCell

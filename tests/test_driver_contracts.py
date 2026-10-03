@@ -15,7 +15,7 @@ from pathlib import Path
 from _ctx import ROOT
 
 from fae import cell
-from fae.cell import experiment as _experiment  # noqa: E402
+from fae import experiment as _experiment  # noqa: E402
 SHAPES = _experiment.current().gate.arrangements
 
 T = cell.T

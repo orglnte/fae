@@ -166,7 +166,7 @@ class TestTheSurfaceMustBeDeclared(unittest.TestCase):
 
     def _with_variant(self, cls):
         from unittest import mock
-        from fae.cell import experiment
+        from fae import experiment
         return mock.patch.object(experiment.Definition, "variant", lambda self, vid: cls)
 
     def test_the_base_variant_declares_none(self):

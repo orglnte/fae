@@ -11,6 +11,8 @@ from unittest import mock
 
 from _ctx import ROOT
 
+from fae.experiment import Experiment
+
 try:
     from typer.testing import CliRunner
 except ImportError:                                    # pragma: no cover
@@ -200,37 +202,46 @@ class TestQueueCommands(unittest.TestCase):
         self.assertEqual(vars(ns), dict(selectors=["opus_r1"], dry_run=True))
 
 
-class TestRigCommands(unittest.TestCase):
+class TestExperimentCommands(unittest.TestCase):
+    """The verbs on the experiment as a whole are its Experiment's
+    (fae/experiment.py); `experiment infra` is check's."""
+
     def test_init_carries_the_experiment_directory(self):
-        (ns,), _ = invoke("init", ["experiment", "init"], mod=cli.rig)
-        self.assertEqual(vars(ns), dict(experiment=""))
-        (ns,), _ = invoke("init", ["experiment", "init", "--experiment", "shout"], mod=cli.rig)
-        self.assertEqual(ns.experiment, "shout")
+        args, _ = invoke("init", ["experiment", "init"], mod=Experiment)
+        self.assertEqual(args, ("",))
+        args, _ = invoke("init", ["experiment", "init", "--experiment", "shout"], mod=Experiment)
+        self.assertEqual(args, ("shout",))
 
     def test_infra_takes_no_arguments(self):
-        """fae/driver/rig.py's infra ignores its namespace entirely; an
-        earlier cli signature accepted an argument it silently discarded."""
-        (ns,), _ = invoke("infra", ["experiment", "infra"], mod=cli.rig)
+        """check.infra ignores its namespace entirely; an earlier cli
+        signature accepted an argument it silently discarded."""
+        (ns,), _ = invoke("infra", ["experiment", "infra"], mod=cli.check)
         self.assertEqual(vars(ns), {})
 
-    def test_smoke_carries_every_field_runs_smoke_reads(self):
-        """fae/driver/rig.py's smoke reads variants/only/rep/full_gate unconditionally;
-        the namespace must carry all four, with its own defaults."""
-        (ns,), _ = invoke("smoke", ["experiment", "smoke"], mod=cli.rig)
-        self.assertEqual(vars(ns), dict(variants="", only="", rep=1, full_gate=False))
-        (ns,), _ = invoke("smoke", ["experiment", "smoke", "--only", "alpha", "--rep", "2",
-                                    "--full-gate"], mod=cli.rig)
-        self.assertEqual(vars(ns), dict(variants="", only="alpha", rep=2, full_gate=True))
+    def test_smoke_carries_every_option(self):
+        _, kw = invoke("smoke", ["experiment", "smoke"], mod=Experiment)
+        self.assertEqual(kw, dict(variants="", only="", rep=1, full_gate=False))
+        _, kw = invoke("smoke", ["experiment", "smoke", "--only", "alpha", "--rep", "2",
+                                 "--full-gate"], mod=Experiment)
+        self.assertEqual(kw, dict(variants="", only="alpha", rep=2, full_gate=True))
 
     def test_prepare(self):
-        (ns,), _ = invoke("prepare", ["experiment", "prepare", "--reps", "2", "--task", "T2"],
-                          mod=cli.rig)
-        self.assertEqual(vars(ns), dict(agent="", reps=2, task="T2"))
-        (ns,), _ = invoke("prepare", ["experiment", "prepare", "--agent", "sonnet"], mod=cli.rig)
-        self.assertEqual(ns.agent, "sonnet")
+        with mock.patch.dict("os.environ", {}, clear=False) as env:
+            env.pop("FRESH", None)
+            args, kw = invoke("prepare", ["experiment", "prepare", "--agent", "sonnet",
+                                          "--reps", "2", "--task", "T2"], mod=Experiment)
+        self.assertEqual((args, kw), (("sonnet", 2, "T2"), dict(fresh=False)))
+
+    def test_prepare_needs_an_agent(self):
+        with mock.patch.dict("os.environ") as env, \
+                mock.patch.object(Experiment, "prepare") as m:
+            env.pop("AGENT", None)
+            result = runner.invoke(cli.app, ["experiment", "prepare"])
+        self.assertNotEqual(result.exit_code, 0)
+        m.assert_not_called()
 
     def _verb(self, argv):
-        with mock.patch.object(cli.rig, "verb_cmd", return_value=0) as m:
+        with mock.patch.object(Experiment, "verb", return_value=0) as m:
             result = runner.invoke(cli.app, argv)
         self.assertEqual(result.exit_code, 0, result.output)
         return m.call_args.args
@@ -246,7 +257,7 @@ class TestRigCommands(unittest.TestCase):
         self.assertEqual(self._verb(["experiment", "verb"]), ("", []))
 
     def test_verb_exits_with_the_commands_code(self):
-        with mock.patch.object(cli.rig, "verb_cmd", return_value=3):
+        with mock.patch.object(Experiment, "verb", return_value=3):
             self.assertEqual(runner.invoke(cli.app, ["experiment", "verb", "x"]).exit_code, 3)
 
 if __name__ == "__main__":

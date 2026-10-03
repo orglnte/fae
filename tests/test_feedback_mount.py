@@ -54,7 +54,7 @@ class TestFeedbackLogs(unittest.TestCase):
     def stage(self, names):
         from types import SimpleNamespace
         from unittest import mock
-        from fae.cell import experiment as _experiment
+        from fae import experiment as _experiment
         from fae.cell.cell import Cell
         ws = Path(tempfile.mkdtemp())
         for n in ("verify.log", "deploy.log", "tool.log", "other.log"):

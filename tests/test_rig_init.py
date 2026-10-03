@@ -11,7 +11,7 @@ from unittest import mock
 from _ctx import ROOT, runs
 
 from fae.cell import config as _config
-from fae.cell import experiment as _experiment
+from fae import experiment as _experiment
 
 try:
     import tomllib
@@ -55,26 +55,22 @@ class TestTheRenderedExperimentDir(unittest.TestCase):
 class TestTheVerb(unittest.TestCase):
     def test_experiment_names_the_directory_the_file_points_at(self):
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(runs.rig, "ROOT", Path(d)), \
-                mock.patch.dict(os.environ), \
-                mock.patch.object(runs.common, "definition",
-                                  return_value=_experiment.current()):
+                mock.patch.dict(os.environ):
             # a process runs one experiment: in the verb's own process nothing
             # is loaded before init, here the suite's definition stands in
-            runs.rig.init(runs.argparse.Namespace(experiment="calc"))
+            _experiment.Experiment(Path(d)).init(experiment="calc")
             doc = tomllib.loads((Path(d) / _config.TOML).read_text())
             self.assertEqual(doc["paths"]["experiment_dir"], "calc")
             self.assertEqual(os.environ["EXPERIMENT_DIR"], "calc")
 
     def test_it_writes_once_and_refuses_to_overwrite(self):
-        with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(runs.rig, "ROOT", Path(d)):
-            runs.rig.init(runs.argparse.Namespace())
+        with tempfile.TemporaryDirectory() as d:
+            _experiment.Experiment(Path(d)).init()
             target = Path(d) / _config.TOML
             self.assertTrue(target.is_file())
             target.write_text("# edited\n")
             with self.assertRaises(SystemExit):
-                runs.rig.init(runs.argparse.Namespace())
+                _experiment.Experiment(Path(d)).init()
             self.assertEqual(target.read_text(), "# edited\n")
 
     def test_the_cli_has_the_verb(self):

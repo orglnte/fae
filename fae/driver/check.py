@@ -16,18 +16,109 @@ from __future__ import annotations
 
 import importlib
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Callable
 
+from fae import paths as _paths
 from fae.driver import common
 
 HOWTO = "HOWTO.md"
+
+
+# --- the host carries the variants: their infra and verify images ---------
+
+def _authorable_error(vid):
+    from fae.cell.surface import authorable
+    try:
+        authorable(vid)
+    except RuntimeError as e:
+        return str(e)
+    return ""
+
+
+def probe_variants(variants=None):
+    """Every variant's own preflight (its infra's ok(): the daemon, the tools)
+    and the image its cells are verified in, built here when missing —
+    printed one per line; the count refused."""
+    from fae.cell import variants as _tr
+    bad = 0
+    for vid in sorted(variants or common.definition().active):
+        cell = _tr._ShimCell(f"infra-probe-{vid}", "/nonexistent", common.ROOT)
+        cell.variant = vid
+        infra = _tr.for_cell(cell)
+        ok, note = True, ""
+        if not _tr.liveness_declared(infra.variant):
+            ok, note = False, f"{type(infra).__name__} declares no alive() probe"
+        elif (undeclared := _authorable_error(vid)):
+            ok, note = False, undeclared
+        elif not infra.ok():
+            ok = False
+        if ok:
+            try:
+                note = infra.image()
+            except RuntimeError as e:
+                ok, note = False, f"verify image: {str(e).splitlines()[0]}"
+        print(f"  [{'ok' if ok else 'HALT'}] {vid}  {note}")
+        bad += not ok
+    return bad
+
+
+def infra(args):
+    """`experiment infra`: can this host carry each variant? Every active
+    variant's preflight and verify image (probe_variants), then a sweep of
+    stale infra. Nothing per cell is created. Exit 1 if any is refused."""
+    bad = probe_variants()
+    from fae.cell import variants as _tr
+    for infra_cls in {cls.INFRA for cls in _tr.registry().values()}:
+        infra_cls.sweep()
+    if bad:
+        sys.exit(f"infra: {bad} variant(s) refused — see hooks.log lines above")
+
+
+# --- the transitions replay against the model ------------------------------
+
+TLA_DIR = _paths.ENGINE.parent / ".tla"      # the engine repo's model
+CONFORMANCE_SINCE = TLA_DIR / "conformance-since"
+_ISO_Z = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+
+def tla_verify_path():
+    """The TLA+ trace checker: $FAE_TLA_VERIFY, else the one fae ships
+    (fae/utils/tla_verify.py); None when the variable names no file."""
+    p = os.environ.get("FAE_TLA_VERIFY") or str(_paths.ENGINE / "utils" / "tla_verify.py")
+    return p if Path(p).is_file() else None
+
+
+def conformance_since():
+    """['--since', <instant>] for tla_verify, or [] when no cutoff is declared.
+
+    A cutoff in the future would judge nothing, which is a green check that
+    proves nothing — refused rather than honoured.
+    """
+    from datetime import datetime, timezone
+    try:
+        body = CONFORMANCE_SINCE.read_text()
+    except OSError:
+        return []
+    vals = [l.strip() for l in body.splitlines() if l.strip() and not l.startswith("#")]
+    if not vals:
+        return []
+    since = vals[-1]
+    if not _ISO_Z.match(since):
+        print(f"  (ignoring {CONFORMANCE_SINCE.name}: '{since}' is not "
+              f"YYYY-MM-DDTHH:MM:SSZ — judging the whole trace)")
+        return []
+    if since > f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}":
+        print(f"  (ignoring {CONFORMANCE_SINCE.name}: {since} is in the "
+              f"future, which would judge nothing — judging the whole trace)")
+        return []
+    return ["--since", since]
 
 
 @dataclass
@@ -64,7 +155,7 @@ class Ctx:
 
     def forget(self):
         """Drop the loaded definition, so a retry sees the files as they are now."""
-        from fae.cell import experiment as _experiment
+        from fae import experiment as _experiment
         _experiment.unload()
         self._definition = None
 
@@ -223,8 +314,7 @@ def _seeds(ctx):
 
 
 def _infra(ctx):
-    from fae.driver import rig
-    bad = rig.probe_variants(ctx.selected())
+    bad = probe_variants(ctx.selected())
     return [Finding(not bad, "every variant's infra and verify image" if not bad
                     else f"{bad} variant(s) refused this host (the lines above name why)",
                     "fix what the refused variant's line names; then "
@@ -289,19 +379,18 @@ def _leftovers(ctx):
 
 def _trace(ctx):
     from fae.cell import config as _config
-    from fae.driver import rig
-    tool = rig.tla_verify_path()
+    tool = tla_verify_path()
     if tool is None:
         return [Finding(False, "no TLA+ trace checker",
                         "unset FAE_TLA_VERIFY to use fae/utils/tla_verify.py, or point it at a file")]
     log = common.TRANSITIONS_LOG
     if not (log.exists() and log.stat().st_size):
         return [Finding(True, "no transitions recorded yet: nothing to replay")]
-    spec = sorted(rig.TLA_DIR.glob("*.tla"))
+    spec = sorted(TLA_DIR.glob("*.tla"))
     # the checker's constants are the fleet's, not this shell's
     slots = str(_config.load(ctx.root).values.get("WORK_SLOTS") or 8)
     r = subprocess.run(["python3", tool, "--live-trace", str(log)]
-                       + ([str(spec[0])] if spec else []) + rig.conformance_since(),
+                       + ([str(spec[0])] if spec else []) + conformance_since(),
                        cwd=ctx.root, capture_output=True, text=True,
                        env=dict(os.environ, WORK_SLOTS=slots))
     judged = [l for l in r.stdout.splitlines()
@@ -316,11 +405,9 @@ def _trace(ctx):
 
 
 def _pipeline(ctx):
-    from fae.driver import rig
+    exp = common.experiment()
     try:
-        rig.smoke(SimpleNamespace(variants=",".join(v for v in rig.smoke_variants()
-                                                    if v in ctx.selected()),
-                                  only="", rep=1, full_gate=False))
+        exp.smoke(variants=",".join(v for v in exp.smoke_variants() if v in ctx.selected()))
         rc = 0
     except SystemExit as e:
         rc = e.code if isinstance(e.code, int) else 1

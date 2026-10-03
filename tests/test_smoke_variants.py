@@ -15,7 +15,7 @@ class TestOneSmokePerWayOfBeingJudged(unittest.TestCase):
         self.d = runs.common.definition()
 
     def test_variants_that_differ_only_in_their_inputs_share_one(self):
-        picked = runs.rig.smoke_variants()
+        picked = runs.common.experiment().smoke_variants()
         self.assertEqual(len([v for v in picked if v.startswith("alpha_")]), 1)
         self.assertEqual(len([v for v in picked if v.startswith("beta_")]), 1)
 
@@ -24,12 +24,12 @@ class TestOneSmokePerWayOfBeingJudged(unittest.TestCase):
             def alive(self):
                 return True
         with mock.patch.object(self.d.variant("alpha_howto"), "INFRA", Other):
-            picked = runs.rig.smoke_variants()
+            picked = runs.common.experiment().smoke_variants()
         self.assertIn("alpha_howto", picked)
 
     def test_another_access_is_another_way(self):
         with mock.patch.object(self.d.variant("alpha_howto"), "ACCESS_INFRA", True):
-            self.assertIn("alpha_howto", runs.rig.smoke_variants())
+            self.assertIn("alpha_howto", runs.common.experiment().smoke_variants())
 
 
 if __name__ == "__main__":

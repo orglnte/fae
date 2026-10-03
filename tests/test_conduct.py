@@ -303,7 +303,7 @@ class TestPreflight(unittest.TestCase):
     def test_every_arm_is_probed_and_a_refusal_is_a_note(self):
         # The experiment's infra (its daemons, images, tools) is the
         # variants' own preflight; conduct runs it and reports, never installs.
-        with mock.patch.object(runs.rig, "probe_variants", return_value=2) as probe:
+        with mock.patch.object(runs.check, "probe_variants", return_value=2) as probe:
             ok, calls = self._run({})
         self.assertTrue(ok, "a refused arm is a note, not a stop")
         self.assertEqual(probe.call_count, 1)

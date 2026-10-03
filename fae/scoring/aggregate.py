@@ -522,7 +522,7 @@ def _definition():
     for p in (str(REPO_ROOT), str(_paths.ENGINE.parent)):
         if p not in sys.path:
             sys.path.insert(0, p)
-    from fae.cell import experiment as _experiment
+    from fae import experiment as _experiment
     return _experiment.current()
 
 
