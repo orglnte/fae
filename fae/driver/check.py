@@ -99,6 +99,12 @@ def _prerequisites(ctx):
             ok = False
         out.append(Finding(ok, "docker daemon " + ("answers" if ok else "unreachable"),
                            "start Docker, then `docker info` must succeed"))
+    from fae import mutex as _mutex
+    from fae.driver import common as _common
+    local, fstype = _mutex.fs_is_local(_common.WS)
+    if local is False:
+        out.append(Finding(True, f"WARNING: workspaces on {fstype}, not a local disk: ledger "
+                                 f"appends from conduct and a cell can interleave"))
     return out
 
 
