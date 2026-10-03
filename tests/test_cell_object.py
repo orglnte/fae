@@ -62,13 +62,10 @@ class TestTheTwoVocabulariesCannotDisagree(CellTestCase):
         # describe the same cell differently.
         self.assertEqual(set(Phase), set(cell.PHASE_TO_LOOP))
 
-    def test_a_cell_queued_for_its_arm_is_still_TLA_agent(self):
-        # It already holds the work slot; calling it `idle` would let a second
-        # cell believe the slot is free.
-        self.assertIs(cell.PHASE_TO_LOOP[Phase.ARM_LOCK], Loop.AGENT)
-
-    def test_a_cell_queued_for_a_work_slot_holds_nothing(self):
-        self.assertIs(cell.PHASE_TO_LOOP[Phase.SLOT_WAIT], Loop.IDLE)
+    def test_a_cell_in_setup_is_TLA_agent(self):
+        # It was admitted holding its slots; calling it `idle` would let a
+        # second cell believe the slot is free.
+        self.assertIs(cell.PHASE_TO_LOOP[Phase.SETUP], Loop.AGENT)
 
     def test_only_the_verify_phase_is_TLA_verify(self):
         # verify-lock is QUEUED for the verify, not verifying: mapping it to
@@ -80,31 +77,28 @@ class TestTheTwoVocabulariesCannotDisagree(CellTestCase):
 
 class TestTheTransitionTableRefuses(CellTestCase):
 
-    def test_a_second_spawn_on_a_live_loop_is_illegal(self):
+    def test_a_second_admission_on_a_live_loop_is_illegal(self):
         # THE 2026-08-18 failure: a cell readmitted while the model still had
         # its previous loop live. 12 of these produced 71 replay violations.
         c = self.cell()
-        c.apply(T.SPAWN)
+        c.apply(T.ADMIT)
         with self.assertRaises(cell.IllegalTransition):
-            c.apply(T.SPAWN)
+            c.apply(T.ADMIT)
 
-    def test_a_slot_cannot_be_acquired_twice(self):
+    def test_a_paused_cell_is_not_admitted(self):
         c = self.cell()
-        c.apply(T.SPAWN)
-        c.apply(T.ACQUIRE_SLOT)
+        c.apply(T.PAUSE)
         with self.assertRaises(cell.IllegalTransition):
-            c.apply(T.ACQUIRE_SLOT)
+            c.apply(T.ADMIT)
 
     def test_verifying_without_an_attempt_is_illegal(self):
         c = self.cell()
-        c.apply(T.SPAWN)
         with self.assertRaises(cell.IllegalTransition):
-            c.apply(T.ACQUIRE_VERIFY)      # still `idle`, no slot
+            c.apply(T.ACQUIRE_VERIFY)      # not admitted, no slot
 
     def test_the_rig_is_only_taken_under_a_verify(self):
         c = self.cell()
-        c.apply(T.SPAWN)
-        c.apply(T.ACQUIRE_SLOT)
+        c.apply(T.ADMIT)
         with self.assertRaises(cell.IllegalTransition):
             c.apply(T.ACQUIRE_RIG)
 
@@ -119,7 +113,7 @@ class TestTheTransitionTableRefuses(CellTestCase):
         # The inverse: a table that refuses everything would pass every test
         # above and be useless.
         c = self.cell()
-        for t in (T.SPAWN, T.ACQUIRE_SLOT, T.ACQUIRE_VERIFY, T.ACQUIRE_RIG,
+        for t in (T.ADMIT, T.ACQUIRE_VERIFY, T.ACQUIRE_RIG,
                   T.RELEASE_RIG, T.VERIFY_GREEN):
             c.apply(t)
         self.assertIs(c.state.loop, Loop.NONE)
@@ -130,36 +124,36 @@ class TestApplyingAndRecordingAreOneAct(CellTestCase):
 
     def test_a_legal_transition_is_recorded(self):
         c = self.cell()
-        c.apply(T.SPAWN)
-        self.assertEqual(self.transitions(), ["Spawn"])
+        c.apply(T.ADMIT)
+        self.assertEqual(self.transitions(), ["Admit"])
 
     def test_an_illegal_transition_records_NOTHING(self):
         # If the refusal still logged, the log would describe a fleet that
         # never existed — which is precisely the failure mode being closed.
         c = self.cell()
-        c.apply(T.SPAWN)
+        c.apply(T.ADMIT)
         with self.assertRaises(cell.IllegalTransition):
-            c.apply(T.SPAWN)
-        self.assertEqual(self.transitions(), ["Spawn"])
+            c.apply(T.ADMIT)
+        self.assertEqual(self.transitions(), ["Admit"])
 
 
 class TestAttemptArithmeticMatchesTheSpec(CellTestCase):
 
-    def test_an_attempt_begins_when_the_slot_is_taken(self):
+    def test_an_attempt_begins_when_the_cell_is_admitted(self):
         c = self.cell()
-        c.apply(T.SPAWN); c.apply(T.ACQUIRE_SLOT)
+        c.apply(T.ADMIT)
         self.assertEqual(c.state.attempts, 1)
 
     def test_an_attempt_abandoned_before_judgement_is_not_spent(self):
         # The respawn redoes it. Counting it would charge the cell for a crash.
         c = self.cell()
-        c.apply(T.SPAWN); c.apply(T.ACQUIRE_SLOT)
+        c.apply(T.ADMIT)
         c.apply(T.CRASH)
         self.assertEqual(c.state.attempts, 0)
 
-    def test_a_stand_down_before_the_slot_costs_nothing(self):
+    def test_a_stand_down_refunds_the_unjudged_attempt(self):
         c = self.cell()
-        c.apply(T.SPAWN)
+        c.apply(T.ADMIT)
         c.apply(T.PAUSE)
         c.apply(T.STAND_DOWN)
         self.assertEqual(c.state.attempts, 0)
@@ -189,7 +183,7 @@ class TestSealedCellsAreReadOnly(CellTestCase):
     def test_running_is_refused(self):
         c = self.cell(sealed=self.SEAL)
         with self.assertRaises(cell.Sealed):
-            c.run()
+            c.run(ignore_slots=True)
 
     def test_checkpointing_is_refused(self):
         c = self.cell(sealed=self.SEAL)
@@ -953,8 +947,7 @@ class TestOneReleasePerSlot(CellTestCase):
     def test_the_driver_clears_its_holder_note_as_it_emits(self):
         h = self._holder()
         c = self.cell()
-        c.apply(T.SPAWN)
-        c.apply(T.ACQUIRE_SLOT)
+        c.apply(T.ADMIT)
         c.release_slot("cell end")
         self.assertFalse(h.exists())
         self.assertEqual(self.transitions().count("ReleaseSlot"), 1)
@@ -963,8 +956,7 @@ class TestOneReleasePerSlot(CellTestCase):
         h = self._holder()
         h.write_text("someone_else_high_beta_apidocs_T1_r7 999\n")
         c = self.cell()
-        c.apply(T.SPAWN)
-        c.apply(T.ACQUIRE_SLOT)
+        c.apply(T.ADMIT)
         c.release_slot("cell end")
         self.assertTrue(h.exists())
 
@@ -994,7 +986,7 @@ class TestOnePausePerPause(CellTestCase):
         self._log().write_text(
             f"2026-08-22T10:00:00Z\tPause\t{self.CID}\treason=manual\n")
         c = self.cell()
-        c.apply(T.SPAWN)
+        c.apply(T.ADMIT)
         c.note_pause()
         self.assertEqual(self._pauses(), 1)          # only the command's
         self.assertEqual(c.state.intent, "paused")   # but locally honored
@@ -1002,7 +994,7 @@ class TestOnePausePerPause(CellTestCase):
 
     def test_a_raw_file_pause_is_self_healed(self):
         c = self.cell()
-        c.apply(T.SPAWN)
+        c.apply(T.ADMIT)
         c.note_pause()
         self.assertEqual(self._pauses(), 1)          # the driver's own
         c.apply(T.STAND_DOWN, "attempt-boundary")

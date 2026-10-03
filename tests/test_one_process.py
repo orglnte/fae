@@ -89,7 +89,8 @@ class TestNoPythonChildProcesses(unittest.TestCase):
         # the test and be argued for explicitly.
         allowed = {"bash", "docker", "kubectl", "cp", "k6", "git",
                    "kind", "curl", "ps", "lsof",   # the variants' infra CLIs
-                   "caffeinate"}                   # macOS idle-sleep assertion
+                   "caffeinate",                   # macOS idle-sleep assertion
+                   "npm"}                          # the agent clients' upstream versions
         found = set()
         for f in sorted(PKG.glob("*.py")):
             for m in re.finditer(r'subprocess\.(?:run|Popen)\(\[\s*"([a-z0-9_]+)"',
@@ -285,12 +286,14 @@ class TestTheRunLoopTakesItsLocksAndProvisionsItsArm(unittest.TestCase):
         self.assertIn("self.LOCK_EXIT", b)
 
     def test_the_slots_are_held_across_the_setup_hook(self):
-        # Without its slots a cell takes no work slot and no lock slot, and
-        # every cap is bypassed.
+        # Without its slots a cell holds no work slot and no lock slot, and
+        # every cap is bypassed: it runs only on the slots handed to it, or
+        # when asked explicitly to run without.
         b = self.block()
-        self.assertIn("slots, queue = self.acquire_slots()", b)
-        self.assertLess(b.index("slots, queue = self.acquire_slots()"),
+        self.assertIn("slots = self.queues.adopt_slots(self.cid, handed)", b)
+        self.assertLess(b.index("slots = self.queues.adopt_slots(self.cid, handed)"),
                         b.index("self.setup()"))
+        self.assertIn("elif not ignore_slots:", b)
         self.assertIn("slots.close()", b)
 
     def test_setup_and_teardown_both_run(self):
@@ -413,14 +416,14 @@ class TestTheCellTakesItsOwnLocks(unittest.TestCase):
     def test_the_slot_is_taken_before_the_hook_provisions(self):
         b = self.BODY[self.BODY.index("    def run(self, stub_overlay"):]
         b = b[:b.index("\n    def ", 10)]
-        self.assertLess(b.index("self.acquire_slots()"), b.index("self.setup()"))
+        self.assertLess(b.index("self.queues.adopt_slots("), b.index("self.setup()"))
 
     def test_the_slot_is_held_for_the_CELL_not_per_attempt(self):
         # Releasing between attempts would leave the next one with no slot to
         # verify under, and the model would refuse its AcquireVerify.
         b = self.BODY[self.BODY.index("    def run(self, stub_overlay"):]
         loop = b[b.index("for attempt in range("):b.index("self._append(\"END\"")]
-        self.assertNotIn("ACQUIRE_SLOT", loop)
+        self.assertNotIn("T.ADMIT", loop)
         # the one release inside the loop is on the rig-fault path, which ends
         # the cell rather than continuing to the next attempt — by returning or
         # by raising Halt, which carries the exit code out to the supervisor
@@ -430,26 +433,18 @@ class TestTheCellTakesItsOwnLocks(unittest.TestCase):
                 self.assertTrue("return None" in after or "raise Halt" in after,
                                 line.strip())
 
-    def test_the_arm_lock_is_taken_after_the_work_slot(self):
-        # A cell queuing for the scarce arm already holds the work slot; the
-        # reverse order blocks a slot waiter behind an arm waiter.
-        b = QUEUES_SRC[QUEUES_SRC.index("    def acquire_slots(self"):]
+    def test_the_lock_slot_is_taken_after_the_work_slot(self):
+        # Without a free work slot no lock slot is touched, and a busy lock
+        # pool gives the work slot back: nothing is held while waiting.
+        b = QUEUES_SRC[QUEUES_SRC.index("    def try_slots(self"):]
         b = b[:b.index("\n    def ", 10)]
-        self.assertLess(b.index('"work-slots"'), b.index('f"arm-lock['))
-
-    def test_an_operator_pause_in_either_queue_stands_the_cell_down(self):
-        # Each queue returns ITS OWN name, so the StandDown names the queue
-        # it happened in instead of blaming the work-slot queue for both.
-        b = QUEUES_SRC[QUEUES_SRC.index("    def acquire_slots(self"):]
-        b = b[:b.index("\n    def ", 10)]
-        self.assertIn('return slots, "slot-queue"', b)
-        self.assertIn('return slots, "arm-lock-queue"', b)
+        self.assertIn('("work", "lock") if lock else ("work",)', b)
+        self.assertIn("slots.close()\n                    return None, pool", b)
 
     def test_a_failed_attempt_leaves_the_cell_able_to_verify_again(self):
         from fae.cell.fsm import State, T, step
         s = State()
-        for t in (T.SPAWN, T.ACQUIRE_SLOT):
-            step(s, t)
+        step(s, T.ADMIT)
         for _ in range(3):
             step(s, T.ACQUIRE_VERIFY)
             step(s, T.VERIFY_FAIL)
@@ -495,7 +490,7 @@ class TestTheContractStandDownIsAModeledPath(unittest.TestCase):
     def test_void_then_pause_then_stand_down_is_legal_below_budget(self):
         from fae.cell.fsm import State, T, step
         s = State()
-        for t in (T.SPAWN, T.ACQUIRE_SLOT, T.ACQUIRE_VERIFY, T.VERIFY_FAIL, T.PAUSE, T.STAND_DOWN):
+        for t in (T.ADMIT, T.ACQUIRE_VERIFY, T.VERIFY_FAIL, T.PAUSE, T.STAND_DOWN):
             step(s, t)
         self.assertEqual(s.intent, "paused")
         self.assertIsNone(s.outcome)
@@ -519,10 +514,16 @@ class TestTheStubFlagIsTheRigDebugPath(unittest.TestCase):
         seen = {}
 
         class FakeCell:
+            IGNORE_SLOTS_ENV = "CELL_IGNORE_SLOTS"
+
             def __init__(self, cid):
-                self._env = {}
                 self.ws = "/w"
-            def run(self, stub_overlay=None):
+
+            @classmethod
+            def new(cls, cid, task, variant, rep, reference=False):
+                return cls(cid)
+
+            def run(self, stub_overlay=None, ignore_slots=False):
                 seen["stub"] = stub_overlay
                 return "green"
         with mock.patch.object(entry, "Cell", FakeCell), \

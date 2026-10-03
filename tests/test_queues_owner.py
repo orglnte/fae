@@ -13,8 +13,7 @@ from _ctx import ROOT, _EXPERIMENT
 # Entries of .queues/ named as a path segment (`a / "queue"`).
 SEGMENTS = {"queue", "running", "done", "backups", "work-slots"}
 # Names and name prefixes that only .queues/ uses, in any string.
-NAMES = (".queues", "work-slots", "weekly.json", "agent-io.json", "agent_image.json",
-         "agent_clients.json", "queues-lock")
+NAMES = (".queues", "work-slots", "weekly.json", "agent-io.json", "queues-lock")
 PREFIXES = ("arm-", "slot-", "cooldown.")
 OWNER = "queues.py"
 # fae/plane.py says where .queues/ is, and nothing about what is in it.

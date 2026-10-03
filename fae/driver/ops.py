@@ -58,9 +58,9 @@ def _crash_before_spawn(cid):
     then the previous loop ended without saying so.
 
     Skipping this is what produced the 2026-08-18 trace: a cell whose setup
-    failed was readmitted every ~32s, far inside the grace, so four Spawns
+    failed was readmitted every ~32s, far inside the grace, so four admissions
     replayed as illegal and — worse — each left a slot held by a cell that had
-    none. Those leaked slots eventually made AcquireSlot un-enabled for the
+    none. Those leaked slots eventually made Admit un-enabled for the
     whole fleet, and the replay was then judging a world that did not exist.
     """
     last = common._last_transitions().get(cid)
@@ -76,7 +76,7 @@ def _crash_before_spawn(cid):
     return True
 
 
-def _spawn_detached(argv, env, cid, what="spawn"):
+def _spawn_detached(argv, env, cid, what="spawn", pass_fds=()):
     """Launch a detached cell driver, then confirm it did not die on the spot.
 
     The driver refuses a run BEFORE it writes anything for a whole class of
@@ -122,7 +122,7 @@ def _spawn_detached(argv, env, cid, what="spawn"):
         e.flush()
         p = subprocess.Popen(argv, cwd=common.ROOT, env=env,
                              stdout=subprocess.DEVNULL, stderr=e,
-                             start_new_session=True)
+                             start_new_session=True, pass_fds=tuple(pass_fds))
     time.sleep(SPAWN_PROBE_S)
     if p.poll() is None:
         return None                     # alive; an int is the immediate exit code
@@ -140,15 +140,41 @@ def _cell_argv(task, variant, rep):
     return [sys.executable, "-m", "fae.cell", task, variant, str(rep)]
 
 
-def spawn_spec(agent, spec, cid, what):
-    """Start one cell from its spec. Returns the spawn rc (None = alive)."""
-    prestart_clean(cid)
+def start_cell(cell, agent, slots=None, what="spawn"):
+    """Start the cell's process. With `slots`, it is handed their open files
+    and runs holding them; without, it is asked to run without slots. The
+    caller closes its own copies of `slots` afterwards. Returns the start's rc
+    (None: alive)."""
+    from fae.cell import Cell
+    prestart_clean(cell.cid)
     env = dict(os.environ, AGENT=agent)
-    if spec.get("fresh"):
-        env["FRESH"] = "1"
-    return _spawn_detached(
-        _cell_argv(spec.get("task", "T1"), spec["variant"], spec["rep"]),
-        env, cid, what)
+    env.pop(Cell.SLOT_FDS_ENV, None)
+    env.pop(Cell.IGNORE_SLOTS_ENV, None)
+    if slots is not None:
+        env[Cell.SLOT_FDS_ENV] = slots.handover()
+    else:
+        env[Cell.IGNORE_SLOTS_ENV] = "1"
+    return _spawn_detached(_cell_argv(cell.task, cell.variant, cell.rep), env, cell.cid,
+                           what, pass_fds=slots.fds() if slots is not None else ())
+
+
+def refuse_while_the_run_is_up(verb, ignore):
+    """A manual start runs without slots; while the run admits cells with
+    theirs, it would run outside the cap. Returns the refusal, or None."""
+    from fae.driver.conduct import Conduct
+    pid = Conduct().pid()
+    if pid and not ignore:
+        return (f"refusing to {verb}: the run is up (pid {pid}) and admits cells with "
+                f"their slots; a manual start runs without slots, outside the cap. "
+                f"Pass --dangerously-ignore-slots to start it anyway")
+    return None
+
+
+def warn_shared_resource(cell):
+    """A variant with a lock shares a resource its slots ration."""
+    if cell.arm:
+        print(f"WARNING: {cell.variant} uses the shared resource '{cell.arm}'; started "
+              f"without its slot, other cells using it may run at the same time")
 
 
 def _matches(cid, sel):
@@ -217,7 +243,7 @@ def queued_cids_many(selectors):
 
 def request_pause(cids, reason, who="operator"):
     """Write the per-cell stop request. COOPERATIVE: loops poll it at their own
-    safe points (attempt boundary, arm-lock queue, retry sleep) and exit
+    safe points (attempt boundary, verify-lock queue, retry sleep) and exit
     through their teardown trap.
 
     Nothing is signalled. The old pause SIGSTOPped loops, which is not a pause
@@ -510,7 +536,8 @@ def resume(args):
                     except (FileExistsError, OSError):
                         pass
                     break
-        if _respawn(st, dry=False):
+        if _respawn(st, dry=False,
+                    ignore_slots=getattr(args, "dangerously_ignore_slots", False)):
             acted.append("respawned")
         elif claimed is not None:
             qs.release(agent, claimed, front=True)
@@ -617,8 +644,9 @@ def _variant_teardown(variant, cid, timeout=None):
     def run():
         sys.path.insert(0, str(common.ROOT))
         from fae.cell import Cell
-        c = Cell(cid, workspaces=common.WS, root=common.ROOT)
-        c._env.setdefault("VARIANT", variant)
+        p = common.parse_cell_id(cid)
+        c = Cell.new(cid, p[2] if p else "T1", variant, p[3] if p else 1,
+                     workspaces=common.WS, root=common.ROOT)
         try:
             c.teardown()
         except Exception as e:           # Cell.teardown already ALERTs; a
@@ -890,11 +918,9 @@ def spawn(args):
                  "for several reps enqueue them (top-up / queue add) and let "
                  "`experiment run` admit under its caps")
 
-    if args.agent != "human":
-        from fae.driver import image
-        if not image.ensure_agent_for(args.variant):
-            sys.exit(f"refusing: the agent image for {args.variant} could not be built "
-                     f"(the lines above say why)")
+    refusal = refuse_while_the_run_is_up("spawn", getattr(args, "dangerously_ignore_slots", False))
+    if refusal:
+        sys.exit(refusal)
 
     live = state.loop_parents()
     for rep in reps:
@@ -917,24 +943,26 @@ def spawn(args):
             if (ws / ".cancelled").exists():
                 print(f"skipping {cid}: already DONE·cancelled — use --fresh to force a new run")
                 continue
+        from fae.cell import Cell
+        cell = Cell.new(cid, args.task, args.variant, rep, agent=args.agent,
+                        workspaces=common.WS, root=common.ROOT, queues=common.queues())
+        if not cell.ready_image():
+            sys.exit(f"refusing: the agent image for {args.variant} could not be built "
+                     f"(the lines above say why)")
+        warn_shared_resource(cell)
         prestart_clean(cid)
+        cell.prepare(fresh=args.fresh)
         if args.agent == "human":
             # human pseudo-agent is INTERACTIVE (the driver pauses on a tty
             # each attempt) — print the command for the person's own terminal
             # instead of detaching it. Same cell machinery, budget and verify.
             print(f"HUMAN cell {cid} — run this in YOUR terminal (tmux for long sessions):\n")
-            print(f"  cd {common.ROOT} && "
-                  + (f"FRESH=1 " if args.fresh else "")
-                  + f"AGENT=human "
+            print(f"  cd {common.ROOT} && {Cell.IGNORE_SLOTS_ENV}=1 AGENT=human "
                   f"python3 -m fae.cell {args.task} {args.variant} {rep}\n")
             print("Each attempt: edit workspaces*/{cid}/artifacts, press ENTER to "
                   "verify (q to stop).".format(cid=cid))
             continue
-        env = dict(os.environ, AGENT=args.agent)
-        if args.fresh:
-            env["FRESH"] = "1"
-        if _spawn_detached(_cell_argv(args.task, args.variant, rep),
-                           env, cid, "spawn") is None:
+        if start_cell(cell, args.agent, what="spawn") is None:
             print(f"spawned {cid}")
 
 
@@ -999,7 +1027,7 @@ def unflag(cid):
     return True
 
 
-def _respawn(st, dry):
+def _respawn(st, dry, ignore_slots=False):
     """Resume a cell: same spawn as `spawn`, NEVER --fresh (attempts persist).
 
     True only when a loop was actually launched — the caller owns the spec and
@@ -1023,10 +1051,19 @@ def _respawn(st, dry):
     if state.loop_parents().get(cid):
         common._rec_log(f"{cid} respawn skipped — a live loop already owns the workspace")
         return False
-    prestart_clean(cid)
-    env = dict(os.environ, AGENT=st["agent"])
-    if _spawn_detached(_cell_argv(st["task"], st["variant"], st["rep"]),
-                       env, cid, "respawn") is not None:
+    refusal = refuse_while_the_run_is_up("respawn", ignore_slots)
+    if refusal:
+        common._rec_log(f"{cid} {refusal}")
+        print(refusal)
+        return False
+    from fae.cell import Cell
+    cell = Cell.new(cid, st["task"], st["variant"], st["rep"], agent=st["agent"],
+                    workspaces=common.WS, root=common.ROOT, queues=common.queues())
+    if not cell.ready_image():
+        common._rec_log(f"{cid} respawn FAILED: its agent image could not be built")
+        return False
+    warn_shared_resource(cell)
+    if start_cell(cell, st["agent"], what="respawn") is not None:
         # Do NOT bump the respawn budget for a launch that never started: a
         # cell refused on a preflight would otherwise walk to MAX_RESPAWNS and
         # be flagged for a human, with the real cause never reported anywhere.

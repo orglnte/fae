@@ -41,8 +41,8 @@ class TestAFreshCell(unittest.TestCase):
         self.assertIs(s.rig_held, False)
         self.assertIsNone(s.outcome)
 
-    def test_admits_only_spawn_pause_and_kill(self):
-        self.assertEqual(enabled(State()), {T.SPAWN, T.PAUSE, T.KILL})
+    def test_admits_only_admit_pause_and_kill(self):
+        self.assertEqual(enabled(State()), {T.ADMIT, T.PAUSE, T.KILL})
 
     def test_renders_each_hold_as_a_definite_boolean(self):
         # The repr is what an IllegalTransition shows the operator; a hold
@@ -64,14 +64,14 @@ class TestEveryPhaseHasALoop(unittest.TestCase):
 class TestAcquiring(unittest.TestCase):
 
     def test_the_slot_is_held_and_the_attempt_is_charged(self):
-        s = run(T.SPAWN, T.ACQUIRE_SLOT)
+        s = run(T.ADMIT)
         self.assertIs(s.slot_held, True)
         self.assertIs(s.loop, Loop.AGENT)
         self.assertEqual(s.attempts, 1)
-        self.assertNotIn(T.ACQUIRE_SLOT, enabled(s))
+        self.assertNotIn(T.ADMIT, enabled(s))
 
     def test_the_verify_is_held_while_verifying(self):
-        s = run(T.SPAWN, T.ACQUIRE_SLOT, T.ACQUIRE_VERIFY)
+        s = run(T.ADMIT, T.ACQUIRE_VERIFY)
         self.assertIs(s.verify_held, True)
         self.assertIs(s.loop, Loop.VERIFY)
         self.assertEqual(
@@ -80,7 +80,7 @@ class TestAcquiring(unittest.TestCase):
              T.CRASH, T.PAUSE, T.KILL})
 
     def test_the_rig_is_taken_released_and_can_be_taken_again(self):
-        s = run(T.SPAWN, T.ACQUIRE_SLOT, T.ACQUIRE_VERIFY, T.ACQUIRE_RIG)
+        s = run(T.ADMIT, T.ACQUIRE_VERIFY, T.ACQUIRE_RIG)
         self.assertIs(s.rig_held, True)
         refuses(self, s, T.ACQUIRE_RIG)
         step(s, T.RELEASE_RIG)
@@ -93,7 +93,7 @@ class TestAcquiring(unittest.TestCase):
 class TestAGreenVerdict(unittest.TestCase):
 
     def test_ends_the_loop_and_gives_everything_back(self):
-        s = run(T.SPAWN, T.ACQUIRE_SLOT, T.ACQUIRE_VERIFY, T.ACQUIRE_RIG,
+        s = run(T.ADMIT, T.ACQUIRE_VERIFY, T.ACQUIRE_RIG,
                 T.VERIFY_GREEN)
         self.assertEqual(s.outcome, "green")
         self.assertIs(s.loop, Loop.NONE)
@@ -103,17 +103,17 @@ class TestAGreenVerdict(unittest.TestCase):
         self.assertEqual(s.attempts, 1)
 
     def test_a_finished_cell_holds_nothing_to_release_and_cannot_respawn(self):
-        s = run(T.SPAWN, T.ACQUIRE_SLOT, T.ACQUIRE_VERIFY, T.ACQUIRE_RIG,
+        s = run(T.ADMIT, T.ACQUIRE_VERIFY, T.ACQUIRE_RIG,
                 T.VERIFY_GREEN)
         self.assertEqual(enabled(s), {T.PAUSE, T.KILL})
         refuses(self, s, T.RELEASE_RIG)
-        refuses(self, s, T.SPAWN)
+        refuses(self, s, T.ADMIT)
 
 
 class TestAFailedVerdict(unittest.TestCase):
 
     def test_returns_the_cell_to_the_agent_keeping_the_slot_and_the_charge(self):
-        s = run(T.SPAWN, T.ACQUIRE_SLOT, T.ACQUIRE_VERIFY, T.VERIFY_FAIL)
+        s = run(T.ADMIT, T.ACQUIRE_VERIFY, T.VERIFY_FAIL)
         self.assertIs(s.loop, Loop.AGENT)
         self.assertIs(s.slot_held, True)
         self.assertIs(s.verify_held, False)
@@ -129,31 +129,28 @@ class TestAbandoningAnAttempt(unittest.TestCase):
     def test_ending_the_loop_frees_every_hold_and_lets_the_cell_respawn(self):
         for t in (T.RELEASE_SLOT, T.CRASH):
             with self.subTest(t=t.value):
-                s = run(T.SPAWN, T.ACQUIRE_SLOT, T.ACQUIRE_VERIFY,
+                s = run(T.ADMIT, T.ACQUIRE_VERIFY,
                         T.ACQUIRE_RIG, t)
                 self.assertIs(s.loop, Loop.NONE)
                 self.assertIs(s.slot_held, False)
                 self.assertIs(s.verify_held, False)
                 self.assertIs(s.rig_held, False)
                 refuses(self, s, T.RELEASE_RIG)
-                step(s, T.SPAWN)
-                step(s, T.ACQUIRE_SLOT)
+                step(s, T.ADMIT)
                 self.assertIs(s.loop, Loop.AGENT)
 
     def test_an_unjudged_attempt_is_refunded_a_judged_one_is_not(self):
         for t in (T.RELEASE_SLOT, T.CRASH):
-            with self.subTest(t=t.value, where="idle"):
-                self.assertEqual(run(T.SPAWN, t).attempts, 0)
             with self.subTest(t=t.value, where="agent"):
-                self.assertEqual(run(T.SPAWN, T.ACQUIRE_SLOT, t).attempts, 0)
+                self.assertEqual(run(T.ADMIT, t).attempts, 0)
             with self.subTest(t=t.value, where="verify"):
                 self.assertEqual(
-                    run(T.SPAWN, T.ACQUIRE_SLOT, T.ACQUIRE_VERIFY, t).attempts,
+                    run(T.ADMIT, T.ACQUIRE_VERIFY, t).attempts,
                     0)
             with self.subTest(t=t.value, where="after a fail"):
                 # The fail was judged and charged; the crash after it refunds
                 # only the fresh, unjudged attempt the cell was on.
-                s = run(T.SPAWN, T.ACQUIRE_SLOT, T.ACQUIRE_VERIFY,
+                s = run(T.ADMIT, T.ACQUIRE_VERIFY,
                         T.VERIFY_FAIL, T.ACQUIRE_VERIFY, t)
                 self.assertEqual(s.attempts, 0)
 
@@ -168,33 +165,27 @@ class TestStandingDown(unittest.TestCase):
     its unjudged attempt is refunded, so the resume redoes it."""
 
     def test_only_a_non_running_cell_stands_down(self):
-        refuses(self, run(T.SPAWN, T.ACQUIRE_SLOT), T.STAND_DOWN)
-        refuses(self, run(T.SPAWN, T.ACQUIRE_SLOT, T.ACQUIRE_VERIFY, T.PAUSE),
+        refuses(self, run(T.ADMIT), T.STAND_DOWN)
+        refuses(self, run(T.ADMIT, T.ACQUIRE_VERIFY, T.PAUSE),
                 T.STAND_DOWN)
 
     def test_a_paused_cell_stands_down_and_resumes_into_a_fresh_attempt(self):
-        s = run(T.SPAWN, T.ACQUIRE_SLOT, T.PAUSE, T.STAND_DOWN)
+        s = run(T.ADMIT, T.PAUSE, T.STAND_DOWN)
         self.assertIs(s.loop, Loop.NONE)
         self.assertIs(s.slot_held, False)
         self.assertEqual(s.attempts, 0)
         self.assertEqual(s.intent, "paused")
-        refuses(self, s, T.SPAWN)
+        refuses(self, s, T.ADMIT)
         step(s, T.RESUME)
-        step(s, T.SPAWN)
-        step(s, T.ACQUIRE_SLOT)
+        step(s, T.ADMIT)
         self.assertIs(s.slot_held, True)
         self.assertEqual(s.attempts, 1)
-
-    def test_standing_down_from_idle_refunds_nothing(self):
-        s = run(T.SPAWN, T.PAUSE, T.STAND_DOWN)
-        self.assertEqual(s.attempts, 0)
-        self.assertIs(s.loop, Loop.NONE)
 
 
 class TestIntent(unittest.TestCase):
 
     def test_pause_then_resume_restores_a_running_cell(self):
-        s = run(T.SPAWN, T.ACQUIRE_SLOT, T.PAUSE)
+        s = run(T.ADMIT, T.PAUSE)
         self.assertEqual(s.intent, "paused")
         refuses(self, s, T.PAUSE)
         refuses(self, s, T.ACQUIRE_VERIFY)
@@ -210,17 +201,17 @@ class TestIntent(unittest.TestCase):
         self.assertEqual(enabled(s), enabled(State()))
 
     def test_kill_is_terminal_for_intent(self):
-        for before in ((), (T.PAUSE,), (T.SPAWN, T.ACQUIRE_SLOT)):
+        for before in ((), (T.PAUSE,), (T.ADMIT,)):
             with self.subTest(before=[t.value for t in before]):
                 s = run(*before, T.KILL)
                 self.assertEqual(s.intent, "killed")
                 refuses(self, s, T.KILL)
                 refuses(self, s, T.RESUME)
                 refuses(self, s, T.PAUSE)
-                refuses(self, s, T.SPAWN)
+                refuses(self, s, T.ADMIT)
 
     def test_a_killed_cell_stands_down_and_stays_dead(self):
-        s = run(T.SPAWN, T.ACQUIRE_SLOT, T.KILL, T.STAND_DOWN)
+        s = run(T.ADMIT, T.KILL, T.STAND_DOWN)
         self.assertIs(s.loop, Loop.NONE)
         self.assertEqual(s.intent, "killed")
         self.assertEqual(enabled(s), set())
@@ -229,22 +220,22 @@ class TestIntent(unittest.TestCase):
 class TestARefusal(unittest.TestCase):
 
     def test_names_the_transition_and_shows_the_state(self):
-        s = run(T.SPAWN, T.ACQUIRE_SLOT)
+        s = run(T.ADMIT)
         with self.assertRaises(IllegalTransition) as cm:
-            step(s, T.SPAWN)
+            step(s, T.ADMIT)
         msg = str(cm.exception)
-        self.assertIn("Spawn is not enabled", msg)
+        self.assertIn("Admit is not enabled", msg)
         self.assertIn(repr(s), msg)
 
     def test_changes_nothing(self):
-        s = run(T.SPAWN, T.ACQUIRE_SLOT)
+        s = run(T.ADMIT)
         before = repr(s)
-        refuses(self, s, T.ACQUIRE_SLOT)
+        refuses(self, s, T.ADMIT)
         self.assertEqual(repr(s), before)
 
     def test_accepts_the_spec_name_as_a_string(self):
-        s = step(State(), "Spawn")
-        self.assertIs(s.loop, Loop.IDLE)
+        s = step(State(), "Admit")
+        self.assertIs(s.loop, Loop.AGENT)
         with self.assertRaises(ValueError):
             step(s, "NotATransition")
 

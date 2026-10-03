@@ -28,7 +28,6 @@ class ConductCase(OrchTmpCase):
             mock.patch.object(runs.ops, "prestart_clean", lambda cid: None),
             mock.patch.object(runs.state, "pause_lock", side_effect=lambda cid: None),
             mock.patch.object(runs.ops, "_spawn_detached", side_effect=self._spawn),
-            mock.patch.object(runs.conduct.image, "ensure_current", return_value=True),
             mock.patch.object(runs.time, "sleep", self._tick),
         ]
         for p in self.patches:
@@ -39,7 +38,7 @@ class ConductCase(OrchTmpCase):
         self.rounds = 0
         self.max_rounds = 4
 
-    def _spawn(self, argv, env, cid, what="spawn"):
+    def _spawn(self, argv, env, cid, what="spawn", pass_fds=()):
         self.spawned.append(cid)
         if self.spawn_rc is None:
             self.live[cid] = 4242       # becomes a live loop
@@ -277,7 +276,7 @@ class TestPreflight(unittest.TestCase):
 
         self.ensured = mock.Mock(return_value=image_ok)
         with mock.patch.object(runs.subprocess, "run", side_effect=fake), \
-                mock.patch.object(runs.conduct.image, "ensure_agent", self.ensured), \
+                mock.patch("fae.cell.agent_image.AgentImage.ready", self.ensured), \
                 contextlib.redirect_stdout(io.StringIO()):
             return runs.conduct.Conduct().preflight(), calls
 
@@ -288,8 +287,8 @@ class TestPreflight(unittest.TestCase):
         self.ensured.assert_not_called()
 
     def test_the_agent_image_is_ensured_base_and_layer(self):
-        # missing base built, clients current, the experiment's layer over
-        # it: one call, fae/driver/image.py's (its own tests pin the steps)
+        # missing base built, clients current, every variant's layer over
+        # it: one call, AgentImage.ready (its own tests pin the steps)
         ok, _ = self._run({})
         self.assertTrue(ok)
         self.ensured.assert_called_once()
@@ -820,14 +819,62 @@ class TestDiagnose(ConductCase):
 
 
 class TestSpawnAndAdoptEdges(ConductCase):
-    def test_a_fresh_spec_sets_FRESH_in_the_environment(self):
-        seen = {}
-        with mock.patch.object(runs.ops, "_spawn_detached",
-                               side_effect=lambda argv, env, cid, what:
-                               seen.update(env) or None):
-            runs.ops.spawn_spec("aaa", dict(self.spec(), fresh=True),
-                             "aaa_high_beta_apidocs_T1_r1", "test")
-        self.assertEqual(seen.get("FRESH"), "1")
+    CID = "aaa_high_beta_apidocs_T1_r1"
+
+    def _admit(self, fresh=False, take=None):
+        from fae.cell import Cell
+        seen = {"spawned": []}
+        cell = runs.conduct.Conduct._cell(self.CID, self.spec(), "aaa")
+
+        def spawn(argv, env, cid, what="spawn", pass_fds=()):
+            seen["spawned"].append(cid)
+            seen["env"], seen["fds"] = env, list(pass_fds)
+            seen["held_at_spawn"] = runs.queues.occupied(1)
+            return None
+
+        patches = [mock.patch.object(Cell, "prepare",
+                                     side_effect=lambda fresh=False: seen.update(fresh=fresh)),
+                   mock.patch.object(runs.ops, "_spawn_detached", side_effect=spawn)]
+        if take is not None:
+            patches.append(mock.patch.object(Cell, "take_slots", return_value=take))
+        with contextlib.ExitStack() as st:
+            for p in patches:
+                st.enter_context(p)
+            seen["rc"] = runs.conduct.Conduct().admit(cell, "aaa", fresh=fresh)
+        return seen
+
+    def test_a_fresh_admission_prepares_the_workspace_fresh(self):
+        seen = self._admit(fresh=True)
+        self.assertIsNone(seen["rc"])
+        self.assertTrue(seen["fresh"])
+        self.assertNotIn("FRESH", seen["env"])
+
+    def test_the_cell_is_started_holding_its_slot_and_conduct_keeps_no_copy(self):
+        from fae.cell import Cell
+        seen = self._admit()
+        self.assertEqual(seen["held_at_spawn"], 1, "the slot is held when the cell starts")
+        self.assertTrue(seen["fds"])
+        handed = seen["env"][Cell.SLOT_FDS_ENV]
+        self.assertEqual([int(x.split(":")[0]) for x in handed.split(",")], seen["fds"])
+        self.assertNotIn(Cell.IGNORE_SLOTS_ENV, seen["env"])
+        self.assertEqual(runs.queues.occupied(1), 0, "admission closed its own copy")
+
+    def test_a_cell_that_cannot_be_prepared_is_not_started_and_frees_its_slot(self):
+        from fae.cell import Cell
+        cell = runs.conduct.Conduct._cell(self.CID, self.spec(), "aaa")
+        with mock.patch.object(Cell, "prepare", side_effect=RuntimeError("no reference")), \
+                mock.patch.object(runs.ops, "_spawn_detached") as spawned, \
+                contextlib.redirect_stdout(io.StringIO()):
+            rc = runs.conduct.Conduct().admit(cell, "aaa")
+        self.assertEqual(rc, "no-prepare")
+        spawned.assert_not_called()
+        self.assertEqual(runs.queues.occupied(1), 0)
+
+    def test_no_free_work_slot_starts_nothing(self):
+        seen = self._admit(take=(None, "work"))
+        self.assertEqual(seen["rc"], "no-slot:work")
+        self.assertEqual(seen["spawned"], [])
+        self.assertNotIn("fresh", seen, "nothing is prepared without a slot")
 
     def test_adoption_skips_a_cell_with_no_state(self):
         """A live loop whose workspace says nothing must not get a fabricated
@@ -848,7 +895,7 @@ class TestArmSlotWinnersDoNotReap(unittest.TestCase):
 
     def test_the_slot_winner_invokes_no_reconcile(self):
         src = (runs.ROOT / "fae" / "cell" / "cell.py").read_text()
-        body = src[src.index("    def acquire_slots(self"):]
+        body = src[src.index("    def take_slots(self"):]
         body = body[:body.index("\n    def ", 10)]
         self.assertNotIn("_arm_reconcile", body)
         for line in body.splitlines():
@@ -963,7 +1010,7 @@ class TestConductLiftsItsOwnStandDowns(ConductCase):
         head = src[:src.index("ARM-STUCK held")]
         self.assertIn('if _phase == "agent" or _phase in state.WAIT_PHASES:', head[-2500:])
         self.assertEqual(runs.state.WAIT_PHASES,
-                         {"arm-lock", "verify-lock", "limit", "slot-wait"})
+                         {"verify-lock", "limit"})
 
 
 class TestWeeklyBudgetLanes(ConductCase):

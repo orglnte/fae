@@ -22,7 +22,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fae.driver import common
-from fae.driver import image
 from fae.driver import ops
 from fae.driver import state
 from fae.driver import supervise
@@ -216,9 +215,10 @@ class Conduct:
         count — conduct warns when it does not, because a lower cap silently
         starves lanes. Lanes admit starved-first, round-robin.
 
-        Arm serialization (an arm with a lock) is NOT an admission concern: the lane's
-        cell parks on the arm lock in-cell and takes the arm the moment it frees,
-        and one-cell-per-lane already bounds how many can wait.
+        Admission takes the cell's slots, never waiting: a work slot and, for a
+        variant with a lock, a slot of the lock's pool; a lane whose lock pool is
+        full is passed over this round. The cell process is handed the open slot
+        files and holds them for its whole life.
 
         A lane whose spawn dies immediately with a systemic code (creds, empty
         AGENT_CMD, seed FATAL) is FROZEN and reported instead of drained into the
@@ -423,10 +423,20 @@ class Conduct:
                     if p is None:
                         idle_sweep += 1
                         continue
+                    cell = self._cell(cid, qs.read_spec(p), m)
+                    slots, why = self.slots_for(cell)
+                    if slots is None:
+                        idle_sweep += 1
+                        if why == "no-slot:work":
+                            break                  # every work slot is held: nothing admits now
+                        continue
                     claimed = qs.claim(m, p)          # QUEUED -> RUNNING, one rename
                     spec = qs.read_spec(claimed)
-                    image.ensure_agent(log=lambda t: print(f"  [{common.hhmm()}] {t}", flush=True))
-                    rc = ops.spawn_spec(m, spec, cid, "conduct")
+                    rc = self._start(cell, m, slots, fresh=bool(spec.get("fresh")), what="conduct")
+                    if rc == "no-prepare":
+                        qs.release(m, claimed)
+                        idle_sweep += 1
+                        continue
                     if rc is None:
                         idle_sweep = 0
                         admitted.add(cid)
@@ -806,7 +816,9 @@ class Conduct:
                   f"local disk.", flush=True)
         # the agent image every spawn uses: the base (built when missing, its
         # clients current) and the experiment's layer over it
-        if not image.ensure_agent(log=lambda t: print(f"run: {t}", flush=True)):
+        from fae.cell.agent_image import AgentImage
+        if not AgentImage(common.ROOT, common.definition()).ready(
+                log=lambda t: print(f"run: {t}", flush=True)):
             print("run: STOP — the agent image could not be built. "
                   "Every spawn would die at preflight.", flush=True)
             return False
@@ -820,6 +832,50 @@ class Conduct:
             print(f"run: NOTE — {bad} variant(s) refused their preflight; cells of "
                   f"those variants will HALT.", flush=True)
         return True
+
+    def admit(self, cell, agent, fresh=False, what="admit", wait=False, poll=5.0):
+        """Start `cell` holding its slots: its agent image ready (never while a
+        slot is held), its slots taken without waiting — with `wait`, until
+        free — then its workspace prepared and its process started with the
+        slots handed over. Returns the start's rc (None: alive), or
+        "no-image" / "no-slot:<pool>" / "no-prepare" when it did not start."""
+        slots, why = self.slots_for(cell, wait=wait, poll=poll)
+        if slots is None:
+            return why
+        return self._start(cell, agent, slots, fresh=fresh, what=what)
+
+    def slots_for(self, cell, wait=False, poll=5.0):
+        """(slots, None) with the cell's agent image ready and its slots held,
+        or (None, "no-image" / "no-slot:<pool>")."""
+        if not cell.ready_image(log=lambda t: print(f"  [{common.hhmm()}] {t}", flush=True)):
+            return None, "no-image"
+        while True:
+            slots, pool = cell.take_slots()
+            if slots is not None:
+                return slots, None
+            if not wait:
+                return None, f"no-slot:{pool}"
+            time.sleep(poll)
+
+    def _start(self, cell, agent, slots, fresh=False, what="admit"):
+        """Prepare the workspace and start the cell's process with `slots`;
+        this process's copies are closed either way. "no-prepare" when the
+        workspace could not be prepared (the reason is printed)."""
+        try:
+            try:
+                cell.prepare(fresh=fresh)
+            except (OSError, RuntimeError) as e:
+                print(f"  [{common.hhmm()}] {cell.cid} could not be prepared: {e}", flush=True)
+                return "no-prepare"
+            return ops.start_cell(cell, agent, slots=slots, what=what)
+        finally:
+            slots.close()
+
+    @staticmethod
+    def _cell(cid, spec, agent):
+        from fae.cell import Cell
+        return Cell.new(cid, spec.get("task", "T1"), spec["variant"], spec["rep"], agent=agent,
+                        workspaces=common.WS, root=common.ROOT, queues=common.queues())
 
     def _next_admissible(self, agent, boxes):
         """The lane's first spec that may start now, with the ones it skipped
@@ -930,7 +986,10 @@ class Conduct:
             except (OSError, ValueError):
                 qs.shelve(p, "unreadable")
                 continue
-            rc = ops.spawn_spec(agent, spec, cid, "repair")
+            cell = self._cell(cid, spec, agent)
+            rc = self.admit(cell, agent, what="repair")
+            if isinstance(rc, str):
+                continue                   # no slot or no image yet: next pass
             if rc is None:
                 ops.respawn_count(cid, bump=True)
                 print(f"  [{common.hhmm()}] repaired {cid} (attempt {n + 1} of "

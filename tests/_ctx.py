@@ -78,6 +78,12 @@ class _QueuesNow:
 
 
 runs.queues = _QueuesNow()
+
+# No test reaches docker or the network for an agent image: a cell's image
+# reads as ready (fae/cell/agent_image.py has its own tests, all mocked). An
+# assignment, not a mock patch, so a test's mock.patch.stopall cannot undo it.
+from fae.cell.cell import Cell as _Cell  # noqa: E402
+_Cell.ready_image = lambda self, log=print: True
 runs.queues_module = _queues_module
 runs.render = render
 runs.rig = rig

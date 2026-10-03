@@ -20,7 +20,7 @@
 (* live transitions.log against this spec (tla_verify --live-trace).       *)
 (***************************************************************************)
 \* CHECK-CONSTANTS: Cells={"c1","c2"}; Budget=2; Slots=1
-\* CHECK-ACTIONS: Spawn AcquireSlot ReleaseSlot StandDown AcquireVerify AcquireRig ReleaseRig VerifyGreen VerifyFail Crash Pause Resume Kill
+\* CHECK-ACTIONS: Admit ReleaseSlot StandDown AcquireVerify AcquireRig ReleaseRig VerifyGreen VerifyFail Crash Pause Resume Kill
 \* CHECK-INVARIANTS: TypeOK VerifyMutualExclusion WorkCap KilledStaysDead NoBudgetOverrun NoLockWithoutLoop RigOnlyUnderVerify
 \* CHECK-ARGS: Cells
 EXTENDS Naturals, FiniteSets
@@ -62,26 +62,24 @@ Init ==
   /\ rigHeld = {}
 
 (***************************************************************************)
-(* Loop lifecycle.  Spawn models runs.py spawn / worker / reconcile        *)
-(* _respawn: all three paths must pass the loop lock (loop[c] = "none").   *)
+(* Loop lifecycle.  Admit is what starts a cell: whoever admits it (the     *)
+(* run, a smoke) takes its work slot without waiting and starts its loop    *)
+(* holding it, so a loop never exists without its slot and never waits     *)
+(* for one.  It must pass the loop lock (loop[c] = "none").  A manual       *)
+(* start without slots (--dangerously-ignore-slots) is outside the model.   *)
 (***************************************************************************)
-Spawn(c) ==
+Admit(c) ==
   /\ loop[c] = "none"                       \* the loop lock: nobody owns c
-  /\ ~Terminal(c)                           \* worker doneness via cell_state
-  /\ intent[c] = "run"                      \* spawn paths honor pause/kill
-  /\ loop' = [loop EXCEPT ![c] = "idle"]
-  /\ UNCHANGED <<outcome, intent, attempts, slotHeld, verifyHeld, rigHeld>>
-
-AcquireSlot(c) ==
-  /\ loop[c] = "idle" /\ ~slotHeld[c]
-  /\ intent[c] = "run"                      \* slot queue polls the pause lock
+  /\ ~Terminal(c)                           \* admission skips DONE cells
+  /\ intent[c] = "run"                      \* admission honors pause/kill
+  /\ ~slotHeld[c]
   /\ Cardinality({d \in Cells : slotHeld[d]}) < Slots
   /\ slotHeld' = [slotHeld EXCEPT ![c] = TRUE]
   /\ loop' = [loop EXCEPT ![c] = "agent"]
   /\ attempts' = [attempts EXCEPT ![c] = @ + 1]   \* attempt begins
   /\ UNCHANGED <<outcome, intent, verifyHeld, rigHeld>>
 
-(* pause honored while queued for a slot / at the boundary *)
+(* pause honored at the attempt boundary *)
 StandDown(c) ==
   /\ loop[c] \in {"idle", "agent"}
   /\ intent[c] /= "run"
@@ -134,12 +132,8 @@ VerifyFail(c) ==
           /\ loop' = [loop EXCEPT ![c] = "none"]
           /\ slotHeld' = [slotHeld EXCEPT ![c] = FALSE]
           /\ attempts' = attempts
-     ELSE \* next attempt begins directly in "agent": run_cell.sh's retry
-          \* loop re-enters the build immediately, no separate AcquireSlot
-          \* (the slot is held for the cell's whole lifetime, not per
-          \* attempt) — discovered via live-trace replay (item 4): the old
-          \* "idle" transition here was a dead end, reachable only via the
-          \* unrealistic Crash action, never by a real retry.
+     ELSE \* the next attempt begins directly in "agent": the slot is held
+          \* for the cell's whole life, not per attempt
           /\ outcome' = outcome
           /\ loop' = [loop EXCEPT ![c] = "agent"]
           /\ slotHeld' = slotHeld
@@ -179,7 +173,7 @@ Pause(c) ==
   /\ UNCHANGED <<outcome, loop, attempts, slotHeld, verifyHeld, rigHeld>>
 
 (* resume all: lifts pause but NEVER killed (18b1de5) and never respawns
-   into a terminal cell; respawn itself is Spawn *)
+   into a terminal cell; the restart itself is Admit *)
 Resume(c) ==
   /\ intent[c] = "paused"
   /\ intent' = [intent EXCEPT ![c] = "run"]
@@ -198,15 +192,15 @@ Kill(c) ==
   /\ attempts' = [attempts EXCEPT ![c] = IF loop[c] \in {"agent", "verify"} THEN @ - 1 ELSE @]
   /\ UNCHANGED outcome
 
-(* reconcile: respawns crashed non-terminal run-intent cells — same guard
-   set as Spawn, so it is Spawn; the model needs no separate action.
+(* reconcile: restarts crashed non-terminal run-intent cells through the
+   same admission, so it is Admit; the model needs no separate action.
    The 2026-07-25 regression is modeled by ReconcileRepair being ENABLED
    only when a reverify is genuinely active — the model has no reverify,
    so the action does not exist: any append that changes outcome of a
    Terminal cell would violate VerdictStable. *)
 
 Next == \E c \in Cells :
-  \/ Spawn(c) \/ AcquireSlot(c) \/ ReleaseSlot(c) \/ StandDown(c)
+  \/ Admit(c) \/ ReleaseSlot(c) \/ StandDown(c)
   \/ AcquireVerify(c) \/ AcquireRig(c) \/ ReleaseRig(c)
   \/ VerifyGreen(c) \/ VerifyFail(c) \/ Crash(c)
   \/ Pause(c) \/ Resume(c) \/ Kill(c)
@@ -219,7 +213,7 @@ Spec == Init /\ [][Next]_vars
 VerifyMutualExclusion == Cardinality(verifyHeld) <= 1
 
 OneLoopPerCell == TRUE  \* structural here (loop is a function); the python
-                        \* checker additionally asserts Spawn is disabled
+                        \* checker additionally asserts Admit is disabled
                         \* when a loop exists — the TOCTOU class
 
 WorkCap == Cardinality({c \in Cells : slotHeld[c]}) <= Slots

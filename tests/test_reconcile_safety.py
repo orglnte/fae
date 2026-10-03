@@ -172,19 +172,18 @@ class TestTheEpochSeedIsComplete(unittest.TestCase):
                          "slot=true verify=true")
 
     def test_a_slot_in_hand_means_the_attempt_started(self):
-        # AcquireSlot is enabled only while the slot is NOT held, so a cell
-        # seeded `idle` holding one can never legally reach `agent` — and
-        # every verify it then runs replays as illegal.
-        for phase in ("agent", "verify-lock", "limit", "arm-lock", "setup", ""):
+        # A cell is admitted holding its slot, so one seeded `idle` while
+        # holding it can never legally reach `agent` — and every verify it
+        # then runs replays as illegal.
+        for phase in ("agent", "verify-lock", "limit", "setup", ""):
             self.assertEqual(runs.rig._loop_of_phase(phase, True), "agent", phase)
 
     def test_verify_is_its_own_state(self):
         self.assertEqual(runs.rig._loop_of_phase("verify", True), "verify")
 
-    def test_no_slot_yet_is_the_idle_window(self):
-        # Between Spawn and AcquireSlot, which is the only place `idle` is
-        # reachable from.
-        for phase in ("setup", "arm-lock", "slot-wait", ""):
+    def test_no_slot_is_the_idle_window(self):
+        # A loop without a slot has not been admitted.
+        for phase in ("setup", ""):
             self.assertEqual(runs.rig._loop_of_phase(phase, False), "idle", phase)
 
     def test_lock_holders_are_read_from_the_mutex_files(self):
@@ -321,14 +320,14 @@ class TestTheModelLearnsAboutKilledLoops(unittest.TestCase):
         self.assertEqual(self._emitted(), ["Crash"])
 
     def test_a_live_loop_is_left_alone(self):
-        self.assertFalse(self._reconcile("Spawn", loop_pid=4242))
-        self.assertFalse(self._reconcile("Spawn", in_box=True))
+        self.assertFalse(self._reconcile("Admit", loop_pid=4242))
+        self.assertFalse(self._reconcile("Admit", in_box=True))
         self.assertEqual(self._emitted(), [])
 
     def test_a_recently_written_agent_log_is_the_canary(self):
         # A loop re-execs (the FP re-pin) and is briefly pidless. Fresh output
         # means it is between boundaries, not dead.
-        self.assertFalse(self._reconcile("Spawn", out_age=5))
+        self.assertFalse(self._reconcile("Admit", out_age=5))
         self.assertEqual(self._emitted(), [])
 
     def test_a_cell_the_model_already_thinks_idle_is_left_alone(self):
@@ -372,7 +371,7 @@ class TestTheModelLearnsAboutKilledLoops(unittest.TestCase):
         # No pid yet, no container, no agent log — indistinguishable from a
         # corpse except that its Spawn was seconds ago.
         now = f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}"
-        self.assertFalse(self._reconcile("Spawn", out_age=None, ts=now))
+        self.assertFalse(self._reconcile("Admit", out_age=None, ts=now))
         self.assertEqual(self._emitted(), [])
 
     def test_an_epoch_that_seeded_a_live_loop_is_not_a_clearing_event(self):
@@ -1126,8 +1125,9 @@ class TestRespawnKeepsTheCellsImplementation(unittest.TestCase):
 
     def test_the_respawn_argv_comes_from_the_recorded_impl(self):
         import inspect
-        src = inspect.getsource(runs.ops._respawn)
-        self.assertIn("_cell_argv(st[", src)
+        self.assertIn("start_cell(cell,", inspect.getsource(runs.ops._respawn))
+        self.assertIn("_cell_argv(cell.task, cell.variant, cell.rep)",
+                      inspect.getsource(runs.ops.start_cell))
         self.assertIn('"-m", "fae.cell"', inspect.getsource(runs.ops._cell_argv))
 
     def test_impl_of_reads_the_cell_env(self):

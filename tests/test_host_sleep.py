@@ -75,7 +75,7 @@ class TestTheDriverRefundsIt(unittest.TestCase):
         gate = lambda: [cell.VerifyResult(green=False, shape="G2",
                                           stage_failed="host-sleep", charge=False)]
         with self.assertRaises(cell.Halt) as cm:
-            c.run(stub_overlay=self.overlay, verify=gate)
+            c.run(ignore_slots=True, stub_overlay=self.overlay, verify=gate)
         self.assertEqual(cm.exception.code, 45)
         lines = (self.root / "transitions.log").read_text().splitlines()
         self.assertIn("void=host-sleep", lines[-2])

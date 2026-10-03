@@ -8,8 +8,9 @@ table be read against the spec line by line, and tested without a workspace.
 
 TWO VOCABULARIES, ONE MAPPING. `Loop` is what the model reasons about — four
 coarse states. `Phase` is what an operator needs — where a cell WAITS or WORKS.
-A cell in `arm-lock` is TLA-`agent` (it already holds its work slot); a cell in
-`verify-lock` is NOT `verify` (it is queued, not verifying). PHASE_TO_LOOP is
+A cell is admitted holding its slots, so every phase after admission is at
+least TLA-`agent`; a cell in `verify-lock` is NOT `verify` (it is queued, not
+verifying). PHASE_TO_LOOP is
 the only place those two are related, and it is total: a phase with no loop
 would let the console and the model describe the same cell differently.
 
@@ -43,8 +44,6 @@ class Loop(str, Enum):
 class Phase(str, Enum):
     """The heartbeat vocabulary — where a cell waits or works."""
     SETUP = "setup"
-    SLOT_WAIT = "slot-wait"
-    ARM_LOCK = "arm-lock"
     AGENT = "agent"
     LIMIT = "limit"
     VERIFY_LOCK = "verify-lock"
@@ -52,9 +51,7 @@ class Phase(str, Enum):
 
 
 PHASE_TO_LOOP = {
-    Phase.SETUP: Loop.IDLE,
-    Phase.SLOT_WAIT: Loop.IDLE,      # queued, holding nothing
-    Phase.ARM_LOCK: Loop.AGENT,      # already holds the work slot
+    Phase.SETUP: Loop.AGENT,         # admitted: holds its slots while its infra comes up
     Phase.AGENT: Loop.AGENT,
     Phase.LIMIT: Loop.AGENT,         # waiting out an API wall, attempt intact
     Phase.VERIFY_LOCK: Loop.AGENT,   # queued for the verify; not verifying yet
@@ -65,8 +62,7 @@ PHASE_TO_LOOP = {
 class T(str, Enum):
     """Transitions, named exactly as .tla/Runs.tla names them — the live-trace
     replay matches on these strings."""
-    SPAWN = "Spawn"
-    ACQUIRE_SLOT = "AcquireSlot"
+    ADMIT = "Admit"
     RELEASE_SLOT = "ReleaseSlot"
     STAND_DOWN = "StandDown"
     ACQUIRE_VERIFY = "AcquireVerify"
@@ -101,10 +97,8 @@ class State:
 # Enabling conditions, transcribed from the spec. Fleet-wide conjuncts (the
 # slot cap, verify mutual exclusion, the rig set) are deliberately absent.
 ENABLED = {
-    T.SPAWN: lambda s: s.loop is Loop.NONE and s.intent == "run"
-                       and s.outcome is None,
-    T.ACQUIRE_SLOT: lambda s: s.loop is Loop.IDLE and not s.slot_held
-                              and s.intent == "run",
+    T.ADMIT: lambda s: s.loop is Loop.NONE and s.intent == "run"
+                       and s.outcome is None and not s.slot_held,
     T.ACQUIRE_VERIFY: lambda s: s.loop is Loop.AGENT and not s.verify_held
                                 and s.intent == "run",
     T.ACQUIRE_RIG: lambda s: s.loop is Loop.VERIFY and not s.rig_held,
@@ -124,9 +118,7 @@ ENABLED = {
 def fire(s, t):
     """Apply one transition. Mirrors the primed variables in the spec; this is
     the only function that writes to a State."""
-    if t is T.SPAWN:
-        s.loop = Loop.IDLE
-    elif t is T.ACQUIRE_SLOT:
+    if t is T.ADMIT:
         s.slot_held, s.loop, s.attempts = True, Loop.AGENT, s.attempts + 1
     elif t is T.ACQUIRE_VERIFY:
         s.verify_held, s.loop = True, Loop.VERIFY

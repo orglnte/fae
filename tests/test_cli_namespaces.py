@@ -43,7 +43,12 @@ class TestCellCommands(unittest.TestCase):
         (ns,), _ = invoke("spawn", ["cell", "spawn", "sonnet", "beta_apidocs",
                                     "-r", "2", "--fresh"], mod=cli.ops)
         self.assertEqual(vars(ns), dict(agent="sonnet", variant="beta_apidocs", rep="2", task="T1",
-                                        fresh=True))
+                                        fresh=True, dangerously_ignore_slots=False))
+
+    def test_spawn_dangerously_ignore_slots(self):
+        (ns,), _ = invoke("spawn", ["cell", "spawn", "sonnet", "beta_apidocs",
+                                    "--dangerously-ignore-slots"], mod=cli.ops)
+        self.assertTrue(ns.dangerously_ignore_slots)
 
     def test_pause_takes_several_selectors(self):
         (ns,), _ = invoke("pause", ["cell", "pause", "sonnet", "haiku",
@@ -53,7 +58,8 @@ class TestCellCommands(unittest.TestCase):
 
     def test_resume(self):
         (ns,), _ = invoke("resume", ["cell", "resume", "haiku"], mod=cli.ops)
-        self.assertEqual(vars(ns), dict(selectors=["haiku"], force=False))
+        self.assertEqual(vars(ns), dict(selectors=["haiku"], force=False,
+                                        dangerously_ignore_slots=False))
 
     def test_resume_force(self):
         (ns,), _ = invoke("resume", ["cell", "resume", "haiku", "--force"], mod=cli.ops)

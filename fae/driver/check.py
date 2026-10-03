@@ -277,37 +277,6 @@ def _invariants(ctx):
     return out
 
 
-def _agent_images(ctx):
-    from fae.cell import config as _config, image as _image
-    from fae.driver import image as _agents
-    out, base = [], _agents.image_name()
-    if not _image.present(base):
-        rc = _agents.rebuild({}, base)
-        out.append(Finding(rc == 0, f"agents' base image {base}: " + ("built" if rc == 0
-                                                                          else f"build failed (rc={rc})"),
-                           "read the build output above; the base is the experiment root's "
-                           "Dockerfile.agent-base, else the engine's"))
-        if rc != 0:
-            return out
-    else:
-        out.append(Finding(True, f"agents' base image {base}"))
-    try:
-        behind = _agents.stale(_agents.installed(base), _agents.upstream_cached(_agents.image_arch(base)))
-    except (OSError, ValueError, RuntimeError):
-        behind = []
-    out += [Finding(True, f"{tool} {have} in the base, {want} upstream: the next `experiment run` "
-                          f"rebuilds it before admitting a cell") for tool, have, want in behind]
-    conf = _config.load(ctx.root)
-    for tag, cls in _agents.variant_layers().items():
-        try:
-            _image.for_agent(ctx.definition(), conf, cls, ctx.root, log=lambda m: None)
-            out.append(Finding(True, f"agent layer {tag}"))
-        except RuntimeError as e:
-            out.append(Finding(False, f"agent layer {tag}: {_last_line(e)}",
-                               "fix the layer's Dockerfile; its build output names the step"))
-    return out
-
-
 def _leftovers(ctx):
     from fae.driver import zombies
     found = zombies.find_zombies()
@@ -381,9 +350,6 @@ STEPS = (
     Step("infra", "infra",
          "infra ok() per variant; verify image, built if missing",
          "§7", _infra, needs=("seeds", "prerequisites"), docker=True),
-    Step("agents", "agents",
-         "agent base image and each variant's tools layer, built if missing; CLIs vs upstream",
-         "§10", _agent_images, needs=("definition", "prerequisites"), docker=True),
     Step("leftovers", "leftovers",
          "containers, clusters, heartbeats of dead cells",
          "§11", _leftovers, needs=("prerequisites",), docker=True),

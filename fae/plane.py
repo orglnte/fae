@@ -5,6 +5,7 @@ machine-wide locks and the cells' lifecycle log live under an experiment root.
         .queues/          queued, running and done specs, slots, agents' books
         .conduct/         the scheduler process's own state and logs
         .locks/           the locks a cell takes while it runs
+        .images/          the agent images' books (fae/cell/agent_image.py)
         transitions.log   every cell's lifecycle, in the order it happened
 
 Not parametric: it serializes the one machine the cells run on, so it stays
@@ -33,3 +34,7 @@ def locks(root):
 
 def transitions_log(root):
     return base(root) / "transitions.log"
+
+
+def images(root):
+    return base(root) / ".images"

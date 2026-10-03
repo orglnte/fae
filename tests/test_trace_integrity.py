@@ -2,7 +2,7 @@
 
 Two ways it stopped doing so on 2026-08-18, both of which leave the model
 holding resources for cells that hold nothing — and a model with every slot
-leaked stops enabling `AcquireSlot` for ANYBODY, so the conformance check goes
+leaked stops enabling `Admit` for ANYBODY, so the conformance check goes
 from "one broken cell" to "judging a world that does not exist" (71 violations
 over 300 events, 12 with a cause of their own).
 
@@ -11,8 +11,8 @@ over 300 events, 12 with a cause of their own).
      bash hooks are gone; the driver's transitions all go through Cell.apply,
      pinned in tests/test_cell_object.py.)
   2. A cell readmitted every ~32s outran the 300s grace on crash detection, so
-     each respawn emitted `Spawn` while the model still had the previous loop
-     live.
+     each readmission emitted its start while the model still had the
+     previous loop live.
 """
 import tempfile
 import unittest
@@ -38,9 +38,9 @@ class TestACrashIsRecordedBeforeTheRespawn(OrchTmpCase):
         return [l.split("\t")[1] for l in self.log.read_text().splitlines()]
 
     def test_a_loop_that_ended_silently_is_crashed_first(self):
-        # AcquireSlot last => the model still has this cell at `agent`, slot
-        # held. Spawning on top of that is not enabled.
-        self.trace(("Spawn", self.CID), ("AcquireSlot", self.CID))
+        # Admit last => the model still has this cell at `agent`, slot held.
+        # Admitting on top of that is not enabled.
+        self.trace(("Admit", self.CID))
         with mock.patch.object(runs.state, "loop_parents", return_value={}):
             self.assertTrue(runs.ops._crash_before_spawn(self.CID))
         self.assertEqual(self.actions()[-1], "Crash")
@@ -48,7 +48,7 @@ class TestACrashIsRecordedBeforeTheRespawn(OrchTmpCase):
     def test_a_cleanly_ended_loop_is_not_crashed(self):
         # The inverse: ReleaseSlot already returned the model to `none`, and a
         # Crash on top of it would be a transition that did not happen.
-        self.trace(("Spawn", self.CID), ("AcquireSlot", self.CID),
+        self.trace(("Admit", self.CID),
                    ("ReleaseSlot", self.CID))
         with mock.patch.object(runs.state, "loop_parents", return_value={}):
             self.assertFalse(runs.ops._crash_before_spawn(self.CID))
@@ -62,7 +62,7 @@ class TestACrashIsRecordedBeforeTheRespawn(OrchTmpCase):
     def test_a_LIVE_loop_is_never_declared_crashed(self):
         # Declaring a running cell dead desyncs every later event for it —
         # the same failure, pointed the other way.
-        self.trace(("Spawn", self.CID), ("AcquireSlot", self.CID))
+        self.trace(("Admit", self.CID))
         with mock.patch.object(runs.state, "loop_parents",
                                return_value={self.CID: 4242}):
             self.assertFalse(runs.ops._crash_before_spawn(self.CID))
@@ -71,7 +71,7 @@ class TestACrashIsRecordedBeforeTheRespawn(OrchTmpCase):
     def test_it_runs_on_the_spawn_path_itself_not_only_in_supervision(self):
         # The grace that gates supervision (AGENT_DEAD_GRACE) is longer than a
         # readmission cycle, so supervision alone can never win this race.
-        self.trace(("Spawn", self.CID), ("AcquireSlot", self.CID))
+        self.trace(("Admit", self.CID))
         (self.ws / self.CID).mkdir(parents=True)
         with mock.patch.object(runs.state, "loop_parents", return_value={}), \
              mock.patch.object(runs.subprocess, "Popen") as popen:
