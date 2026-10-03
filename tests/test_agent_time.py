@@ -55,48 +55,59 @@ class TestWhereItIsWritten(unittest.TestCase):
 
 
 
+class _Images:
+    def client_versions(self, image):
+        return {}
+
+
 class TestTheClientVersion(unittest.TestCase):
     """Each AGENT line names the CLI that ran and its version in the image it
     ran in, so an attempt stays traceable while the clients follow upstream."""
 
+    def _images(self):
+        from types import SimpleNamespace
+        from fae.cell.agent_image import AgentImage
+        return AgentImage(Path(tempfile.mkdtemp()), SimpleNamespace(name="x"), conf={})
+
     def test_versions_are_probed_once_per_image_id(self):
         from unittest import mock
-        from fae.cell import image as img
-        cache = Book(Path(tempfile.mkdtemp()) / "agent_clients.json")
+        from fae.cell import agent_image as ai
         probes = []
 
-        def installed(iid):
+        def installed(self, iid):
             probes.append(iid)
             return {"claude": "2.1.286"}
-        with mock.patch.object(img, "image_id", side_effect=["sha:a", "sha:a", "sha:b"]), \
-                mock.patch("fae.driver.image.installed", installed):
-            self.assertEqual(img.client_versions("fae-agent", cache), {"claude": "2.1.286"})
-            self.assertEqual(img.client_versions("fae-agent", cache), {"claude": "2.1.286"})
-            img.client_versions("fae-agent", cache)
+        im = self._images()
+        with mock.patch.object(ai, "image_id", side_effect=["sha:a", "sha:a", "sha:b"]), \
+                mock.patch.object(ai.AgentImage, "installed", installed):
+            self.assertEqual(im.client_versions("fae-agent"), {"claude": "2.1.286"})
+            self.assertEqual(im.client_versions("fae-agent"), {"claude": "2.1.286"})
+            im.client_versions("fae-agent")
         self.assertEqual(probes, ["sha:a", "sha:b"])
 
     def test_an_image_that_cannot_be_inspected_has_no_versions(self):
         from unittest import mock
-        from fae.cell import image as img
-        with mock.patch.object(img, "image_id", return_value=""):
-            self.assertEqual(img.client_versions("gone", Book(Path(tempfile.mkdtemp()) / "c.json")), {})
+        from fae.cell import agent_image as ai
+        with mock.patch.object(ai, "image_id", return_value=""):
+            self.assertEqual(self._images().client_versions("gone"), {})
 
     def _cell(self, cli):
         c = cellmod.Cell.__new__(cellmod.Cell)
         c.root = Path(tempfile.mkdtemp())
         c.conf = {"AGENT_CLI": cli, "AGENT_IMAGE": "fae-agent:latest"}
+        c._agent_images = lambda: _Images()
         return c
 
     def test_the_field_names_the_cli_and_its_version(self):
         from unittest import mock
-        with mock.patch("fae.cell.image.client_versions",
-                        return_value={"claude": "2.1.286", "agy": "1.2.14"}):
+        with mock.patch.object(_Images, "client_versions",
+                               return_value={"claude": "2.1.286", "agy": "1.2.14"}):
             self.assertEqual(self._cell("claude")._client_field(), "client=claude:2.1.286")
             self.assertEqual(self._cell("testagent")._client_field(), "client=testagent:-")
 
     def test_a_failed_lookup_writes_a_dash_and_never_raises(self):
         from unittest import mock
-        with mock.patch("fae.cell.image.client_versions", side_effect=RuntimeError("docker")):
+        with mock.patch.object(_Images, "client_versions", side_effect=RuntimeError("docker")):
             self.assertEqual(self._cell("claude")._client_field(), "client=claude:-")
 
     def test_the_scorer_still_reads_a_line_that_carries_it(self):

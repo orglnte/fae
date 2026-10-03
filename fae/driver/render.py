@@ -214,22 +214,10 @@ def render(flat=False, running_only=False):
         cid_to_id = {r[0]: str(i+1) for i, r in enumerate(running_raw)}
         running = []
         for i, r in enumerate(running_raw):
-            phase, hist, detail = r[2], r[6], r[7]
-            # LAST REP carries the block reason while the cell waits on a
-            # holder, its stage history otherwise; BLOCK is the phase's kind.
-            if detail.startswith("held by "):
-                holder_cid = detail.split("held by ", 1)[1].strip()
-                # There is no stale-lock case to render: a held lock has a live
-                # holder by construction, because the kernel releases it when
-                # the holder dies. A holder that just finished leaves the
-                # running list while its waiters are still mid-poll, which is a
-                # normal handover, not a fault.
-                last = (f"blocked by {cid_to_id[holder_cid]}" if holder_cid in cid_to_id
-                        else "waiting (holder finishing)")
-            else:
-                last = hist
+            phase, hist = r[2], r[6]
+            # BLOCK is the phase's kind: YES while the cell waits.
             running.append((str(i+1), r[0], r[1], r[2], r[3], r[4], r[5],
-                            last[:40], "YES" if phase in state.WAIT_PHASES else "NO"))
+                            hist[:40], "YES" if phase in state.WAIT_PHASES else "NO"))
         greens = [r for r in other if r[4].startswith("DONE·green")]
         other = [r for r in other if not r[4].startswith("DONE·green")]
         other.sort(key=lambda r: (r[0], r[1], r[2]))

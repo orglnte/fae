@@ -9,7 +9,8 @@ from unittest import mock
 from _ctx import ROOT  # noqa: F401
 
 from fae.cell import config as _config
-from fae.cell import image as _image
+from fae.cell import agent_image as _image
+from fae.cell import image as _cimage
 from fae.cell.variants.base import Variant
 
 
@@ -95,13 +96,13 @@ class TestTheLayerBuild(unittest.TestCase):
             cls = _variant("alpha", str(layer))
             with mock.patch.object(_image, "image_id", return_value="sha256:base"), \
                  mock.patch.object(_image, "label", return_value="old"), \
-                 mock.patch.object(_image, "build") as build:
+                 mock.patch.object(_cimage, "build") as build:
                 tag = _image.for_agent(_Def, {}, cls, Path(d), log=lambda *_: None)
             self.assertEqual(tag, "fae-exp-layer:latest")
             self.assertEqual(build.call_args.kwargs["base"], _image.BASE_AGENT)
 
     def test_no_layer_no_build(self):
-        with mock.patch.object(_image, "build") as build:
+        with mock.patch.object(_cimage, "build") as build:
             tag = _image.for_agent(_Def, {}, _variant("alpha"), Path("/nonexistent"),
                                    log=lambda *_: None)
         self.assertEqual(tag, _image.BASE_AGENT)

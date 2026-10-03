@@ -47,7 +47,6 @@ class TestTheFixtureIsReady(CheckCase):
         ok = [check.Finding(True, "ok")]
         with mock.patch.object(check, "_prerequisites", return_value=ok), \
                 mock.patch.object(check, "_infra", return_value=ok), \
-                mock.patch.object(check, "_agent_images", return_value=ok), \
                 mock.patch.object(check, "_leftovers", return_value=ok):
             steps = tuple(check.Step(s.key, s.title, s.why, s.howto, getattr(check, s.run.__name__),
                                      s.needs, s.docker, s.opt_in) for s in check.STEPS)
@@ -195,8 +194,7 @@ class TestTheCli(unittest.TestCase):
 
 
 class TestTheFoldedSteps(CheckCase):
-    """What were `rig selftest`, `rig agent-image` and `rig zombies` are steps
-    of the check: each finds its failure and names the fix; the docker ones
+    """What were `rig selftest` and `rig zombies` are steps of the check: each finds its failure and names the fix; the docker ones
     skip under --static and the trace replay runs only with --tla-trace."""
 
     def findings(self, step, ctx=None):
@@ -224,34 +222,6 @@ class TestTheFoldedSteps(CheckCase):
             (f,) = self.findings(check._leftovers)
         self.assertFalse(f.ok)
         self.assertIn("experiment repair", f.fix)
-
-    def test_a_missing_base_image_is_built_and_a_failed_build_stops_the_step(self):
-        from fae.cell import image as _image
-        from fae.driver import image as _agents
-        with mock.patch.object(_image, "present", return_value=False), \
-                mock.patch.object(_agents, "image_name", return_value="fae-agent:x"), \
-                mock.patch.object(_agents, "rebuild", return_value=1) as build:
-            found = self.findings(check._agent_images)
-        build.assert_called_once()
-        self.assertEqual([(f.ok, f.text) for f in found],
-                         [(False, "agents' base image fae-agent:x: build failed (rc=1)")])
-
-    def test_a_layer_that_will_not_build_is_a_failure_and_behind_upstream_is_a_note(self):
-        from fae.cell import image as _image
-        from fae.driver import image as _agents
-        with mock.patch.object(_image, "present", return_value=True), \
-                mock.patch.object(_agents, "image_name", return_value="fae-agent:x"), \
-                mock.patch.object(_agents, "installed", return_value={}), \
-                mock.patch.object(_agents, "image_arch", return_value="arm64"), \
-                mock.patch.object(_agents, "upstream_cached", return_value={}), \
-                mock.patch.object(_agents, "stale", return_value=[("claude", "1.0", "1.1")]), \
-                mock.patch.object(_agents, "variant_layers", return_value={"fae-a-layer:1": object()}), \
-                mock.patch.object(_image, "for_agent", side_effect=RuntimeError("step 3 failed")):
-            found = self.findings(check._agent_images)
-        notes = [f for f in found if f.ok and "upstream" in f.text]
-        self.assertEqual(len(notes), 1)
-        self.assertIn("claude 1.0 in the base, 1.1 upstream", notes[0].text)
-        self.assertIn((False, "agent layer fae-a-layer:1: step 3 failed"), [(f.ok, f.text) for f in found])
 
     def test_the_trace_names_a_missing_checker_and_an_empty_log_is_fine(self):
         from fae.driver import rig
@@ -281,7 +251,6 @@ class TestTheFoldedSteps(CheckCase):
 
     def test_static_skips_the_docker_steps_and_the_trace_is_opt_in(self):
         self.run_check()
-        self.assertIn("  skip    agents", self.lines)
         self.assertIn("  skip    leftovers", self.lines)
         self.assertNotIn("tla-trace", self.text())
         self.lines.clear()

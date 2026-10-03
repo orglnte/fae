@@ -1,10 +1,9 @@
-"""The pause/stand-down matrix — PY-READINESS rows 11, 12, 13, 17, 18.
+"""The pause/stand-down matrix — PY-READINESS rows 11-13, 17, 18.
 
 Real Cell, real flocks, scratch roots: each row drives the ACTUAL driver code
 through its stand-down point and asserts the ledger the model will replay.
-Deterministic by construction — the pause marker is on disk before the queue
-is entered, and wait_fds checks it before its first sleep — so these rows are
-rerunnable evidence, not one-shot smoke runs.
+Deterministic by construction — the pause marker is on disk before the cell
+starts — so these rows are rerunnable evidence, not one-shot smoke runs.
 """
 import fcntl
 import os
@@ -34,8 +33,8 @@ class PauseMatrixCase(unittest.TestCase):
         os.environ["TRANSITIONS_LOG"] = str(self.root / "transitions.log")
         os.environ["WORKSPACES_DIR"] = str(self.wsdir)   # mutex pause probe
         os.environ["FAE_VARIANT_NOOP"] = "1"     # a scratch root provisions nothing
-        os.environ["WORK_SLOTS"] = "7"              # the slot-queue rows fill this many
-        os.environ["ARM_SLOTS_ALPHA"] = "1"         # the arm-queue row holds this one
+        os.environ["WORK_SLOTS"] = "7"
+        os.environ["ARM_SLOTS_ALPHA"] = "1"
         self.addCleanup(os.environ.pop, "FAE_VARIANT_NOOP", None)
         self.addCleanup(os.environ.pop, "TRANSITIONS_LOG", None)
         self.addCleanup(os.environ.pop, "WORKSPACES_DIR", None)
@@ -73,37 +72,30 @@ class PauseMatrixCase(unittest.TestCase):
                 if "\tPAUSED\t" in l]
 
 
-class TestRow11PauseInTheWorkSlotQueue(PauseMatrixCase):
+class TestRows11And12ACellNeverQueuesForASlot(PauseMatrixCase):
+    """Rows 11 and 12 were a pause landing while the cell queued for a work
+    slot or a lock slot. A cell is now admitted holding its slots, so it never
+    queues: started without them, it refuses before any transition."""
 
-    def test_the_cell_stands_down_from_the_slot_queue(self):
-        queues = self.root / "workspaces.nosync" / ".queues"
-        for i in range(1, 8):                      # conf default WORK_SLOTS=7
-            self.hold(queues / "work-slots" / f"slot-{i}")
+    def test_a_cell_started_without_slots_refuses_and_emits_nothing(self):
         c = self.cell()
-        (c.ws / ".paused").write_text("row 11\n")
-        self.assertIsNone(c.run(stub_overlay="unused"))
-        self.assertEqual(self.actions(), ["Spawn", "Pause", "StandDown"])
-        self.assertEqual(self.transitions()[-1][2], "slot-queue")
-        self.assertIn("slot-queue", self.paused_lines(c)[0])
+        with self.assertRaises(cell.Halt) as e:
+            c.run(stub_overlay="unused")
+        self.assertEqual(e.exception.code, c.NO_SLOTS_EXIT)
+        self.assertEqual(self.actions(), [])
 
-
-class TestRow12PauseInTheArmLockQueue(PauseMatrixCase):
-
-    CID = "opus_high_alpha_apidocs_T1_r1"
-
-    def test_the_cell_stands_down_from_the_arm_queue_by_name(self):
+    def test_a_cell_handed_a_slot_it_does_not_hold_refuses(self):
         queues = self.root / "workspaces.nosync" / ".queues"
-        # work slots free; the ONE keda arm slot held by the test
-        self.hold(queues / "arm-alpha.slots" / "slot-1")
-        c = self.cell(variant="alpha_apidocs")
-        (c.ws / ".paused").write_text("row 12\n")
-        # stage_agent needs creds; the arm queue is reached before any agent,
-        # and a stub run skips staging exactly like the rig-debug path.
-        self.assertIsNone(c.run(stub_overlay="unused"))
-        self.assertEqual(self.actions(),
-                         ["Spawn", "AcquireSlot", "Pause", "StandDown"])
-        # the ledger names the queue it happened in — not the work-slot queue
-        self.assertEqual(self.transitions()[-1][2], "arm-lock-queue")
+        slot = queues / "work-slots" / "slot-1"
+        self.hold(slot)                         # someone else holds it
+        fd = os.open(str(slot), os.O_RDWR)     # the cell's to close, as when handed
+        c = self.cell()
+        os.environ[c.SLOT_FDS_ENV] = f"{fd}:{slot}"
+        self.addCleanup(os.environ.pop, c.SLOT_FDS_ENV, None)
+        with self.assertRaises(cell.Halt) as e:
+            c.run(stub_overlay="unused")
+        self.assertEqual(e.exception.code, c.NO_SLOTS_EXIT)
+        self.assertEqual(self.actions(), [])
 
 
 class TestRow13PauseAtTheAttemptBoundary(PauseMatrixCase):
@@ -111,9 +103,8 @@ class TestRow13PauseAtTheAttemptBoundary(PauseMatrixCase):
     def test_the_cell_stands_down_before_spending_the_attempt(self):
         c = self.cell()
         (c.ws / ".paused").write_text("row 13\n")
-        self.assertIsNone(c.run(stub_overlay="unused"))
-        self.assertEqual(self.actions(),
-                         ["Spawn", "AcquireSlot", "Pause", "StandDown"])
+        self.assertIsNone(c.run(ignore_slots=True, stub_overlay="unused"))
+        self.assertEqual(self.actions(), ["Admit", "Pause", "StandDown"])
         self.assertEqual(self.transitions()[-1][2], "attempt-boundary")
         self.assertIn("operator", self.paused_lines(c)[0])
         # the abandoned attempt is refunded (StandDown from `agent` is @-1)
@@ -125,7 +116,7 @@ class TestRow13PauseAtTheAttemptBoundary(PauseMatrixCase):
         # the command's own Pause is already in the ledger
         (self.root / "transitions.log").write_text(
             f"2026-08-22T10:00:00Z\tPause\t{c.cid}\treason=manual\n")
-        self.assertIsNone(c.run(stub_overlay="unused"))
+        self.assertIsNone(c.run(ignore_slots=True, stub_overlay="unused"))
         self.assertEqual(self.actions().count("Pause"), 1)
 
 

@@ -521,8 +521,8 @@ starts an agent shows up here instead of after a night of tokens.
 
 Build the agent base image once (it holds the three real clients too; a
 variant whose file names `[authoring] tools` gets its own layer over it,
-built by the engine — `python3 cli.py experiment check` builds what is
-missing):
+built by the engine when a cell of that variant is started, and by the run
+at its preflight):
 
 ```sh
 bash fae/agent-container/build.sh

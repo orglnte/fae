@@ -4,6 +4,9 @@ AGENT and EFFORT come from the environment; REFERENCE=1 seeds the variant's
 known answer (a smoke cell). --stub DIR runs the rig-debug path: no agent,
 DIR copied over the artifacts (an empty DIR verifies what prepare seeded,
 e.g. the reference), one attempt, the full gate.
+
+The cell runs holding the slots its admission handed over (CELL_SLOT_FDS);
+CELL_IGNORE_SLOTS=1 runs it without slots (a manual start).
 """
 import sys
 
@@ -34,14 +37,10 @@ def main(argv=None):
                          task, effort=os.environ.get("EFFORT", "high"),
                          smoke=bool(os.environ.get("SMOKE")))
 
-    c = Cell(cid)
-    c._env.setdefault("TASK", task)
-    c._env.setdefault("VARIANT", variant)
-    if os.environ.get("REFERENCE") == "1":
-        c._env.setdefault("REFERENCE", "1")
-    c._env.setdefault("REPEAT", str(rep))
+    c = Cell.new(cid, task, variant, rep, reference=os.environ.get("REFERENCE") == "1")
     try:
-        verdict = c.run(stub_overlay=stub)
+        verdict = c.run(stub_overlay=stub,
+                        ignore_slots=os.environ.get(Cell.IGNORE_SLOTS_ENV) == "1")
     except Sealed as e:
         print(f"refusing: {e}", file=sys.stderr)
         return 46

@@ -91,11 +91,11 @@ def _verify_holder():
 def _loop_of_phase(phase, slot_held):
     """Heartbeat phase -> the agent's loop state.
 
-    `idle` is the window between Spawn and AcquireSlot, and AcquireSlot is
-    enabled only while the slot is NOT held — so a cell seeded `idle` that
-    already holds its slot can never legally reach `agent`, and every verify
-    it goes on to run replays as illegal. A slot in hand means AcquireSlot
-    has happened: the cell is `agent`, whatever phase it is waiting in.
+    A cell is admitted holding its slot and starts in `agent`, so a slot in
+    hand means Admit has happened: the cell is `agent`, whatever phase it is
+    waiting in. Seeded `idle` with its slot held, it could never legally
+    reach `agent`, and every verify it went on to run would replay as
+    illegal.
     """
     if phase == "verify":
         return "verify"
@@ -311,11 +311,7 @@ def _reference_cell(cid, vid, rep, workspaces):
     with its known answer laid over, no agent), constructed only: prepare()
     seeds it."""
     from fae.cell import Cell
-    c = Cell(cid, workspaces=workspaces, root=ROOT)
-    for key, value in (("TASK", "T1"), ("VARIANT", vid), ("REFERENCE", "1"),
-                       ("REPEAT", str(rep))):
-        c._env.setdefault(key, value)
-    return c
+    return Cell.new(cid, "T1", vid, rep, reference=True, workspaces=workspaces, root=ROOT)
 
 
 def smoke_variants():
@@ -385,8 +381,20 @@ def smoke(args):
             results.append((vid, False, f"PREPARE FAILED — {e}"))
             continue
         print(f"  prepared: {c.ws}", flush=True)
-        p = subprocess.run(ops._cell_argv("T1", vid, args.rep)
-                           + ["--stub", str(empty)], cwd=str(ROOT), env=env)
+        from fae.cell import Cell
+        from fae.driver.conduct import Conduct
+        slots, why = Conduct().slots_for(c, wait=True)
+        if slots is None:
+            print(f"    VERDICT: NOT ADMITTED — {why}")
+            results.append((vid, False, f"NOT ADMITTED — {why}"))
+            continue
+        try:
+            p = subprocess.run(ops._cell_argv("T1", vid, args.rep)
+                               + ["--stub", str(empty)], cwd=str(ROOT),
+                               env=dict(env, **{Cell.SLOT_FDS_ENV: slots.handover()}),
+                               pass_fds=tuple(slots.fds()))
+        finally:
+            slots.close()
         green, verdict = _smoke_classify(c.ws)
         green = green and p.returncode == 0
         if p.returncode != 0:

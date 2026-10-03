@@ -54,43 +54,73 @@ class TestOpeningTheSlots(SlotCase):
 class TestTakingASlot(SlotCase):
 
     def test_the_work_slot_then_the_lock_slot(self):
-        order = []
-        slots, queue = self.q.acquire_slots(
-            "c1", 1, lock="beta", lock_slots=1,
-            on_wait_work=lambda: order.append("wait-work"),
-            on_work_slot=lambda: order.append("work"),
-            on_wait_lock=lambda: order.append("wait-lock"))
+        slots, pool = self.q.try_slots("c1", 1, lock="beta", lock_slots=1)
         self.addCleanup(slots.close)
-        self.assertIsNone(queue)
-        self.assertEqual(order, ["wait-work", "work", "wait-lock"])
+        self.assertIsNone(pool)
         self.assertEqual([p.parent.name for p in slots.held], ["work-slots", "arm-beta.slots"])
         self.assertTrue(all(self.q.slot_held(p) for p in slots.held))
         self.assertEqual(self.q.slot_note(slots.held[0])[0], "c1")
 
+    def test_only_the_held_files_stay_open(self):
+        slots, _ = self.q.try_slots("c1", 3)
+        self.addCleanup(slots.close)
+        self.assertEqual(len(slots.fds()), 1)
+        fd, path = slots.handover().split(":", 1)
+        self.assertEqual(int(fd), slots.fds()[0])
+        self.assertEqual(Path(path), slots.held[0])
+
     def test_closing_is_the_release(self):
-        slots, _ = self.q.acquire_slots("c1", 1)
+        slots, _ = self.q.try_slots("c1", 1)
         held = slots.held[0]
         slots.close()
         self.assertFalse(self.q.slot_held(held))
 
-    def test_a_full_pool_and_a_pause_stand_the_cell_down_by_queue_name(self):
-        ws = Path(self.base).parent / "workspaces.nosync" / "c1"
-        ws.mkdir(parents=True)
-        (ws / ".paused").write_text("test\n")
+    def test_a_full_work_pool_takes_nothing_and_never_waits(self):
         self.hold(self.base / "work-slots" / "slot-1")
-        import os
-        from unittest import mock
-        with mock.patch.dict(os.environ, {"WORKSPACES_DIR": str(ws.parent)}):
-            slots, queue = self.q.acquire_slots("c1", 1)
-        self.addCleanup(slots.close)
-        self.assertEqual(queue, "slot-queue")
-        self.assertEqual(slots.held, [])
+        self.assertEqual(self.q.try_slots("c1", 1, lock="beta", lock_slots=1), (None, "work"))
+        self.assertFalse(self.q.slot_held(self.base / "arm-beta.slots" / "slot-1"))
+
+    def test_a_full_lock_pool_gives_the_work_slot_back(self):
+        self.hold(self.base / "arm-beta.slots" / "slot-1")
+        self.assertEqual(self.q.try_slots("c1", 1, lock="beta", lock_slots=1), (None, "lock"))
+        self.assertFalse(self.q.slot_held(self.base / "work-slots" / "slot-1"))
 
     def test_the_holder_notes_naming_a_cell_are_cleared(self):
-        slots, _ = self.q.acquire_slots("c1", 1)
+        slots, _ = self.q.try_slots("c1", 1)
         self.addCleanup(slots.close)
         self.q.clear_holder_notes("c1")
         self.assertIsNone(self.q.slot_note(slots.held[0]))
+
+
+class TestAdoptingHandedSlots(SlotCase):
+    """The cell process adopts the open slot files its admission handed it."""
+
+    def _handed(self):
+        import os
+        taken, _ = self.q.try_slots("c1", 1)
+        fd = os.dup(taken.fds()[0])          # what the child inherits
+        path = taken.held[0]
+        taken.close()                        # the admitting side closes its copy
+        return f"{fd}:{path}", path
+
+    def test_a_handed_slot_stays_held_and_is_noted_for_the_cell(self):
+        import os
+        handover, path = self._handed()
+        slots = self.q.adopt_slots("c9", handover)
+        self.addCleanup(slots.close)
+        self.assertEqual(slots.held, [path])
+        self.assertTrue(self.q.slot_held(path))
+        self.assertEqual(self.q.slot_note(path)[:2], ("c9", os.getpid()))
+
+    def test_a_slot_held_by_another_holder_is_not_adopted(self):
+        import os
+        path = self.base / "work-slots" / "slot-1"
+        self.hold(path)
+        fd = os.open(str(path), os.O_RDWR)
+        self.assertIsNone(self.q.adopt_slots("c9", f"{fd}:{path}"))
+
+    def test_nothing_handed_is_nothing_adopted(self):
+        self.assertIsNone(self.q.adopt_slots("c9", ""))
 
 
 if __name__ == "__main__":

@@ -123,10 +123,7 @@ def wait_reason(ws):
     return faults.reason(snaps[-1].read_text(errors="replace"))[:WAIT_REASON_MAX]
 # phases a loop declares that mean "alive but parked, waiting on something it
 # will leave by itself" — as opposed to spending wall clock productively.
-# slot-wait: queued on the global work-slot semaphore (Queues.acquire_slots).
-
-
-WAIT_PHASES = {"arm-lock", "verify-lock", "limit", "slot-wait"}
+WAIT_PHASES = {"verify-lock", "limit"}
 
 
 def pause_lock(cid):
@@ -313,10 +310,7 @@ def cell_liveness(ws, boxes):
     if hb:
         phase = hb.get("phase", "?")
         if phase in WAIT_PHASES:
-            detail = (f"held by {arm_wait(ws) or '?'}" if phase == "arm-lock"
-                      else wait_reason(ws) if phase == "limit"
-                      else slot_wait_detail() if phase == "slot-wait"
-                      else "")
+            detail = wait_reason(ws) if phase == "limit" else ""
             return "WAITING", phase, detail
         return "RUNNING", phase, ""
 
@@ -495,9 +489,6 @@ def _cell_state(ws, loops, boxes):
     if intent == "pause":
         st["detail"] = (st["detail"] + "  (pause pending)").strip()
     return st
-# arm_wait marks a dead holder by suffixing its cid. This used to be a raw NUL
-# ("\x00dead"), decoded only in the aggregated table — so `--flat` and the
-# attention list printed the NUL straight to the terminal. A cid is
 
 
 def _arm_slot_of(arm, cid):
@@ -516,39 +507,6 @@ def _arm_slot_of(arm, cid):
             continue
         return awake_age(note[2]) if note[2] is not None else None
     return None
-
-
-def arm_wait(ws):
-    """If this cell's loop is queued on its variant's lock, the holder's cid.
-
-    Two questions, in order: the kernel says whether a slot is held, and only
-    then does the note name who. The note alone would name whoever took the
-    slot LAST, held or not.
-    """
-    parsed = parse_cell_id(ws.name)
-    if not parsed:
-        return None
-    arm = common.definition().lock_of(parsed[1])
-    if not arm:
-        return None
-    q = common.queues()
-    held = [(q.slot_note(s) or ("",))[0] for s in q.slot_files(arm) if q.slot_held(s)]
-    # A cell that HOLDS a slot is never blocked, whatever its heartbeat phase
-    # still says. Skipping only "not me" made every holder display the OTHER
-    # holder as its blocker, so two holders rendered as a circular
-    # "2 blocked by 5, 5 blocked by 2".
-    if ws.name in held:
-        return None
-    return next((h for h in held if h and h != ws.name), None)
-
-
-def slot_wait_detail():
-    """How many work slots are occupied, for a cell queued on the semaphore."""
-    try:
-        n = int(os.environ.get("WORK_SLOTS", 7))
-    except ValueError:
-        return ""
-    return f"{common.queues().occupied(n)}/{n} slots busy"
 
 
 def all_states(running_only=False):

@@ -41,8 +41,7 @@ class TestTheRunningTable(unittest.TestCase):
 
     def test_the_columns(self):
         working = _state("sonnet_high_alpha_apidocs_T1_r1", "verify", shape="2/6*")
-        waiting = _state("haiku_high_alpha_apidocs_T1_r2", "arm-lock",
-                         detail="held by sonnet_high_alpha_apidocs_T1_r1")
+        waiting = _state("haiku_high_alpha_apidocs_T1_r2", "verify-lock")
         out = self._render([working, waiting])
         hdr = next(l for l in out.splitlines() if l.lstrip().startswith("ID"))
         self.assertNotIn("LIVE", hdr)
@@ -53,8 +52,6 @@ class TestTheRunningTable(unittest.TestCase):
         self.assertIn("scaling gate=BSB", w)
         self.assertTrue(w.rstrip().endswith("NO"))
         b = rows["haiku_high_alpha_apidocs_T1_r2"]
-        self.assertIn("blocked by 2", b)
-        self.assertNotIn("scaling gate=BSB", b)
         self.assertTrue(b.rstrip().endswith("YES"))
 
 

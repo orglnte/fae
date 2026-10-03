@@ -96,10 +96,14 @@ def cell_spawn(
     task: str = typer.Option("T1", "--task", help="task id: T<n>, one the experiment's task/ carries"),
     fresh: bool = typer.Option(False, "--fresh",
                               help="WIPES the workspace (safe_wipe) and restarts at attempt 1"),
+    dangerously_ignore_slots: bool = typer.Option(
+        False, "--dangerously-ignore-slots",
+        help="start even while the run is up; the cell runs without slots, outside the cap"),
 ):
-    """Start one cell now, in parallel with whatever else is running."""
+    """Start one cell now, without slots. Refuses while the run is up, which
+    admits cells with their slots, unless --dangerously-ignore-slots."""
     ops.spawn(_ns(agent=agent, variant=variant, rep=rep,
-                  task=task, fresh=fresh))
+                  task=task, fresh=fresh, dangerously_ignore_slots=dangerously_ignore_slots))
 
 
 @cell_app.command("pause")
@@ -114,11 +118,16 @@ def cell_pause(selectors: list[str] = typer.Argument(..., help=SEL + " Must matc
 @cell_app.command("resume")
 def cell_resume(selectors: list[str] = typer.Argument(..., help=SEL + " Must match ONE cell."),
                 force: bool = typer.Option(False, "--force",
-                                           help="respawn even past the per-agent live-cell cap")):
-    """Lift ONE cell's locks, clear its reconcile flag, respawn its loop.
-    Direct spawn is safe at n=1; the respawn still defers at the per-agent
-    cap (--force pushes past it). Bulk resume is `experiment resume`."""
-    ops.resume(_ns(selectors=list(selectors), force=force))
+                                           help="respawn even past the per-agent live-cell cap"),
+                dangerously_ignore_slots: bool = typer.Option(
+                    False, "--dangerously-ignore-slots",
+                    help="respawn even while the run is up; the cell runs without slots")):
+    """Lift ONE cell's locks, clear its reconcile flag, respawn its loop
+    without slots. The respawn defers at the per-agent cap (--force pushes
+    past it) and refuses while the run is up unless --dangerously-ignore-slots.
+    Bulk resume is `experiment resume`."""
+    ops.resume(_ns(selectors=list(selectors), force=force,
+                   dangerously_ignore_slots=dangerously_ignore_slots))
 
 
 @cell_app.command("stop")

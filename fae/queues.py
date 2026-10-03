@@ -12,13 +12,15 @@ module is the only code that reads or writes it.
     work-slots/slot-<n>               the cap on running cells (flock)
     arm-<lock>.slots/slot-<n>         a variant lock's cap (flock)
     weekly.json, cooldown.<agent>     when a lane may admit
-    agent-io.json, agent_image.json, agent_clients.json   the agents' books
+    agent-io.json                     the agents' output, sampled by supervision
 
 A spec moves by one rename(2), so it is always in exactly one state: a crash
 at any instant can neither lose nor duplicate it. Every change also holds
 <root>/workspaces.nosync/.locks/queues-lock for the change alone, so two
 processes never interleave a multi-rename change (a renumber, a park, the
-weekly hold). It is never held while a cell waits for a slot or holds one.
+weekly hold). It is never held while a slot is taken or held: slots are
+taken without waiting, by whoever admits the cell, and handed to the cell
+process, which holds them by fd for its whole life.
 """
 from __future__ import annotations
 
@@ -98,6 +100,27 @@ class Slots:
 
     def _pool(self, pool):
         return [(p, f) for k, p, f in self._files if k == pool]
+
+    def keep_held(self):
+        """Close the candidates that were not won."""
+        keep = []
+        for k, p, f in self._files:
+            if p in self.held:
+                keep.append((k, p, f))
+            else:
+                try:
+                    f.close()
+                except OSError:
+                    pass
+        self._files = keep
+
+    def fds(self):
+        """The held files' fds, to hand to the process that runs the cell."""
+        return [f.fileno() for _, p, f in self._files if p in self.held]
+
+    def handover(self):
+        """`fd:path,...` for the cell process's CELL_SLOT_FDS."""
+        return ",".join(f"{f.fileno()}:{p}" for _, p, f in self._files if p in self.held)
 
     def close(self):
         """THE release. Idempotent."""
@@ -459,44 +482,54 @@ class Queues:
             raise
         return Slots(files)
 
-    def _take(self, slots, pool, cid, label, poll):
-        cand = slots._pool(pool)
-        by_fd = {f.fileno(): p for p, f in cand}
-        got = mutex.wait_fds(list(by_fd), cid, label, poll=poll)
-        if got is None:
-            return False
-        with self._changing():
-            mutex.note_holder(by_fd[got], cid, os.getpid())
-        slots.held.append(by_fd[got])
-        return True
+    def try_slots(self, cid, work_slots, lock=None, lock_slots=1):
+        """The slots a cell needs, taken now or not at all: a free work slot and,
+        for a variant with a lock, a free slot of the lock's pool. Never waits.
 
-    def acquire_slots(self, cid, work_slots, lock=None, lock_slots=1,
-                      on_wait_work=None, on_work_slot=None, on_wait_lock=None, poll=5.0):
-        """A work slot, then (for a locked variant) a slot of its lock — slot
-        first, so a cell queuing for the scarce lock already holds its work
-        slot, never the reverse. Blocks until held; an operator pause stands
-        the cell down from whichever queue it is in.
-
-        Returns (slots, None) when held, or (slots, queue) when it stood down,
-        queue naming where ("slot-queue" / "arm-lock-queue"). Either way the
-        caller closes `slots`, and closing is the release."""
+        Returns (slots, None) with the slots held, or (None, pool) naming the
+        pool that had none free ("work" / "lock"); nothing is kept then."""
         slots = self.open_slots(work_slots, lock, lock_slots)
         try:
-            if on_wait_work:
-                on_wait_work()
-            if not self._take(slots, "work", cid, "work-slots", poll):
-                return slots, "slot-queue"
-            if on_work_slot:
-                on_work_slot()
-            if lock:
-                if on_wait_lock:
-                    on_wait_lock()
-                if not self._take(slots, "lock", cid, f"arm-lock[{lock}]", poll):
-                    return slots, "arm-lock-queue"
+            for pool in ("work", "lock") if lock else ("work",):
+                cand = slots._pool(pool)
+                got = mutex.try_fds([f.fileno() for _, f in cand])
+                if got is None:
+                    slots.close()
+                    return None, pool
+                slots.held.append(next(p for p, f in cand if f.fileno() == got))
+            slots.keep_held()
+            with self._changing():
+                for path in slots.held:
+                    mutex.note_holder(path, cid, os.getpid())
             return slots, None
         except BaseException:
             slots.close()
             raise
+
+    def adopt_slots(self, cid, handover):
+        """The slots handed to this process (`handover` is CELL_SLOT_FDS,
+        `fd:path,...`). Each fd must hold its flock — a try on the fd this
+        process inherited succeeds only for the holder — and the holder notes
+        are rewritten with this process's pid. Returns the Slots, or None when
+        any handed slot is not held."""
+        files = []
+        for item in filter(None, handover.split(",")):
+            fd_s, _, path = item.partition(":")
+            try:
+                f = os.fdopen(int(fd_s), "a+")
+            except (OSError, ValueError):
+                Slots(files).close()
+                return None
+            files.append(("handed", Path(path), f))
+        slots = Slots(files)
+        if not files or not all(mutex.try_fd(f.fileno()) for _, _, f in files):
+            slots.close()
+            return None
+        slots.held = [p for _, p, _ in files]
+        with self._changing():
+            for path in slots.held:
+                mutex.note_holder(path, cid, os.getpid())
+        return slots
 
     @_changes
     def clear_holder_notes(self, cid, lock=None):
@@ -515,12 +548,6 @@ class Queues:
 
     def agent_io_book(self):
         return Book(self.base / "agent-io.json", changing=self._changing)
-
-    def agent_image_book(self):
-        return Book(self.base / "agent_image.json", changing=self._changing)
-
-    def agent_clients_book(self):
-        return Book(self.base / "agent_clients.json", changing=self._changing)
 
     def cooldown_file(self, agent):
         return self.base / f"cooldown.{agent}"

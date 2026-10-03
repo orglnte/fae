@@ -19,8 +19,7 @@ CID = "ref_high_smoke_beta_reference_T1_r1"
 
 def _run(t0):
     """One cell from spawn to a green verdict, starting at minute t0."""
-    return [(f"2026-09-21T10:{t0:02d}:00Z", "Spawn", ""),
-            (f"2026-09-21T10:{t0:02d}:01Z", "AcquireSlot", ""),
+    return [(f"2026-09-21T10:{t0:02d}:00Z", "Admit", ""),
             (f"2026-09-21T10:{t0:02d}:02Z", "AcquireVerify", ""),
             (f"2026-09-21T10:{t0 + 5:02d}:00Z", "VerifyGreen", "attempt=1")]
 
@@ -112,7 +111,7 @@ class TestTheReplayJudgesTheNewCellFromInit(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.replay(_run(0) + _run(30), tmp)
         self.assertIn("VIOLATION", out)
-        self.assertIn("Spawn", out)
+        self.assertIn("Admit", out)
 
 
 if __name__ == "__main__":

@@ -5,8 +5,6 @@ import fcntl
 import subprocess
 import sys
 import tempfile
-import threading
-import time
 import unittest
 from pathlib import Path
 
@@ -62,31 +60,12 @@ class TestConcurrentWritersStayConsistent(LockCase):
 class TestASlotNeverBlocksAChange(LockCase):
 
     def test_a_held_slot_does_not_block_an_enqueue(self):
-        slots, queue = self.q.acquire_slots("c1", 1)
+        slots, pool = self.q.try_slots("c1", 1)
         self.addCleanup(slots.close)
-        self.assertIsNone(queue)
+        self.assertIsNone(pool)
         p = self.writer("x", 1)
         self.assertEqual(p.wait(timeout=10), 0)
         self.assertEqual(len(self.q.lane_specs("aaa")), 1)
-
-    def test_a_cell_waiting_for_a_slot_does_not_block_an_enqueue(self):
-        slot = self.plane / ".queues" / "work-slots" / "slot-1"
-        slot.parent.mkdir(parents=True)
-        f = open(slot, "a+")
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        got = {}
-        t = threading.Thread(target=lambda: got.update(
-            r=self.q.acquire_slots("c2", 1, poll=0.1)), daemon=True)
-        t.start()
-        time.sleep(0.3)
-        self.assertTrue(t.is_alive(), "the cell is queued on the full pool")
-        p = self.writer("y", 1)
-        self.assertEqual(p.wait(timeout=10), 0)
-        f.close()
-        t.join(timeout=10)
-        slots, queue = got["r"]
-        self.addCleanup(slots.close)
-        self.assertIsNone(queue)
 
 
 if __name__ == "__main__":

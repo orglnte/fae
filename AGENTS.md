@@ -163,26 +163,34 @@ a stranded reverify leaves the population.
 ## 3. Locks — what each one actually protects
 
 Every lock is **`flock(2)` on a file**, implemented once in
-**`fae/mutex.py`**; `fae/queues.py` (`Queues.acquire_slots`), `fae/cell`
-(`Cell.verify_lock_acquire`, `Cell.exclusive_acquire`) and
-`fae/driver/common.py`'s `fs_lock` are its holders. Do not add a second
-mutex implementation.
+**`fae/mutex.py`**; `fae/queues.py` (`Queues.try_slots`,
+`Queues.adopt_slots`), `fae/cell` (`Cell.verify_lock_acquire`,
+`Cell.exclusive_acquire`) and `mutex.fs_lock` are its holders. Do not add a
+second mutex implementation.
 
 **A lock is a FILE, held by an open fd.** The kernel releases it when the
 holding process dies by any means — SIGKILL, OOM, panic, host sleep — so
 nothing on disk is ever judged stale: no steal, no adoption, no settle
-window. **The cell process owns the fd and takes the slots itself:**
-`Queues.acquire_slots` opens every candidate slot file and flocks the work
-slot, then the variant's lock slot, in the cell's own process, the holder for
-the cell's whole life. Provisioning never touches the slots.
+window. **Admission takes the slots; the cell process holds them:**
+`Conduct.admit` (or a smoke) takes a free work slot and, for a variant with a
+lock, a free slot of the lock's pool (`Queues.try_slots`, never waiting; a
+busy lock pool gives the work slot back), then starts the cell process with
+the open slot files handed over (`pass_fds`, their numbers in
+`CELL_SLOT_FDS`) and closes its own copies. The cell adopts them
+(`Queues.adopt_slots`), the holder for its whole life, and refuses to start
+without them unless asked to run without slots (`CELL_IGNORE_SLOTS`, a manual
+`cell spawn`/`cell resume`, which refuses while the run is up unless
+`--dangerously-ignore-slots`). Provisioning never touches the slots.
 
 Two rules break mutual exclusion **silently** if violated:
 
 1. **Never let a process that outlives its driver inherit a lock fd.** A
    flock is freed when the LAST fd on it closes, so an inherited fd keeps a
-   dead holder's lock alive. `subprocess` closes fds by default; nothing in
-   `fae/cell` writes `pass_fds` or `close_fds=False`, and a daemon that
-   outlives its setup says `close_fds=True` out loud.
+   dead holder's lock alive. `subprocess` closes fds by default; the one
+   `pass_fds` is admission handing a cell its slots, whose admitting copies
+   are closed at once; nothing in `fae/cell` writes `pass_fds` or
+   `close_fds=False`, and a daemon that outlives its setup says
+   `close_fds=True` out loud.
 2. **Never unlink a lock file.** Unlink-and-recreate puts two holders on two
    inodes with no error anywhere. The lock FILE is permanent; only the
    `<lock>.holder` sidecar may be removed.
@@ -332,8 +340,8 @@ writes an `ALERT SETUP-FAILED` ledger line.
   An empty agent log means the first model turn has not returned: unknown,
   and unknown never kills.
 - **A phase is a place a cell can WAIT or WORK, never a label for a step.**
-  There are seven: `setup`, `slot-wait`, `arm-lock`, `agent`, `limit`,
-  `verify-lock`, `verify`. A phase for a step nothing waits on buys nothing
+  There are five: `setup`, `agent`, `limit`, `verify-lock`, `verify`. A
+  cell never waits for a slot: it is admitted holding them. A phase for a step nothing waits on buys nothing
   and costs a state everything downstream must interpret.
 
 ## 4. Variants and infra
@@ -495,23 +503,25 @@ variant's own layer: its `[authoring] tools` directory and its infra's
 `agent_image_context`, one per directory, tagged by the directory's path
 under the experiment (`fae-<experiment>-<path parts>:latest`, so variants
 that name one directory share one image) and rebuilt by
-`fae/cell/image.py: for_agent` whenever its content, its staged sources or
+`fae/cell/agent_image.py: for_agent` whenever its content, its staged sources or
 the base's id is not what its `fae-content` label records. An agent sees
 its own variant's tools and SDK and no other's: a layer shared across
 variants would hand one variant's agent the other's interface to read. The
 cell resolves its image from its variant (`Cell.agent_image`); env
-`AGENT_IMAGE` forces one image on every variant and is for rig tests only. The base's
-clients follow upstream: the run runs `fae/driver/image.py:ensure_agent` at
-preflight and before every admission (upstream versions cached 1 h in
-`.queues/agent_image.json`), because a provider gates new models on a minimum
-client and a stale client fails every cell of that agent. A failed update at
-preflight stops the run; before an admission it is logged and the cell
-starts on the image there is. An update pulls the base image through
+`AGENT_IMAGE` forces one image on every variant and is for rig tests only.
+`AgentImage.ready` (fae/cell/agent_image.py) is the one readiness policy —
+the base present, its clients at upstream, the variant's layer built — under
+`.locks/image-lock`, so concurrent callers build once. The base's clients
+follow upstream (versions cached 1 h in `.images/agent_image.json`), because
+a provider gates new models on a minimum client and a stale client fails
+every cell of that agent. The run readies every variant's image at preflight
+and a cell's before admitting it, never while holding its slots; a failed
+build at preflight stops the run, and at admission the cell is not started. An update pulls the base image through
 Docker's credential helper, so a helper that hangs blocks every update.
 Client versions are not part of the fingerprint; each attempt's AGENT ledger
 line records the CLI that ran and its version in the image it ran in
 (`client=claude:2.1.286`, `-` when unreadable), probed once per image id
-and cached in `.queues/agent_clients.json`.
+and cached in `.images/agent_clients.json`.
 
 `$AGENT_CLAUDE` is restaged **before every attempt**: the CLI keeps
 per-project memory and transcripts under `~/.claude/projects/<cwd>`, and
@@ -592,7 +602,7 @@ every prior agent's memory — cross-run leakage invisible in the results.
   --tla-trace`). A
   fresh prepare that wipes a workspace logs `Retire <cid>`: the id then names
   a NEW cell, which the replay judges from Init as `<cid>#<n>` — without it
-  the new cell's `Spawn` is judged against the old cell's verdict and every
+  the new cell's `Admit` is judged against the old cell's verdict and every
   later event of the id cascades. `rig trace-reset` archives the log and
   records the observed state as `EPOCH` lines, the only way to start a replay
   anywhere but a cold fleet.

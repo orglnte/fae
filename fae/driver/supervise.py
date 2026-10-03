@@ -116,9 +116,7 @@ PHASE_LIMITS = {
     # A single agent call runs past 90 minutes on the slower agents, so this
     # sits well above the observed normal rather than at it.
     "agent":       (int(os.environ.get("PHASE_AGENT_ALERT_S", 10800)), None),
-    "arm-lock":    (int(os.environ.get("PHASE_WAIT_ALERT_S", 3600)), None),
     "verify-lock": (int(os.environ.get("PHASE_WAIT_ALERT_S", 3600)), None),
-    "slot-wait":   (int(os.environ.get("PHASE_WAIT_ALERT_S", 3600)), None),
 }
 
 
@@ -243,7 +241,7 @@ def _reconcile_dead_loop(cid, loop_pid, in_box, out_age, last, dry,
     Runs for EVERY cell, including paused ones the rest of supervision leaves
     alone: this writes a transition and touches nothing else. Without it a
     cell killed while paused keeps a live loop in the agent, its next
-    legitimate Spawn replays as illegal, and every later event for it cascades
+    legitimate Admit replays as illegal, and every later event for it cascades
     — the conformance check goes deaf on exactly the cell that broke.
 
     Signals must agree before declaring the loop gone, because a loop re-execs

@@ -172,6 +172,24 @@ class Cell:
         self._env = self._read_env()
         self._replay_ledger()
 
+    @classmethod
+    def new(cls, cid, task, variant, rep, agent=None, reference=False,
+            workspaces=None, root=None, queues=None):
+        """A cell named by what it runs, before (or without) its workspace:
+        what admission prepares and starts. `agent` is the tag its agent runs
+        as, when that is not this process's AGENT; `queues` the queues its
+        slots are taken from, when not the root's."""
+        c = cls(cid, workspaces=workspaces, root=root)
+        c._queues = queues
+        if agent:
+            c.conf = _config.load(c.root, env=dict(os.environ, AGENT=agent))
+        c._env.setdefault("TASK", task)
+        c._env.setdefault("VARIANT", variant)
+        c._env.setdefault("REPEAT", str(rep))
+        if reference:
+            c._env.setdefault("REFERENCE", "1")
+        return c
+
     # --- identity ---------------------------------------------------------
 
     def _read_env(self):
@@ -956,11 +974,27 @@ class Cell:
         for a variant the experiment does not declare."""
         return _variants.registry().get(self.variant)
 
-    def agent_image(self):
-        """The image this cell's agents run in: its arm's layer over the base."""
+    def _agent_images(self):
         from . import experiment as _experiment
-        from . import image as _image
-        return _image.agent_tag(_experiment.current(), self.root, self.variant_cls)
+        from .agent_image import AgentImage
+        return AgentImage(self.root, _experiment.current(), self.conf)
+
+    def agent_image(self):
+        """The image this cell's agents run in: its variant's layer over the base."""
+        return self._agent_images().tag(self.variant_cls)
+
+    def runs_an_agent(self):
+        """Does this cell's agent run in a container? A tag the experiment
+        does not declare (a reference or stub cell) runs none."""
+        return bool(self.conf.get("AGENT_CLI"))
+
+    def ready_image(self, log=print):
+        """The image this cell's agent runs in, built or brought current if it
+        needs to be (AgentImage.ready). True when ready, or when the cell runs
+        no agent."""
+        if not self.runs_an_agent():
+            return True
+        return self._agent_images().ready(self.variant_cls, log=log)
 
     @property
     def arm(self):
@@ -971,8 +1005,10 @@ class Cell:
 
     @property
     def queues(self):
-        """The queues (fae/queues.py): this cell's slots live there."""
-        return Queues(_plane.queues(self.root), locks=_plane.locks(self.root))
+        """The queues (fae/queues.py): this cell's slots live there. Whoever
+        admits the cell may hand it the queues it admits from."""
+        return getattr(self, "_queues", None) or Queues(_plane.queues(self.root),
+                                                        locks=_plane.locks(self.root))
 
     def verify_lock_acquire(self, poll=5.0):
         """The fleet-wide verify lock: gates are serialized WHOLE, so one
@@ -1031,24 +1067,22 @@ class Cell:
         threading.Thread(target=beat, daemon=True, name="hb").start()
         return stop.set
 
-    SLOTS_HELD_ENV = "CELL_SLOTS_HELD"
+    SLOT_FDS_ENV = "CELL_SLOT_FDS"       # the slots handed to the cell process: fd:path,...
+    IGNORE_SLOTS_ENV = "CELL_IGNORE_SLOTS"  # a manual start that runs without slots
+    NO_SLOTS_EXIT = 48
 
-    def acquire_slots(self):
-        """Take the work slot, and the lock's slot for a locked variant
-        (Queues.acquire_slots). The cell process holds them on its own fds for
-        its whole life, so no lock can outlive the process that took it.
-
-        Returns (slots, None), or (slots, queue) when it stood down — the
-        ledger must name the queue it happened in. The caller closes `slots`.
-        """
+    def slot_counts(self):
+        """(work slots, the lock's slots): how many cells may hold each."""
         s = self.variant_cls
-        return self.queues.acquire_slots(
-            self.cid, int(self.conf.get("WORK_SLOTS", 7)), lock=self.arm,
-            lock_slots=int(self.conf.get(f"ARM_SLOTS_{(self.arm or '').upper()}",
-                                         s.LOCK_SLOTS if s else 1)),
-            on_wait_work=lambda: self.hb(Phase.SLOT_WAIT, 0),
-            on_work_slot=lambda: self.apply(T.ACQUIRE_SLOT),
-            on_wait_lock=lambda: self.hb(Phase.ARM_LOCK, 0))
+        return (int(self.conf.get("WORK_SLOTS", 7)),
+                int(self.conf.get(f"ARM_SLOTS_{(self.arm or '').upper()}",
+                                  s.LOCK_SLOTS if s else 1)))
+
+    def take_slots(self):
+        """This cell's slots, taken now or not at all (Queues.try_slots):
+        (slots, None), or (None, pool) naming the pool with none free."""
+        work, lock_n = self.slot_counts()
+        return self.queues.try_slots(self.cid, work, lock=self.arm, lock_slots=lock_n)
 
     @property
     def infra(self):
@@ -1296,9 +1330,8 @@ class Cell:
         the image it runs in, `-` when that cannot be read."""
         cli = self.conf.get("AGENT_CLI", "claude")
         try:
-            from . import image as _image
-            v = _image.client_versions(self.conf.get("AGENT_IMAGE") or self.agent_image(),
-                                       self.queues.agent_clients_book()).get(cli)
+            v = self._agent_images().client_versions(
+                self.conf.get("AGENT_IMAGE") or self.agent_image()).get(cli)
         except Exception:       # an unreadable version never costs an attempt
             v = None
         return f"client={cli}:{v or '-'}"
@@ -1507,12 +1540,14 @@ class Cell:
     LOCK_EXIT = 43          # another loop owns the workspace
     INFRA_EXIT = 45     # the infra failed under the cell; nothing to charge
 
-    def run(self, stub_overlay=None, agent_cmd=None, verify=None):
+    def run(self, stub_overlay=None, agent_cmd=None, verify=None, ignore_slots=False):
         """The attempt loop. Returns the cell's verdict, or None if it stood
         down without reaching one.
 
-        Holds the loop lock for the whole run and its slots from before the
-        setup hook until after teardown; closing them is the release.
+        Runs with the slots its admission handed to this process (CELL_SLOT_FDS)
+        and refuses to start without them, unless asked to run without slots.
+        Holds the loop lock for the whole run and the slots until after
+        teardown; closing them is the release.
         """
         self._refuse_if_sealed("running")
         gate = verify or self.gate
@@ -1524,8 +1559,24 @@ class Cell:
             self.seal("green" if self.verdict == "green" else "budget")
             return self.verdict
 
+        # The slots first, before anything is written: a cell that may not
+        # run leaves no trace.
+        slots = None
+        handed = os.environ.get(self.SLOT_FDS_ENV, "")
+        if handed:
+            slots = self.queues.adopt_slots(self.cid, handed)
+            if slots is None:
+                raise Halt(f"refusing: the slots handed to {self.cid} are not held",
+                           self.NO_SLOTS_EXIT)
+        elif not ignore_slots:
+            raise Halt(f"refusing: {self.cid} was started without slots; admit it "
+                       f"through the run, or start it without slots explicitly",
+                       self.NO_SLOTS_EXIT)
+
         loop_lock = self.loop_lock()
         if loop_lock is None:
+            if slots is not None:
+                slots.close()
             raise Halt(f"refusing: another loop owns {self.cid}", self.LOCK_EXIT)
         awake = hold_awake(os.getpid())
 
@@ -1543,21 +1594,14 @@ class Cell:
         # How many attempts the LEDGER has spent. Read before any transition:
         # AcquireSlot moves the model's own counter, which is a different thing.
         prior = self.attempts
-        self.apply(T.SPAWN)
 
-        slots = None
         stop_ticker = self.start_ticker()
         setup_env, green, attempt = {}, False, prior
         try:
             self.hb(Phase.SETUP, 0)
             # Always: a cell occupies the rig whether or not an agent runs, and
-            # AcquireSlot is what tells the model an attempt has begun.
-            slots, queue = self.acquire_slots()
-            if queue is not None:
-                self._append("PAUSED", "attempt=0", queue)
-                self.note_pause()
-                self.apply(T.STAND_DOWN, queue)
-                return None
+            # Admit is what tells the model an attempt has begun.
+            self.apply(T.ADMIT)
             if not stub_overlay:
                 try:
                     self.stage_agent()

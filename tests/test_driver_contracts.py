@@ -80,7 +80,7 @@ class TestSealPlacement(DriverCase):
 
     def test_green_seals_after_the_end_line(self):
         c = self.cell()
-        self.assertEqual(c.run(stub_overlay=self.overlay, verify=self.green), "green")
+        self.assertEqual(c.run(ignore_slots=True, stub_overlay=self.overlay, verify=self.green), "green")
         ev = self.events(c)
         self.assertIn("END", ev)
         self.assertNotIn("SEAL", ev)                  # the marker is a file
@@ -89,7 +89,7 @@ class TestSealPlacement(DriverCase):
 
     def test_a_spent_budget_seals_too(self):
         c = self.cell()
-        self.assertEqual(c.run(stub_overlay=self.overlay, verify=self.red), "failed")
+        self.assertEqual(c.run(ignore_slots=True, stub_overlay=self.overlay, verify=self.red), "failed")
         self.assertIn("END", self.events(c))
         self.assertIn("verdict=budget", (c.ws / ".sealed").read_text())
 
@@ -98,23 +98,23 @@ class TestSealPlacement(DriverCase):
         gate = lambda: [cell.VerifyResult(green=False, shape="G2",
                                           stage_failed="exclusive-lock", charge=False)]
         with self.assertRaises(cell.Halt):
-            c.run(stub_overlay=self.overlay, verify=gate)
+            c.run(ignore_slots=True, stub_overlay=self.overlay, verify=gate)
         self.assertNotIn("END", self.events(c))
         self.assertFalse((c.ws / ".sealed").exists())
 
     def test_a_pause_does_not_seal(self):
         c = self.cell()
         (c.ws / ".paused").write_text("op\n")
-        self.assertIsNone(c.run(stub_overlay=self.overlay, verify=self.green))
+        self.assertIsNone(c.run(ignore_slots=True, stub_overlay=self.overlay, verify=self.green))
         self.assertNotIn("END", self.events(c))
         self.assertFalse((c.ws / ".sealed").exists())
 
     def test_a_sealed_cell_refuses_to_run_again(self):
         c = self.cell()
-        c.run(stub_overlay=self.overlay, verify=self.green)
+        c.run(ignore_slots=True, stub_overlay=self.overlay, verify=self.green)
         c2 = cell.Cell(self.CID, workspaces=self.wsdir, root=self.root)
         with self.assertRaises(cell.Sealed):
-            c2.run(stub_overlay=self.overlay, verify=self.green)
+            c2.run(ignore_slots=True, stub_overlay=self.overlay, verify=self.green)
 
 
 class TestTheNoEditOracleIsTheJudgedTree(DriverCase):
@@ -165,7 +165,7 @@ class TestAgentRetries(DriverCase):
         c.conf.values["LIMIT_RETRY_S"] = "0"
         calls = self._agent_script(c, [("rate limit reached\n", 1),
                                        ("built the thing\n", 0)])
-        self.assertEqual(c.run(verify=self.green), "green")
+        self.assertEqual(c.run(ignore_slots=True, verify=self.green), "green")
         self.assertEqual(calls, [1, 0])
         ev = self.events(c)
         self.assertIn("WAIT", ev)
@@ -178,7 +178,7 @@ class TestAgentRetries(DriverCase):
         c.conf.values["AGENT_FAULT_RETRIES"] = "1"
         calls = self._agent_script(c, [("", 1)])
         with self.assertRaises(cell.Halt) as cm:
-            c.run(verify=self.green)
+            c.run(ignore_slots=True, verify=self.green)
         self.assertEqual(cm.exception.code, 42)
         self.assertEqual(len(calls), 2)                  # 1 + cap
         ev = self.events(c)
@@ -195,7 +195,7 @@ class TestASetupFailureIsLoud(DriverCase):
         c = self.cell()
         c.setup = lambda: (7, {})
         with self.assertRaises(cell.Halt) as cm:
-            c.run(verify=self.green)
+            c.run(ignore_slots=True, verify=self.green)
         self.assertEqual(cm.exception.code, 45)
         alert = [l for l in (c.ws / "iterations.log").read_text().splitlines()
                  if "\tALERT\t" in l][0]
@@ -206,7 +206,7 @@ class TestASetupFailureIsLoud(DriverCase):
         c = self.cell()
         c.setup = lambda: (7, {})
         with self.assertRaises(cell.Halt) as cm:
-            c.run(stub_overlay=self.overlay, verify=self.green)
+            c.run(ignore_slots=True, stub_overlay=self.overlay, verify=self.green)
         self.assertEqual(cm.exception.code, 45)
 
 class TestTheTickerIsArmedBeforeTheAgent(DriverCase):
@@ -232,7 +232,7 @@ class TestEveryExitClearsTheHolderNotes(DriverCase):
         c = self.cell()
         c.setup = lambda: (7, {})
         with self.assertRaises(cell.Halt):
-            c.run(verify=self.green)
+            c.run(ignore_slots=True, verify=self.green)
         self.assertEqual(self._notes_naming(c), [])
 
     def test_a_void_leaves_no_note(self):
@@ -240,7 +240,7 @@ class TestEveryExitClearsTheHolderNotes(DriverCase):
         gate = lambda: [cell.VerifyResult(green=False, shape="G2",
                                           stage_failed="store", charge=False)]
         with self.assertRaises(cell.Halt):
-            c.run(stub_overlay=self.overlay, verify=gate)
+            c.run(ignore_slots=True, stub_overlay=self.overlay, verify=gate)
         self.assertEqual(self._notes_naming(c), [])
 
 
@@ -280,7 +280,7 @@ class TestWallsAreNotBuilds(DriverCase):
                 c.conf.values["LIMIT_RETRY_S"] = "0"
                 calls = self._agent_script(c, [(wall, rc, False),
                                                ("built the thing\n", 0, True)])
-                self.assertEqual(c.run(verify=self.green), "green")
+                self.assertEqual(c.run(ignore_slots=True, verify=self.green), "green")
                 self.assertEqual(calls, [rc, 0])
                 ev = self.events(c)
                 self.assertEqual(ev.count("WAIT"), 1)
@@ -295,7 +295,7 @@ class TestWallsAreNotBuilds(DriverCase):
         c.conf.values["LIMIT_RETRY_S"] = "0"
         calls = self._agent_script(c, [(LIMIT_LINE + "\n", 0, False),
                                        ("built the thing\n", 0, True)])
-        self.assertEqual(c.run(verify=self.green), "green")
+        self.assertEqual(c.run(ignore_slots=True, verify=self.green), "green")
         self.assertEqual(calls, [0, 0])
         ev = self.events(c)
         self.assertEqual(ev.count("WAIT"), 1)
@@ -306,7 +306,7 @@ class TestWallsAreNotBuilds(DriverCase):
         from fae.testagent import LIMIT_LINE
         c = self.cell()
         self._agent_script(c, [(f"added backoff\n{LIMIT_LINE}\n", 0, True)])
-        self.assertEqual(c.run(verify=self.green), "green")
+        self.assertEqual(c.run(ignore_slots=True, verify=self.green), "green")
         self.assertNotIn("WAIT", self.events(c))
 
     def test_an_auth_wall_halts_systemic_without_an_attempt(self):
@@ -314,7 +314,7 @@ class TestWallsAreNotBuilds(DriverCase):
         c = self.cell()
         self._agent_script(c, [(AUTH_LINE + "\n", 0, False)])
         with self.assertRaises(cell.Halt) as cm:
-            c.run(verify=self.green)
+            c.run(ignore_slots=True, verify=self.green)
         self.assertEqual(cm.exception.code, 42)
         ev = self.events(c)
         self.assertIn("HALT", ev)
@@ -330,7 +330,7 @@ class TestWallsAreNotBuilds(DriverCase):
         c.conf.values["LIMIT_RETRY_S"] = "0"
         pause = lambda: (c.ws / ".paused").write_text("manual by=operator\n")
         self._agent_script(c, [(wall, 0, pause)])
-        self.assertIsNone(c.run(verify=self.green))
+        self.assertIsNone(c.run(ignore_slots=True, verify=self.green))
         ev = self.events(c)
         self.assertIn("PAUSED", ev)
         self.assertNotIn("HALT", ev)
@@ -399,6 +399,6 @@ class TestTheDriverKeepsTheHostAwake(DriverCase):
 
         c = self.cell()
         with mock.patch.object(cellmod, "hold_awake", fake_hold_awake):
-            self.assertEqual(c.run(stub_overlay=self.overlay, verify=self.green), "green")
+            self.assertEqual(c.run(ignore_slots=True, stub_overlay=self.overlay, verify=self.green), "green")
         self.assertEqual(calls, [os.getpid()])
         self.assertEqual(ended, [True])

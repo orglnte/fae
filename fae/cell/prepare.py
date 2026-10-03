@@ -79,7 +79,7 @@ def _transitions_log(root):
 def _log_retire(root, cid, moved):
     """A wiped workspace ends the cell under that id; the id's next events are
     a new cell. The conformance replay needs the boundary, or it judges the new
-    cell's Spawn against the old cell's verdict."""
+    cell's Admit against the old cell's verdict."""
     log = _transitions_log(root)
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a") as f:

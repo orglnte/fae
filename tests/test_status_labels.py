@@ -50,8 +50,8 @@ class TestALongWaitIsNotAStall(SweepCase):
         return (self.cell / "iterations.log").read_text()
 
     def test_a_lock_wait_past_its_limit_is_a_long_wait(self):
-        ledger = self._alert_for("arm-lock")
-        self.assertIn("WAIT-LONG 'arm-lock'", ledger)
+        ledger = self._alert_for("verify-lock")
+        self.assertIn("WAIT-LONG 'verify-lock'", ledger)
         self.assertNotIn("PHASE-STALLED", ledger)
 
     def test_a_working_phase_past_its_limit_is_still_a_stall(self):

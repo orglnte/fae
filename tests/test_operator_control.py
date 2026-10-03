@@ -382,29 +382,55 @@ class TestExactlyOneCellRule(OperatorTestCase):
             runs.ops.spawn(mock.Mock(agent="sonnet", variant="beta_apidocs", rep="2,3", task="T1",
                                  budget=10, fresh=False))
 
-    def _spawn_one(self, image_ready):
-        from fae.driver import image
-        args = mock.Mock(agent="sonnet", variant="beta_apidocs",
-                         rep="1", task="T1", budget=10, fresh=False)
-        with mock.patch.object(image, "ensure_agent_for", return_value=image_ready) as ready, \
+    def _spawn_one(self, image_ready=True, variant="beta_apidocs", run_up=False, ignore=False):
+        from fae.cell import Cell
+        from fae.driver.conduct import Conduct
+        args = mock.Mock(agent="sonnet", variant=variant, rep="1", task="T1", budget=10,
+                         fresh=False, dangerously_ignore_slots=ignore)
+        out = io.StringIO()
+        with mock.patch.object(Cell, "ready_image", return_value=image_ready) as ready, \
+             mock.patch.object(Cell, "prepare"), \
+             mock.patch.object(Conduct, "pid", return_value=4242 if run_up else None), \
              mock.patch.object(runs.ops, "_spawn_detached", return_value=None) as spawned, \
              mock.patch.object(runs.ops, "prestart_clean"), \
-             mock.patch.object(runs.state, "loop_parents", return_value={}):
+             mock.patch.object(runs.state, "loop_parents", return_value={}), \
+             contextlib.redirect_stdout(out):
             try:
                 runs.ops.spawn(args)
-            except SystemExit:
-                pass
-        return ready, spawned
+            except SystemExit as e:
+                out.write(str(e))
+        return ready, spawned, out.getvalue()
 
-    def test_spawn_builds_the_arms_agent_image_before_the_cell_starts(self):
-        ready, spawned = self._spawn_one(True)
-        ready.assert_called_once_with("beta_apidocs")
+    def test_spawn_readies_the_agent_image_before_the_cell_starts(self):
+        ready, spawned, _ = self._spawn_one(True)
+        ready.assert_called_once()
         spawned.assert_called_once()
 
-    def test_spawn_refuses_when_the_arms_agent_image_cannot_be_built(self):
+    def test_spawn_refuses_when_the_agent_image_cannot_be_built(self):
         # a cell whose agent image is missing charges every attempt to the agent
-        _, spawned = self._spawn_one(False)
+        _, spawned, _ = self._spawn_one(False)
         spawned.assert_not_called()
+
+    def test_a_manual_spawn_runs_without_slots(self):
+        from fae.cell import Cell
+        _, spawned, _ = self._spawn_one()
+        env = spawned.call_args.args[1]
+        self.assertEqual(env.get(Cell.IGNORE_SLOTS_ENV), "1")
+        self.assertNotIn(Cell.SLOT_FDS_ENV, env)
+
+    def test_spawn_refuses_while_the_run_is_up(self):
+        _, spawned, out = self._spawn_one(run_up=True)
+        spawned.assert_not_called()
+        self.assertIn("--dangerously-ignore-slots", out)
+
+    def test_spawn_while_the_run_is_up_needs_the_flag(self):
+        _, spawned, _ = self._spawn_one(run_up=True, ignore=True)
+        spawned.assert_called_once()
+
+    def test_a_variant_with_a_lock_warns_about_its_shared_resource(self):
+        _, spawned, out = self._spawn_one(variant="alpha_apidocs")
+        spawned.assert_called_once()
+        self.assertIn("WARNING: alpha_apidocs uses the shared resource 'alpha'", out)
 
 
 class TestStopCells(OperatorTestCase):
@@ -597,41 +623,6 @@ class TestConductResume(OperatorTestCase):
         self.assertTrue(runs.queues.lane_dir("sonnet").is_dir())
         self.assertFalse(runs.queues.lane_dir("sonnet", parked=True).exists())
 
-
-
-class TestArmWaitHolderIsNotBlocked(OperatorTestCase):
-    """With an arm cap >1, two holders each rendered the OTHER as their
-    blocker — a circular 'blocked by' that read as deadlock (2026-08-12)."""
-
-    def _hold(self, arm, slot, cid, really=True):
-        """Take the slot for real. The sidecar alone proves nothing now — a
-        held lock is a kernel fact, and only then is the name worth reading."""
-        d = self.queues / f"arm-{arm}.slots"
-        d.mkdir(parents=True, exist_ok=True)
-        path = d / f"slot-{slot}"
-        if really:
-            f = runs.mutex.open_lock(path)
-            self.assertTrue(runs.mutex.try_fd(f.fileno()))
-            self.addCleanup(f.close)
-        else:
-            path.touch()
-        runs.mutex.note_holder(path, cid, os.getpid())
-
-    def test_a_slot_holder_reports_no_blocker(self):
-        a = "sonnet_high_alpha_apidocs_T1_r1"
-        b = "haiku_high_alpha_apidocs_T1_r2"
-        (self.ws / a).mkdir(exist_ok=True)
-        self._hold("alpha", 1, a)
-        self._hold("alpha", 2, b)
-        self.assertIsNone(runs.state.arm_wait(self.ws / a),
-                          "a holder must never display as blocked")
-
-    def test_a_waiter_still_sees_the_holder(self):
-        a = "sonnet_high_alpha_apidocs_T1_r1"
-        b = "haiku_high_alpha_apidocs_T1_r2"
-        (self.ws / a).mkdir(exist_ok=True)
-        self._hold("alpha", 1, b)
-        self.assertEqual(runs.state.arm_wait(self.ws / a), b)
 
 
 class TestParseResetHint(unittest.TestCase):
@@ -1327,7 +1318,7 @@ class TestResumeAnswersTheLedgerNotTheFile(OperatorTestCase):
 
     def test_no_resume_when_the_ledger_never_paused(self):
         cid = CIDS[0]
-        self._log(("Spawn", cid, ""))
+        self._log(("Admit", cid, ""))
         (self.ws / cid / ".paused").write_text("raw file, never honored\n")
         runs.state.unpause(cid)
         self.assertEqual(self._resumes(), [])

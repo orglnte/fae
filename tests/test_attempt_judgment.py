@@ -39,8 +39,7 @@ class TestOneJudgmentPerAttempt(unittest.TestCase):
 
 class TestThePhaseSet(unittest.TestCase):
 
-    EMITTED = {"setup", "slot-wait", "arm-lock", "agent", "limit",
-               "verify-lock", "verify"}
+    EMITTED = {"setup", "agent", "limit", "verify-lock", "verify"}
 
     def _emitted(self):
         # the driver declares every phase through self.hb(Phase.X) — one

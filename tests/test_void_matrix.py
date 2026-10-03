@@ -84,7 +84,7 @@ class TestVoidStagesRefundTheAttempt(VoidMatrixCase):
         gate = lambda: [cell.VerifyResult(green=False, shape="G2",
                                           stage_failed=stage, charge=False)]
         with self.assertRaises(cell.Halt) as cm:
-            c.run(stub_overlay=self.overlay, verify=gate)
+            c.run(ignore_slots=True, stub_overlay=self.overlay, verify=gate)
         self.assertEqual(cm.exception.code, 45)
         acts = [t[0] for t in self.transitions()]
         self.assertEqual(acts[-3:], ["AcquireVerify", "VerifyFail", "ReleaseSlot"])
@@ -106,7 +106,7 @@ class TestVoidStagesRefundTheAttempt(VoidMatrixCase):
         gate = lambda: [cell.VerifyResult(
             green=False, shape="G1", stage_failed="contract", charge=False,
             contract=["the lease ledger is not empty at bring-up"])]
-        self.assertIsNone(c.run(stub_overlay=self.overlay, verify=gate))
+        self.assertIsNone(c.run(ignore_slots=True, stub_overlay=self.overlay, verify=gate))
         events = self.ledger_events(c)
         self.assertNotIn("ITER", events)
         self.assertIn("PAUSED", events)
@@ -123,7 +123,7 @@ class TestVoidStagesRefundTheAttempt(VoidMatrixCase):
         with mock.patch.object(cell.Surface, "check", return_value=["Dockerfile (modified)"]), \
                 mock.patch.object(cell.Cell, "verify", side_effect=AssertionError("verify ran")):
             with self.assertRaises(cell.Halt) as cm:
-                c.run(stub_overlay=self.overlay)
+                c.run(ignore_slots=True, stub_overlay=self.overlay)
         self.assertEqual(cm.exception.code, 45)
         vf = [t for t in self.transitions() if t[0] == "VerifyFail"][-1]
         self.assertIn("void=harness-heal", vf[2])
@@ -153,7 +153,7 @@ class TestVoidStagesRefundTheAttempt(VoidMatrixCase):
         c = self.cell()
         gate = lambda: [cell.VerifyResult(green=False, shape="G2",
                                           stage_failed="scaling")]
-        self.assertEqual(c.run(stub_overlay=self.overlay, verify=gate),
+        self.assertEqual(c.run(ignore_slots=True, stub_overlay=self.overlay, verify=gate),
                          "failed")
         events = self.ledger_events(c)
         self.assertIn("ITER", events)
@@ -171,7 +171,7 @@ class TestRow19TheNoEditGuard(VoidMatrixCase):
         c.ckpt.init()
         c.ckpt.judged = c.ckpt.commit("seeded as judged")
         never = lambda: self.fail("verify ran on an unedited build")
-        self.assertEqual(c.run(stub_overlay=self.overlay, verify=never),
+        self.assertEqual(c.run(ignore_slots=True, stub_overlay=self.overlay, verify=never),
                          "failed")
         events = self.ledger_events(c)
         self.assertIn("NOEDIT", events)
@@ -195,7 +195,7 @@ class TestRow20HealRevertsOutOfSurfaceEdits(VoidMatrixCase):
         gate = lambda: [cell.VerifyResult(green=True, shape=s)
                         for s in SHAPES]
         with mock.patch.object(c.variant_cls, "TEMPLATE", (skel,)):
-            self.assertEqual(c.run(stub_overlay=self.overlay, verify=gate), "green")
+            self.assertEqual(c.run(ignore_slots=True, stub_overlay=self.overlay, verify=gate), "green")
         self.assertEqual((art / "config.py").read_text(), "FIXED = True\n")
         events = self.ledger_events(c)
         self.assertIn("HEAL", events)
@@ -207,7 +207,7 @@ class TestRow20HealRevertsOutOfSurfaceEdits(VoidMatrixCase):
         c = self.cell()
         (self.overlay / "conftest.py").write_text("import sys\n")
         gate = lambda: [cell.VerifyResult(green=True, shape=s) for s in SHAPES]
-        self.assertEqual(c.run(stub_overlay=self.overlay, verify=gate), "green")
+        self.assertEqual(c.run(ignore_slots=True, stub_overlay=self.overlay, verify=gate), "green")
         self.assertFalse((c.artifacts / "conftest.py").exists())
         self.assertEqual((c.ws / ".out-of-surface" / "attempt-1" / "conftest.py").read_text(),
                          "import sys\n")
@@ -222,7 +222,7 @@ class TestRow20HealRevertsOutOfSurfaceEdits(VoidMatrixCase):
         (c.ws / "heal.last").write_text("Dockerfile\n")
         (c.ws / "evict.last").write_text("conftest.py\n")
         gate = lambda: [cell.VerifyResult(green=True, shape=s) for s in SHAPES]
-        c.run(stub_overlay=self.overlay, verify=gate)
+        c.run(ignore_slots=True, stub_overlay=self.overlay, verify=gate)
         self.assertFalse((c.ws / "heal.last").exists())
         self.assertFalse((c.ws / "evict.last").exists())
 
@@ -290,7 +290,7 @@ class TestAVoidedRunIsZeroed(VoidMatrixCase):
     def charge_attempt_1(self):
         """Attempt 1 charged (scaling fail), run stood down at the boundary."""
         c, gate = self.scripted({"app/authored.txt": "A\n"}, self.FAIL, pause_after=True)
-        self.assertIsNone(c.run(verify=gate))
+        self.assertIsNone(c.run(ignore_slots=True, verify=gate))
         (c.ws / ".paused").unlink()
         iters = [l for l in self.ledger(c) if "\tITER\t" in l]
         self.assertEqual(len(iters), 1)
@@ -302,13 +302,13 @@ class TestAVoidedRunIsZeroed(VoidMatrixCase):
         c, gate = self.scripted({"app/authored.txt": "B\n", "app/voided.txt": "x\n"},
                                 self.VOID)
         with self.assertRaises(cell.Halt):
-            c.run(verify=gate)
+            c.run(ignore_slots=True, verify=gate)
         voided = c.tree()
         self.assertNotEqual(voided, charged)
         self.assertTrue((c.artifacts / "app/voided.txt").exists())
         # attempt 2 again, charged: it starts where attempt 1 was charged
         c, gate = self.scripted({"app/authored.txt": "C\n"}, self.FAIL, pause_after=True)
-        self.assertIsNone(c.run(verify=gate))
+        self.assertIsNone(c.run(ignore_slots=True, verify=gate))
         self.assertEqual(self.restores(c),
                          [f"tree={charged[:12]} (was {voided[:12]})"])
         self.assertEqual(self.pre_trees(c)[-1], charged[:12],
@@ -323,10 +323,10 @@ class TestAVoidedRunIsZeroed(VoidMatrixCase):
         charged = self.charge_attempt_1()
         c, gate = self.scripted({"app/authored.txt": "B\n"}, self.VOID)
         with self.assertRaises(cell.Halt):
-            c.run(verify=gate)
+            c.run(ignore_slots=True, verify=gate)
         voided = c.tree()
         c, gate = self.scripted({"app/authored.txt": "C\n"}, self.FAIL, pause_after=True)
-        c.run(verify=gate)
+        c.run(ignore_slots=True, verify=gate)
         chain = self.chain(c)
         self.assertIn(f"{voided} abandoned before attempt 2 (never charged)", chain)
         self.assertIn(f"{charged} pre attempt 2", chain)
@@ -338,13 +338,13 @@ class TestAVoidedRunIsZeroed(VoidMatrixCase):
         charged = self.charge_attempt_1()
         c, gate = self.scripted({"app/authored.txt": "B\n"}, self.VOID)
         with self.assertRaises(cell.Halt):
-            c.run(verify=gate)
+            c.run(ignore_slots=True, verify=gate)
         self.assertEqual(c.ckpt.judged, charged)
         calls = []
         c, gate = self.scripted({"app/authored.txt": "B\n"},
                                 lambda: calls.append(1) or self.FAIL(),
                                 pause_after=True)
-        c.run(verify=gate)
+        c.run(ignore_slots=True, verify=gate)
         self.assertEqual(len(calls), 1, "the rebuilt voided tree was not verified")
         iters = [l for l in self.ledger(c) if "\tITER\t" in l]
         self.assertNotIn("no-edit", iters[-1])
@@ -352,11 +352,11 @@ class TestAVoidedRunIsZeroed(VoidMatrixCase):
     def test_a_void_on_the_first_attempt_retries_from_the_prepared_tree(self):
         c, gate = self.scripted({"app/authored.txt": "B\n"}, self.VOID)
         with self.assertRaises(cell.Halt):
-            c.run(verify=gate)
+            c.run(ignore_slots=True, verify=gate)
         seed = self.pre_trees(c)[0]
         self.assertNotEqual(c.tree()[:12], seed)
         c, gate = self.scripted({"app/authored.txt": "C\n"}, self.FAIL, pause_after=True)
-        c.run(verify=gate)
+        c.run(ignore_slots=True, verify=gate)
         self.assertEqual(self.pre_trees(c), [seed, seed])
         self.assertEqual(len(self.restores(c)), 1)
         self.assertTrue(self.restores(c)[0].startswith(f"tree={seed}"))
@@ -371,10 +371,10 @@ class TestAVoidedRunIsZeroed(VoidMatrixCase):
             raise KeyboardInterrupt("signal 15")
         c, gate = self.scripted({"app/authored.txt": "B\n"}, stopped)
         with self.assertRaises(KeyboardInterrupt):
-            c.run(verify=gate)
+            c.run(ignore_slots=True, verify=gate)
         self.assertIn("died: KeyboardInterrupt", self.ledger(c)[-1])
         c, gate = self.scripted({"app/authored.txt": "C\n"}, self.FAIL, pause_after=True)
-        c.run(verify=gate)
+        c.run(ignore_slots=True, verify=gate)
         self.assertEqual(len(self.restores(c)), 1)
         self.assertEqual(self.pre_trees(c)[-1], charged[:12])
 
@@ -392,11 +392,11 @@ class TestAVoidedRunIsZeroed(VoidMatrixCase):
             (c.ws / ".paused").write_text("test\n")     # lands before the vlock
             return 0
         c._agent = agent
-        self.assertIsNone(c.run(verify=lambda: self.fail("verified while paused")))
+        self.assertIsNone(c.run(ignore_slots=True, verify=lambda: self.fail("verified while paused")))
         self.assertIn("verify-lock queue", self.ledger(c)[-1])
         (c.ws / ".paused").unlink()
         c, gate = self.scripted({"app/authored.txt": "C\n"}, self.FAIL, pause_after=True)
-        c.run(verify=gate)
+        c.run(ignore_slots=True, verify=gate)
         self.assertEqual(len(self.restores(c)), 1)
         self.assertEqual(self.pre_trees(c)[-1], charged[:12])
 
@@ -408,12 +408,12 @@ class TestAVoidedRunIsZeroed(VoidMatrixCase):
         c.checkpoint = (lambda orig: lambda label: calls.append(label) or orig(label))(c.checkpoint)
         # a scripted agent that always writes A: attempt 1 charged, attempt 2
         # is a no-edit charge, ... until the budget — every boundary charged
-        self.assertEqual(c.run(verify=gate), "failed")
+        self.assertEqual(c.run(ignore_slots=True, verify=gate), "failed")
         self.assertEqual(self.restores(c), [])
         self.assertFalse(any("abandoned" in l for l in calls))
 
     def test_a_first_start_has_nothing_to_restore(self):
         c, gate = self.scripted({"app/authored.txt": "A\n"}, self.FAIL, pause_after=True)
         self.assertIsNone(c.charged_tree())
-        c.run(verify=gate)
+        c.run(ignore_slots=True, verify=gate)
         self.assertEqual(self.restores(c), [])
