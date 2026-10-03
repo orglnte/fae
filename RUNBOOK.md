@@ -36,7 +36,7 @@ verdict rules: [`AGENTS.md`](AGENTS.md).
 Then let the preflight localize anything missing:
 
 ```sh
-python3 cli.py experiment check      # the definition, every variant file, the invariants, each variant's infra, the agents' images, no leftovers (--walk: step by step; --trace: the TLA+ replay)
+python3 cli.py experiment check      # the definition, every variant file, the invariants, each variant's infra, the agents' images, no leftovers (--walk: step by step; --tla-trace: the TLA+ replay)
 python3 cli.py experiment infra  # [ok]/[HALT] per variant: its daemon, tools and images
 python3 cli.py experiment smoke      # one reference cell per way of being judged, one arrangement (--full-gate: the whole gate)
 ```

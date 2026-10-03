@@ -2,7 +2,7 @@
 (transitions.log archived and reseeded), infra (each variant's preflight),
 smoke (the reference through the driver, no agent), prepare (the matrix's
 workspaces seeded, nothing launched), init, and an experiment's own
-commands. The TLA+ helpers here serve `experiment check --trace`.
+commands. The TLA+ helpers here serve `experiment check --tla-trace`.
 """
 from __future__ import annotations
 

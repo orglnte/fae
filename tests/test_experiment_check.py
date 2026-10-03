@@ -192,7 +192,7 @@ class TestTheCli(unittest.TestCase):
 class TestTheFoldedSteps(CheckCase):
     """What were `rig selftest`, `rig agent-image` and `rig zombies` are steps
     of the check: each finds its failure and names the fix; the docker ones
-    skip under --static and the trace replay runs only with --trace."""
+    skip under --static and the trace replay runs only with --tla-trace."""
 
     def findings(self, step, ctx=None):
         return step(ctx or self.ctx())
@@ -284,7 +284,7 @@ class TestTheFoldedSteps(CheckCase):
             steps = tuple(s if s.key != "trace" else check.Step(s.key, s.title, s.why, s.howto,
                                                                  check._trace, s.needs, s.docker,
                                                                  s.opt_in) for s in check.STEPS)
-            self.run_check(steps=steps, trace=True)
+            self.run_check(steps=steps, tla_trace=True)
         self.assertIn("  ok      The fleet's transitions replay against the model", self.lines)
 
 
