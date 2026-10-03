@@ -368,8 +368,8 @@ class Conduct:
                             extra = ""
                             if st == "DONE·green":
                                 try:
-                                    L = common.ledger.parse(common.WS / cid,
-                                                            gate_n=common.definition().gate.arity)
+                                    L = common.cell(cid).read_ledger(
+                                        gate_n=common.definition().gate.arity)
                                     extra = (f" (attempt {L.get('green_at', '?')}"
                                              f"/{L.get('att', '?')}, "
                                              f"gate {L.get('gate', 0)}/{L.get('gate_n', 6)})")

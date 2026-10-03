@@ -23,7 +23,7 @@ from fae.driver import common
 from fae.driver import ops
 from fae.driver import state
 from fae.driver.common import (
-    ROOT, cell_id, ledger,
+    ROOT, cell_id,
     parse_cell_id,
 )
 
@@ -124,17 +124,18 @@ def _observed_epoch():
     for d in sorted(common.WS.iterdir()):
         if not d.is_dir() or not parse_cell_id(d.name):
             continue
-        L = ledger.parse(d)
+        c = state._cell(d)
+        L = c.read_ledger()
         outcome = L["verdict"] or "none"
-        if (d / ".cancelled").exists():
+        if c.cancelled:
             intent = "killed"
-        elif state.pause_lock(d.name):
+        elif (c.pause_request() or (None,))[0]:
             intent = "paused"
         else:
             intent = "run"
         slot = d.name in slot_holders
         if d.name in loops:
-            hb = state.heartbeat(d)
+            hb = state.heartbeat(d, c)
             loop = _loop_of_phase((hb or {}).get("phase") or "", slot)
         else:
             loop = "none"
@@ -151,15 +152,15 @@ def _epoch_fields(c):
 
 
 def trace_reset(args):
-    """Archive transitions.log and start a new one from a RECORDED state.
+    """Re-anchor transitions.log on a RECORDED state.
 
     The live-trace check replays this log against .tla/Runs.tla from the
     spec's Init — every cell idle, intent "run", no outcome. That is only true
-    of a genuinely cold fleet. Resetting the log at any other moment makes the
-    replay judge real events against a starting state that never existed: on
-    2026-07-30 the log was reset while 65 cells sat paused, and the `resume
-    all` that followed produced 65 "Resume not ENABLED" violations plus 142
-    cascaded from them, because Resume requires intent="paused" and the replay
+    of a genuinely cold fleet. Replaying from Init at any other moment judges
+    real events against a starting state that never existed: on 2026-07-30
+    the log was reset while 65 cells sat paused, and the `resume all` that
+    followed produced 65 "Resume not ENABLED" violations plus 142 cascaded
+    from them, because Resume requires intent="paused" and the replay
     believed every cell was "run".
 
     The fix is NOT to have the replayer infer the starting state at read time.
@@ -171,12 +172,10 @@ def trace_reset(args):
 
         <ts>  EPOCH  <cid>  outcome=green intent=paused loop=none attempts=1
 
-    One line per cell that differs from Init; cells already matching Init are
-    omitted. Everything after the epoch is checked at full strength. What is
-    NOT checked is history from before it — that history was never logged, and
-    saying so plainly beats pretending otherwise.
+    One line per cell, appended as one block (Cell.reanchor): the log is never
+    rewritten, and the replay starts from its last EPOCH block. Everything
+    after it is checked at full strength; what came before is not evidence.
     """
-    common.TRANSITIONS_LOG.parent.mkdir(parents=True, exist_ok=True)
     cells = _observed_epoch()
     default = dict(outcome="none", intent="run", loop="none", attempts=0,
                    slot=False, verify=False)
@@ -184,35 +183,26 @@ def trace_reset(args):
                  if any(c[k] != v for k, v in default.items())]
 
     if args.dry_run:
-        print(f"would archive {common.TRANSITIONS_LOG.name} and write "
-              f"{len(differing)} EPOCH line(s) for {len(cells)} cell(s):")
+        print(f"would append {len(cells)} EPOCH line(s) to {common.TRANSITIONS_LOG.name}, "
+              f"{len(differing)} of them away from Init:")
         for c in differing[:10]:
             print(f"  {c['cid']}  {_epoch_fields(c)}")
         if len(differing) > 10:
             print(f"  ... and {len(differing) - 10} more")
         return
+    if not cells:
+        print("no cells: nothing to re-anchor")
+        return
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    if common.TRANSITIONS_LOG.exists():
-        archived = common.TRANSITIONS_LOG.parent / f"transitions.archived-{stamp}.log"
-        common.TRANSITIONS_LOG.rename(archived)
-        print(f"archived {archived.name}")
-
-    ts = f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}"
-    with common.TRANSITIONS_LOG.open("w") as f:
-        f.write(f"# transitions log RESET {ts}\n")
-        f.write(f"# EPOCH lines below record the observed state of {len(cells)} "
-                f"cell(s) at reset time.\n")
-        f.write("# Replay starts from THIS state, not the spec's Init. Cells "
-                "matching Init are omitted.\n")
-        for c in differing:
-            f.write(f"{ts}\tEPOCH\t{c['cid']}\t{_epoch_fields(c)}\n")
-    print(f"wrote {len(differing)} EPOCH line(s) ({len(cells) - len(differing)} "
-          f"cell(s) already at Init)")
+    from fae.cell import Cell
+    Cell.reanchor([(c["cid"], _epoch_fields(c)) for c in cells], root=ROOT,
+                  transitions=common.TRANSITIONS_LOG)
+    print(f"appended {len(cells)} EPOCH line(s) ({len(cells) - len(differing)} "
+          f"cell(s) at Init)")
     live = [c for c in differing if c["loop"] != "none"]
     if live:
         print(f"NOTE: {len(live)} cell(s) have a LIVE loop — their in-flight "
-              f"attempt straddles the reset:")
+              f"attempt straddles the re-anchor:")
         for c in live:
             print(f"  {c['cid']} (loop={c['loop']})")
 
@@ -276,11 +266,9 @@ def _smoke_classify(ws):
     """(green, one-line verdict): the ledger decides, as for any cell;
     metrics.json only localizes the break (the stage, the log to read) when
     the verifier's metrics carry the fields read here."""
-    L = common.ledger.parse(ws) if (ws / "iterations.log").is_file() else {}
-    try:
-        m = json.loads((ws / "metrics.json").read_text())
-    except (OSError, ValueError):
-        m = None
+    c = state._cell(ws)
+    L = c.read_ledger() if c.has_ledger else {}
+    m = c.read_metrics() or None
     e2e = f"{(m or {}).get('e2e_pass')}/{(m or {}).get('e2e_total')}"
     # no ledger verdict: the verifier's own green, when its metrics carry one
     green = L.get("verdict") == "green" if L.get("verdict") else \

@@ -484,7 +484,7 @@ def experiment_check(walk: bool = typer.Option(False, "--walk",
 @rig_app.command("trace-reset")
 def rig_trace_reset(dry_run: bool = typer.Option(False, "--dry-run",
                                                  help="preview the EPOCH lines, write nothing")):
-    """Archive transitions.log, restart it from a recorded EPOCH state."""
+    """Re-anchor transitions.log: append the recorded state of every cell (EPOCH)."""
     rig.trace_reset(_ns(dry_run=dry_run))
 
 

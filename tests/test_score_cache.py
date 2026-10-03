@@ -30,6 +30,10 @@ class CacheCase(unittest.TestCase):
         (self.art / "app" / "b.py").write_text("y = 2\n\nz = 3\n")
         self.addCleanup(self._tmp.cleanup)
 
+    def cell(self):
+        from fae.cell.cell import Cell
+        return Cell(self.ws.name, workspaces=self.ws.parent)
+
     def surface(self, cache):
         return sc.author_surface(self.art, cache)
 
@@ -86,16 +90,16 @@ class TestPartialInvalidation(CacheCase):
         self.assertNotIn("app/b.py", cache["surface_files"])
 
     def test_cached_input_reuses_until_mtime_moves(self):
-        f = self.ws / "cell.env"
-        f.write_text("A=1\n")
+        f = self.ws / "metrics.json"
+        f.write_text('{"A": 1}')
         cache = {}
         calls = []
-        parse = lambda p: (calls.append(1), sc.read_env(p))[1]
-        self.assertEqual(sc.cached_input(cache, "env", f, parse)["A"], "1")
-        self.assertEqual(sc.cached_input(cache, "env", f, parse)["A"], "1")
+        read = lambda: (calls.append(1), json.loads(f.read_text()))[1]
+        self.assertEqual(sc.cached_input(cache, "m", f.stat().st_mtime_ns, read)["A"], 1)
+        self.assertEqual(sc.cached_input(cache, "m", f.stat().st_mtime_ns, read)["A"], 1)
         self.assertEqual(len(calls), 1)
-        self._bump(f, "A=2\n")
-        self.assertEqual(sc.cached_input(cache, "env", f, parse)["A"], "2")
+        self._bump(f, '{"A": 2}')
+        self.assertEqual(sc.cached_input(cache, "m", f.stat().st_mtime_ns, read)["A"], 2)
         self.assertEqual(len(calls), 2)
 
 
@@ -103,11 +107,11 @@ class TestVersioning(CacheCase):
     def test_version_mismatch_discards_the_cache(self):
         (self.ws / "score-cache.json").write_text(json.dumps(
             {"version": sc.CACHE_VERSION - 1, "surface_files": {"poison": {}}}))
-        self.assertEqual(sc.load_cache(self.ws), {})
+        self.assertEqual(sc.load_cache(self.cell()), {})
 
     def test_corrupt_cache_is_ignored(self):
         (self.ws / "score-cache.json").write_text("{not json")
-        self.assertEqual(sc.load_cache(self.ws), {})
+        self.assertEqual(sc.load_cache(self.cell()), {})
 
 
 if __name__ == "__main__":
@@ -123,7 +127,7 @@ class TestAgentTime(unittest.TestCase):
         self.addCleanup(d.cleanup)
         log = Path(d.name) / "iterations.log"
         log.write_text("".join("2026-10-01T00:00:00Z\t" + "\t".join(r) + "\n" for r in rows))
-        return sc.parse_agent_time(log)
+        return sc.parse_agent_time(log.read_text())
 
     def test_charged_attempts_up_to_green_are_summed(self):
         t = self.ledger(("AGENT", "c", "attempt=1", "s=300"), ("ITER", "fail", "attempt=1 stage=e2e"),

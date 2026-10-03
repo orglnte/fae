@@ -54,8 +54,8 @@ _experiment.load(_EXPERIMENT)
 exp1 = importlib.import_module("experiment.exp1") if (_EXPERIMENT / "exp1.py").is_file() else None
 from fae.driver import validate as taint            # noqa: E402
 from fae.driver.common import (                     # noqa: E402
-    ROOT as _COMMON_ROOT, AUTH_HINTS, LIMIT_HINTS, PAUSE_EXIT_RC, SEAL_EXIT,
-    _impl_of, cell_id, ledger, mutex, parse_cell_id,
+    ROOT as _COMMON_ROOT, AUTH_HINTS, LIMIT_HINTS, PAUSE_EXIT_RC,
+    cell_id, ledger, mutex, parse_cell_id,
 )
 
 # The facade every test file imports as `runs`: a real module object (not a
@@ -96,8 +96,7 @@ runs.ROOT = _COMMON_ROOT
 runs.AUTH_HINTS = AUTH_HINTS
 runs.LIMIT_HINTS = LIMIT_HINTS
 runs.PAUSE_EXIT_RC = PAUSE_EXIT_RC
-runs.SEAL_EXIT = SEAL_EXIT
-runs._impl_of = _impl_of
+runs.SEAL_EXIT = _Cell.SEAL_EXIT
 runs.cell_id = cell_id
 runs.ledger = ledger
 runs.mutex = mutex

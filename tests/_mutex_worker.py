@@ -16,6 +16,7 @@ iterations.log).
 
 Exit: 0 held-and-released, 1 busy, 44 stood down for a pause.
 """
+import os
 import sys
 import time
 from pathlib import Path
@@ -42,7 +43,9 @@ def main(argv):
         if not mutex.try_fd(f.fileno()):
             return 1
     else:
-        if mutex.wait_fds([f.fileno()], cid, "test", poll=0.05) is None:
+        paused = Path(os.environ["WORKSPACES_DIR"]) / cid / ".paused"
+        if mutex.wait_fds([f.fileno()], cid, "test", poll=0.05,
+                          stop=paused.exists) is None:
             return mutex.PAUSE_EXIT
 
     note(logfile, f"IN {cid}")

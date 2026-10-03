@@ -20,9 +20,9 @@ class TestTheRunReport(OrchTmpCase):
         ws.mkdir(parents=True)
         (ws / "iterations.log").write_text("".join(l + "\n" for l in lines))
         if sealed:
-            (ws / ".sealed").touch()
-            if sealed_at is not None:
-                os.utime(ws / ".sealed", (sealed_at, sealed_at))
+            at = time.gmtime(sealed_at if sealed_at is not None else time.time())
+            (ws / ".sealed").write_text(f"sealed={time.strftime('%Y-%m-%dT%H:%M:%SZ', at)}"
+                                        "\tverdict=green\tattempts=1\tby=test\n")
         if loop:
             (ws / ".loop").touch()
         return ws

@@ -16,7 +16,6 @@ import re
 import sys
 from pathlib import Path
 
-from fae import metrics as _metrics
 from fae.scoring import surface_filter
 
 from fae import paths as _paths  # noqa: E402
@@ -85,19 +84,6 @@ def _factors(vid) -> dict:
     return dict(cls.FACTORS) if cls is not None else {}
 
 
-def read_env(path: Path) -> dict[str, str]:
-    out: dict[str, str] = {}
-    if not path.is_file():
-        return out
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, _, v = line.partition("=")
-        out[k.strip()] = v.strip()
-    return out
-
-
 def _sha256(p: Path) -> str:
     import hashlib
 
@@ -130,18 +116,11 @@ def read_skeleton_manifest(artifacts_dir: Path) -> dict[str, str]:
 CACHE_VERSION = 1
 
 
-def _mtime_ns(p: Path):
+def load_cache(cell) -> dict:
     try:
-        return p.stat().st_mtime_ns
-    except OSError:
-        return None
-
-
-def load_cache(ws: Path) -> dict:
-    try:
-        c = json.loads((ws / "score-cache.json").read_text())
+        c = json.loads(cell.read_derived("score-cache.json") or "{}")
         return c if c.get("version") == CACHE_VERSION else {}
-    except (OSError, json.JSONDecodeError):
+    except json.JSONDecodeError:
         return {}
 
 
@@ -150,15 +129,14 @@ def cache_text(cache: dict) -> str:
     return json.dumps(cache)
 
 
-def cached_input(cache: dict, key: str, path: Path, parse):
-    """Return parse(path)'s result, reusing the cache when the file's
-    mtime_ns is unchanged. Absent files cache as (None mtime, parsed-empty)."""
-    mt = _mtime_ns(path)
+def cached_input(cache: dict, key: str, mtime_ns, read):
+    """Return read()'s result, reusing the cache while its source's mtime_ns
+    is unchanged. An absent source caches as (None mtime, read-empty)."""
     ent = cache.get(key)
-    if ent is not None and ent.get("mtime_ns") == mt:
+    if ent is not None and ent.get("mtime_ns") == mtime_ns:
         return ent["data"]
-    data = parse(path)
-    cache[key] = {"mtime_ns": mt, "data": data}
+    data = read()
+    cache[key] = {"mtime_ns": mtime_ns, "data": data}
     return data
 
 
@@ -258,21 +236,10 @@ def author_surface(artifacts_dir: Path, cache: dict | None = None) -> dict:
     }
 
 
-def read_metrics(ws: Path) -> dict:
-    """verify.sh output (metrics.json): e2e_pass/e2e_total, load_errors/
-    load_total, deploy_ok, e2e_green, stage_failed. Auto-measured — not
-    human-graded."""
-    return _metrics.read(ws)
-
-
-def parse_iterations(log_path: Path) -> dict:
-    """iterations-to-green — derived by THE ledger library (fae/ledger.py),
-    the same derivation the orchestrator renders and the worker consults. This module
-    used to carry its own parser and scored revoked greens as green (audit
-    finding 2); one shared derivation makes that class of divergence
-    impossible."""
-    from fae import ledger
-    L = ledger.parse(log_path.parent)
+def parse_iterations(L: dict) -> dict:
+    """iterations-to-green from the parsed ledger (fae/ledger.py), the same
+    derivation the orchestrator renders and the worker consults: one shared
+    derivation keeps a revoked green from scoring as green."""
     green = L["verdict"] == "green"
     if green:
         itg = L["green_at"]
@@ -289,18 +256,14 @@ def parse_iterations(log_path: Path) -> dict:
     }
 
 
-def parse_agent_time(log_path: Path) -> dict:
+def parse_agent_time(text: str) -> dict:
     """The agent's wall-clock seconds per charged attempt, from the ledger's
     AGENT lines. A charged attempt is one with an ITER line; a refunded one has
     none and is not counted. An attempt run more than once keeps its last AGENT
     line, the run whose work was judged. The totals are None when a charged
     attempt has no AGENT line (cells that predate it)."""
     charged, green_at, secs = [], None, {}
-    try:
-        lines = log_path.read_text(errors="replace").splitlines()
-    except OSError:
-        lines = []
-    for line in lines:
+    for line in text.splitlines():
         f = line.split("\t")
         if len(f) < 4:
             continue
@@ -344,15 +307,15 @@ def score_one(cell_id: str, cell=None) -> int:
         print(f"ERROR: no such cell '{cell_id}' at {ws}", file=sys.stderr)
         return 1
 
-    cache = load_cache(ws)
-    env = cached_input(cache, "env", ws / "cell.env", read_env)
+    cache = load_cache(cell)
+    env = cell.env
+    mt = cell.mtimes()
     surface = author_surface(ws / "artifacts", cache)
-    iters = cached_input(cache, "iterations", ws / "iterations.log",
-                         parse_iterations)
-    metrics = cached_input(cache, "metrics", ws / "metrics.json",
-                           lambda _p: read_metrics(ws))
-    agent_time = cached_input(cache, "agent_time", ws / "iterations.log",
-                              parse_agent_time)
+    iters = cached_input(cache, "iterations", mt["ledger"],
+                         lambda: parse_iterations(cell.read_ledger()))
+    metrics = cached_input(cache, "metrics", mt["metrics"], cell.read_metrics)
+    agent_time = cached_input(cache, "agent_time", mt["ledger"],
+                              lambda: parse_agent_time(cell.ledger_text()))
 
     itg = iters["iterations_to_green"]
     

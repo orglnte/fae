@@ -119,7 +119,7 @@ class TestTheClientVersion(unittest.TestCase):
         log.write_text("t\tAGENT\tc\tattempt=1\ts=379\truns=1\tlast_s=379\tclient_s=376"
                        "\tcheck=agree\tclient=claude:2.1.286\n"
                        "t\tITER\tgreen\tattempt=1 verify_s=4\n")
-        self.assertEqual(sc.parse_agent_time(log)["agent_s_total"], 379)
+        self.assertEqual(sc.parse_agent_time(log.read_text())["agent_s_total"], 379)
 
 
 if __name__ == "__main__":

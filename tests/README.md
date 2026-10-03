@@ -52,7 +52,7 @@ pointed at — this has happened once during development. Fixtures that touch
 those paths stub `_respawn` and `_spawn_detached`, and any test exercising
 recovery calls `_recover_inflight()` directly rather than `worker()`.
 
-Patch `TRANSITIONS_LOG` too, not just `WS` and the plane folders: `_emit_transition`
-resolves the module-level path, so an unpatched test writes fabricated
+Patch `TRANSITIONS_LOG` too, not just `WS` and the plane folders: `common.cell`
+hands Cell the module-level path, so an unpatched test writes fabricated
 transitions into the live conformance log that `experiment check --tla-trace` replays against
 `.tla/Runs.tla`.

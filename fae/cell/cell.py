@@ -23,6 +23,7 @@ came to be logged for cancelled cells that were never resumed.
 """
 from __future__ import annotations
 
+import collections
 import contextlib
 import json
 import os
@@ -89,7 +90,28 @@ def _now():
     return f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}"
 
 
+PauseRequest = collections.namedtuple("PauseRequest", "reason who at detail")
+
+
+def _transitions_path(root, override=None):
+    return Path(override or os.environ.get("TRANSITIONS_LOG")
+                or _plane.transitions_log(root))
+
+
+def _append(log, text):
+    """Append `text` to `log` in one write (O_APPEND)."""
+    log.parent.mkdir(parents=True, exist_ok=True)
+    data = text.encode()
+    fd = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    try:
+        while data:
+            data = data[os.write(fd, data):]
+    finally:
+        os.close(fd)
+
+
 from fae import ledger  # noqa: E402
+from fae import metrics as _metrics  # noqa: E402
 
 
 class VerifyResult:
@@ -278,6 +300,55 @@ class Cell:
     def terminal(self):
         return self.verdict in ("green", "failed", "revoked")
 
+    # --- reading the recorded files ---------------------------------------
+    # Every read of the cell's own files outside fae/cell goes through these.
+
+    @property
+    def env(self):
+        """cell.env: KEY -> value."""
+        return dict(self._env)
+
+    @property
+    def has_ledger(self):
+        """The cell was prepared: its ledger exists."""
+        return (self.ws / "iterations.log").exists()
+
+    def read_ledger(self, gate_n=6):
+        """The ledger as it is now (fae/ledger.py's parse)."""
+        return ledger.parse(self.ws, gate_n=gate_n)
+
+    def ledger_text(self):
+        """The ledger's raw text, "" when there is none."""
+        try:
+            return (self.ws / "iterations.log").read_text(errors="replace")
+        except OSError:
+            return ""
+
+    def read_metrics(self):
+        """The last verify's metrics.json (fae/metrics.py), {} when absent."""
+        return _metrics.read(self.ws)
+
+    def read_derived(self, name):
+        """One of the files derived from the result (DERIVED), or None."""
+        if name not in self.DERIVED:
+            raise ValueError(f"{name} is not derived from {self.cid}'s result")
+        try:
+            return (self.ws / name).read_text()
+        except OSError:
+            return None
+
+    def mtimes(self):
+        """mtime_ns of the files the recorded result lives in: env, ledger,
+        metrics. None for a file that is absent."""
+        out = {}
+        for role, name in (("env", "cell.env"), ("ledger", "iterations.log"),
+                           ("metrics", "metrics.json")):
+            try:
+                out[role] = (self.ws / name).stat().st_mtime_ns
+            except OSError:
+                out[role] = None
+        return out
+
     # --- sealing ----------------------------------------------------------
     # A cell that reached a verdict is finished evidence. The marker makes the
     # RESULT immutable — iterations.log, metrics.json, trace.csv, verify.log,
@@ -310,6 +381,14 @@ class Cell:
     def sealed_verdict(self):
         for field in self.seal_record().split("\t"):
             if field.startswith("verdict="):
+                return field.split("=", 1)[1]
+        return None
+
+    @property
+    def sealed_at(self):
+        """When the cell was sealed (the record's UTC stamp), or None."""
+        for field in self.seal_record().split("\t"):
+            if field.startswith("sealed="):
                 return field.split("=", 1)[1]
         return None
 
@@ -398,6 +477,54 @@ class Cell:
                 act()
         except Busy:
             act()
+
+    @property
+    def paused(self):
+        """A stop request stands: .paused exists, whatever it holds."""
+        return (self.ws / ".paused").exists()
+
+    def pause_request(self):
+        """The stop request in .paused, or None. `who` and `at` (epoch) are
+        None when the file predates them; `detail` is the violation a
+        stand-down wrote on its second line."""
+        try:
+            lines = (self.ws / ".paused").read_text().splitlines()
+        except OSError:
+            return None
+        parts = lines[0].split() if lines else []
+        who = at = None
+        for t in parts[1:]:
+            if t.startswith("by="):
+                who = t[3:]
+            elif t.startswith("at="):
+                try:
+                    at = (datetime.strptime(t[3:], "%Y-%m-%dT%H:%M:%SZ")
+                          .replace(tzinfo=timezone.utc).timestamp())
+                except ValueError:
+                    at = None
+        return PauseRequest(parts[0] if parts else None, who, at,
+                            lines[1][:120] if len(lines) > 1 else "")
+
+    @property
+    def cancelled(self):
+        return (self.ws / ".cancelled").exists()
+
+    @property
+    def flagged(self):
+        """Quarantined for a human (flag)."""
+        return (self.ws / "reconcile.flagged").exists()
+
+    def heartbeat(self):
+        """The loop's declared heartbeat (.loop) as KEY -> value, with its
+        file's `mtime`; None when there is none. Whether its pid is a live
+        loop is the reader's question."""
+        f = self.ws / ".loop"
+        try:
+            kv = dict(l.split("=", 1) for l in f.read_text().split() if "=" in l)
+            kv["mtime"] = f.stat().st_mtime
+        except OSError:
+            return None
+        return kv
 
     def intent(self):
         """run | paused | killed: the last of EPOCH, Pause, Resume, Retire and
@@ -582,6 +709,8 @@ class Cell:
             return False
 
     # --- transitions ------------------------------------------------------
+    # transitions.log is written only here, and only by appending: one write
+    # per record, which a local disk keeps whole between appenders.
 
     def apply(self, t, extra=""):
         """Check, change, and RECORD — in that order and in one call."""
@@ -593,16 +722,29 @@ class Cell:
         self._emit(t.value, extra)
         return self.state
 
+    def crashed(self, why):
+        """Record the Crash of a loop that ended without recording it."""
+        self._emit("Crash", why)
+
+    def retired(self, moved):
+        """Record that the workspace was wiped (moved to `moved`): the id's
+        next events are a new cell."""
+        self._emit("Retire", f"moved={moved}")
+
+    @classmethod
+    def reanchor(cls, epochs, root=None, transitions=None):
+        """Append one EPOCH line per (cid, fields) in `epochs`, as one
+        contiguous block: the replay starts from the last such block."""
+        stamp = _now()
+        text = f"# transitions re-anchored {stamp}: {len(epochs)} cell(s)\n" + "".join(
+            f"{stamp}\tEPOCH\t{cid}\t{fields}\n" for cid, fields in epochs)
+        _append(_transitions_path(Path(root or _paths.root()), transitions), text)
+
     def _emit(self, action, extra=""):
-        log = self._transitions_log()
-        log.parent.mkdir(parents=True, exist_ok=True)
-        with log.open("a") as f:
-            f.write(f"{_now()}\t{action}\t{self.cid}\t{extra}\n")
+        _append(self._transitions_log(), f"{_now()}\t{action}\t{self.cid}\t{extra}\n")
 
     def _transitions_log(self):
-        return self._transitions or Path(os.environ.get(
-            "TRANSITIONS_LOG",
-            _plane.transitions_log(self.root)))
+        return _transitions_path(self.root, self._transitions)
 
     def note_pause(self):
         """Mark this cell paused before a StandDown — without doubling the

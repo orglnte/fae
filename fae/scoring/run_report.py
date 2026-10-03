@@ -12,7 +12,6 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from fae import ledger
 from fae.driver import common, state
 
 
@@ -32,6 +31,15 @@ def _parse_since(since: str | None) -> float | None:
         return datetime.fromisoformat(since).timestamp()   # ISO 8601
 
 
+def _epoch(stamp: str | None) -> float:
+    """A seal's UTC stamp as epoch seconds; 0 for a seal that carries none."""
+    try:
+        return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def collect(since: float | None) -> tuple[dict, list]:
     """(completed_by_variant, in_progress). A cell is completed-this-run if it
     is sealed and its seal landed at/after `since`; in-progress if a live loop
@@ -46,18 +54,18 @@ def collect(since: float | None) -> tuple[dict, list]:
         if not p:
             continue
         agent, variant, _task, rep = p
-        sealed, loop = d / ".sealed", d / ".loop"
-        if loop.exists() and not sealed.exists():
-            L = ledger.parse(d, gate_n=gate_n)
-            hb = state.heartbeat(d)
+        c = state._cell(d)
+        if c.heartbeat() is not None and not c.sealed:
+            L = c.read_ledger(gate_n=gate_n)
+            hb = state.heartbeat(d, c)
             live.append((agent, variant, int(rep), L["att"],
                          (hb.get("phase") if hb else "") or "?"))
             continue
-        if not sealed.exists():
+        if not c.sealed:
             continue
-        if since is not None and sealed.stat().st_mtime < since:
+        if since is not None and _epoch(c.sealed_at) < since:
             continue
-        L = ledger.parse(d, gate_n=gate_n)
+        L = c.read_ledger(gate_n=gate_n)
         b = done[variant]
         b["done"] += 1
         if L["verdict"] == "green":

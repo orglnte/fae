@@ -52,7 +52,7 @@ def _pending_kind(cid, live_loops):
     ws = common.WS / cid
     if not ws.is_dir():
         return "fresh"
-    if (ws / "reconcile.flagged").exists():
+    if state.flagged(cid):
         return "flagged"
     if state.pause_lock(cid):
         return "paused"

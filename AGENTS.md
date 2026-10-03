@@ -199,12 +199,11 @@ Two rules break mutual exclusion **silently** if violated:
 `tests/test_mutex_kernel.py` pins the mechanism, including the negative
 control that an inherited fd DOES pin a lock.
 
-**Both acquire queues stand down on an operator pause**
-(`mutex.pause_requested`, checked while queued and again after winning): an
-unbounded queue that cannot honour a pause waits forever holding what it
-already took. Pause checks inside the mutex use `.paused` EXISTENCE, as the
-driver does — never `fae/driver/state.py`'s `pause_lock`, which parses the
-first token and calls an empty `.paused` "not paused".
+**A queue on a lock stands down on an operator pause** (`mutex.wait_fds`'s
+`stop`, which a caller answers with `Cell.paused`): an unbounded queue that
+cannot honour a pause waits forever holding what it already took. A pause is
+the request's EXISTENCE (`Cell.paused`), as the driver reads it — never the
+parsed reason (`Cell.pause_request`), which is None for an empty request.
 
 **The `<lock>.holder` sidecar is DISPLAY ONLY.** "Is it held?" is a
 question for the kernel (`mutex.probe_held`); no code path branches on the
@@ -623,9 +622,20 @@ every prior agent's memory — cross-run leakage invisible in the results.
   fresh prepare that wipes a workspace logs `Retire <cid>`: the id then names
   a NEW cell, which the replay judges from Init as `<cid>#<n>` — without it
   the new cell's `Admit` is judged against the old cell's verdict and every
-  later event of the id cascades. `rig trace-reset` archives the log and
-  records the observed state as `EPOCH` lines, the only way to start a replay
-  anywhere but a cold fleet.
+  later event of the id cascades. `rig trace-reset` appends the observed
+  state as one block of `EPOCH` lines (`Cell.reanchor`); the replay starts
+  from the last such block, the only way to start a replay anywhere but a
+  cold fleet. The log is append-only and Cell is its only writer (`apply`,
+  `crashed`, `retired`, `reanchor`): one write per record.
+- **A cell's files are read and written only through `Cell`** (`env`,
+  `read_ledger`, `ledger_text`, `read_metrics`, `read_derived`, `mtimes`,
+  `pause_request`, `paused`, `cancelled`, `flagged`, `heartbeat`, `sealed_at`;
+  `fae/ledger.py` is the ledger's format and is opened through Cell too).
+  Constructing one is cheap (it reads `cell.env` and replays the ledger).
+  `tests/test_cell_files_owner.py` fails on a cell file named outside
+  `fae/cell`, a ledger opened outside it, or a write to `transitions.log`
+  that is not Cell's append; an experiment's suite runs the same scan on its
+  tree.
 - **Authored surface is defined once**, in `fae/scoring/surface_filter.py`,
   and it is content-based, not name-based: a name list cannot catch a vendor
   tree an agent downloads at runtime, and binary bytes counted as lines swamp

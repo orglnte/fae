@@ -213,13 +213,10 @@ def _verify_progress(ws, since_ts):
     """(stamp, age) of the newest VERIFY_READY/SHAPE mark the current verify
     has written, or (None, None) when it has written none yet."""
     newest = None
-    try:
-        for line in (ws / "iterations.log").read_text(errors="replace").splitlines():
-            m = _VERIFY_MARK_RE.match(line)
-            if m and (since_ts is None or m.group(1) >= since_ts):
-                newest = m.group(1)
-    except OSError:
-        return None, None
+    for line in state._cell(ws).ledger_text().splitlines():
+        m = _VERIFY_MARK_RE.match(line)
+        if m and (since_ts is None or m.group(1) >= since_ts):
+            newest = m.group(1)
     if newest is None:
         return None, None
     return newest, _age_of(newest)
@@ -267,7 +264,7 @@ def _reconcile_dead_loop(cid, loop_pid, in_box, out_age, last, dry,
              f"out_age={int(out_age) if out_age is not None else -1}s) -> "
              f"reconciling the agent" + (" [dry-run]" if dry else ""))
     if not dry:
-        common._emit_transition("Crash", cid, "loop-vanished")
+        common.cell(cid).crashed("loop-vanished")
     return True
 
 
@@ -353,13 +350,14 @@ def supervise_pass(alerts, dry=False, only=""):
                                  common.agent_container(cid) in boxes,
                                  _attempt_out(ws)[1], last_tr.get(cid), dry,
                                  terminal=st["state"] == "DONE")
-            if (ws / "reconcile.flagged").exists():
+            c = state._cell(ws)
+            if c.flagged:
                 continue                      # human-flagged: hands off
-            if state.cell_intent(ws)[0] != "run":
+            if state.cell_intent(ws, c)[0] != "run":
                 continue      # operator declared cancel/pause/drain — hands off
             terminal = st["state"] == "DONE"
             if terminal and st["why"] != "cancelled" \
-                    and not (ws / common.VALIDATION).exists():
+                    and c.read_derived("validation.json") is None:
                 # one cell's evidence must never stop supervision of the fleet:
                 # the cell stays unvalidated, is reported once, and is retried
                 try:
@@ -378,7 +376,7 @@ def supervise_pass(alerts, dry=False, only=""):
             loop_pid = parents.get(cid)
             in_box = common.agent_container(cid) in boxes
             out_size, out_age = _attempt_out(ws)
-            iter_age = common.awake_age((ws / "iterations.log").stat().st_mtime)
+            iter_age = common.awake_age(c.mtimes()["ledger"] / 1e9)
             # A cell still inside verify_lock_acquire (last transition
             # AcquireVerify, no later one yet) that has held it past the
             # threshold: write an ALERT to the cell's own ledger, same shape
@@ -493,7 +491,7 @@ def supervise_pass(alerts, dry=False, only=""):
             # COMPLETED gate) whose reverify process is gone leaves the cell
             # Repair the ledger with an explicit rig-abort line: green stays
             # intact and the cell rejoins the reverification population.
-            _L = common.ledger.parse(ws)
+            _L = c.read_ledger()
             if terminal and _L["reverify_active"] \
                     and iter_age > T_HANG \
                     and not any(re.search(zombies.VERIFY_HOLDER_ARGV, l)
@@ -593,7 +591,7 @@ def supervise_pass(alerts, dry=False, only=""):
                             cid, st["variant"], reason="limit-wall",
                             unblock_agent=True)
                         if _outcome in ("termed", "killed"):
-                            common._emit_transition("Crash", cid, "limit-wall")
+                            c.crashed("limit-wall")
                         _reclaim(st, dry)
                         until = _set_cooldown(agent, _line)
                         common._rec_log(f"lane {agent}: cooling until "
@@ -624,7 +622,7 @@ def supervise_pass(alerts, dry=False, only=""):
                         cid, st["variant"], reason="silent-hang",
                         unblock_agent=True)
                     if _outcome in ("termed", "killed"):
-                        common._emit_transition("Crash", cid, "silent-hang")
+                        c.crashed("silent-hang")
                 _reclaim(st, dry)
             elif st["state"] == "CRASHED" and st["why"] == "agent":
                 common._rec_log(f"{cid} CRASHED/agent ({st['detail'][:40]}) — needs a "

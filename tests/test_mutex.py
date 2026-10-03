@@ -126,22 +126,12 @@ class TestHolderSidecar(MutexTestCase):
 
 
 class TestPauseAware(MutexTestCase):
-    def test_pause_requested_is_existence_not_content(self):
-        ws = self.root / "ws" / "cell-a"
-        ws.mkdir()
-        (ws / ".paused").write_text("")
-        self.assertTrue(mutex.pause_requested("cell-a"),
-                        "an empty .paused still means paused, as bash reads it")
-
-    def test_wait_stands_down_when_paused(self):
-        ws = self.root / "ws" / "cell-a"
-        ws.mkdir()
-        (ws / ".paused").write_text("roster\n")
+    def test_wait_stands_down_when_asked_to_stop(self):
         blocker = self.fd()
         self.assertTrue(mutex.try_fd(blocker.fileno()))
         f = self.fd()
         self.assertIsNone(
-            mutex.wait_fds([f.fileno()], "cell-a", "test", poll=0.01))
+            mutex.wait_fds([f.fileno()], "cell-a", "test", poll=0.01, stop=lambda: True))
 
     def test_pause_exit_is_44(self):
         self.assertEqual(mutex.PAUSE_EXIT, 44)

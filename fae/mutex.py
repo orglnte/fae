@@ -32,8 +32,6 @@ import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path(os.environ.get("REPO_ROOT") or Path.cwd()).resolve()
-
 # The driver's stand-down exit code (fae/cell Cell.PAUSE_EXIT reads the
 # same number), so it is a contract.
 PAUSE_EXIT = int(os.environ.get("PAUSE_EXIT", 44))
@@ -49,24 +47,6 @@ FLOCK_CONTENDED = {errno.EWOULDBLOCK, errno.EAGAIN}
 def _log(msg):
     print(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}  {msg}",
           file=sys.stderr)
-
-
-def _workspaces_dir():
-    """Honour WORKSPACES_DIR the way the driver does (Cell reads it before
-    the config's default), so a queue standing down under an alternative
-    root looks at that root's .paused."""
-    env = os.environ.get("WORKSPACES_DIR")
-    if env:
-        return Path(env)
-    nosync = REPO_ROOT / "workspaces.nosync"
-    return nosync if nosync.is_dir() else REPO_ROOT / "workspaces"
-
-
-def pause_requested(cid):
-    """EXISTENCE of .paused, matching the driver's `(ws / ".paused").exists()`.
-    Reading the contents instead would call an empty .paused "not paused" —
-    the opposite of what the loop inside the cell concludes."""
-    return bool(cid) and (_workspaces_dir() / cid / ".paused").is_file()
 
 
 # --- acquisition -------------------------------------------------------------
@@ -88,8 +68,9 @@ def try_fds(fds):
     return None
 
 
-def wait_fds(fds, cid, label, poll=5.0, ppid=None):
-    """Block until one of `fds` is ours. Returns the fd, or None to stand down.
+def wait_fds(fds, cid, label, poll=5.0, ppid=None, stop=None):
+    """Block until one of `fds` is ours. Returns the fd, or None to stand down
+    when `stop()` says the operator paused `cid`.
 
     ppid: give up if our parent died while we queued — a helper that wins a
     lock on an fd whose owning process is already gone holds it for nobody.
@@ -99,7 +80,7 @@ def wait_fds(fds, cid, label, poll=5.0, ppid=None):
         got = try_fds(fds)
         if got is not None:
             return got
-        if pause_requested(cid):
+        if stop is not None and stop():
             _log(f"{label}: {cid} standing down from the queue — operator pause")
             return None
         if ppid is not None and os.getppid() != ppid:

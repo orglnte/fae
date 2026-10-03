@@ -19,7 +19,7 @@ import ujson as json
 from pathlib import Path
 from datetime import datetime, timezone
 
-from fae.cell.cell import Busy
+from fae.cell.cell import Busy, Cell
 from fae.driver import common
 from fae.driver import state
 from fae.driver import zombies
@@ -38,9 +38,9 @@ def prestart_clean(cid):
     if common.agent_container(cid) in state.containers() and cid not in state.loop_parents():
         subprocess.run(["docker", "rm", "-f", common.agent_container(cid)],
                        capture_output=True)
-    ws = common.WS / cid
-    if (ws / ".loop").exists() and state.heartbeat(ws) is None:
-        common.cell(cid).clear_heartbeat()
+    c = common.cell(cid)
+    if c.heartbeat() is not None and state.heartbeat(c.ws) is None:
+        c.clear_heartbeat()
 
 
 SPAWN_PROBE_S = 2.0
@@ -72,7 +72,7 @@ def _crash_before_spawn(cid):
         # it — the exact failure this function exists to prevent — so it is
         # checked here too rather than trusted from outside.
         return False
-    common._emit_transition("Crash", cid, "pre-spawn: previous loop ended silently")
+    common.cell(cid).crashed("pre-spawn: previous loop ended silently")
     return True
 
 
@@ -99,7 +99,7 @@ def _spawn_detached(argv, env, cid, what="spawn", pass_fds=()):
     if common.is_sealed(cid):
         print(f"refusing to {what} {cid}: SEALED — {common.seal_reason(cid)}")
         print("  a terminal result is read-only; delete and requeue to redo it")
-        return common.SEAL_EXIT
+        return Cell.SEAL_EXIT
     # Spawning a stopped cell IS the decision to run it, and the agent's
     # Spawn is enabled only on intent='run'. Lifting the pause here keeps the
     # two stores of intent — the .paused marker and the trace — in step;
@@ -755,7 +755,7 @@ def stop_cell(cid, cancel=False):
         # loop ending without its own transition is Crash(c). --cancel
         # emitted Kill, which takes the loop to "none" itself.
         if not cancel:
-            common._emit_transition("Crash", cid, "stopped-by-operator")
+            cell.crashed("stopped-by-operator")
     if cancel:
         print(f"  {cid}: cancelled; infra torn down, workspace untouched (un-cancel: "
               f"rm workspaces.nosync/{cid}/.cancelled + cli.py cell resume {cid})")
@@ -814,7 +814,8 @@ def top_up(args):
         p = common.parse_cell_id(d.name)
         if not (p and p[0] == args.agent and p[2] == args.task):
             continue
-        if common.ledger.parse(d)["iters"] or (d / ".loop").exists():
+        c = common.cell(d.name)
+        if c.read_ledger()["iters"] or c.heartbeat() is not None:
             have[p[1]].add(int(p[3]))
         else:
             unstarted[p[1]].add(int(p[3]))
@@ -865,12 +866,13 @@ def spawn(args):
             continue
         ws = common.WS / cid
         if ws.is_dir() and not args.fresh:
-            L = common.ledger.parse(ws)
+            c = common.cell(cid)
+            L = c.read_ledger()
             if L["verdict"] in ("green", "failed", "revoked"):
                 at = f" @{L['green_at']}" if L["verdict"] == "green" else f" @{L['att']}"
                 print(f"skipping {cid}: already DONE·{L['verdict']}{at} — use --fresh to force a new run")
                 continue
-            if (ws / ".cancelled").exists():
+            if c.cancelled:
                 print(f"skipping {cid}: already DONE·cancelled — use --fresh to force a new run")
                 continue
         cell = common.cell(cid, args.task, args.variant, rep, agent=args.agent)
@@ -952,7 +954,7 @@ def _respawn(st, dry, ignore_slots=False):
         # touching it from a preview silently disabled supervision of a cell
         # the operator only meant to inspect.
         if not dry:
-            (common.WS / cid / "reconcile.flagged").touch()
+            common.cell(cid).flag()
         common._rec_log(f"{cid} FLAGGED: {n} respawns reached — human needed, not touching again"
                  + (" [dry-run: flag NOT written]" if dry else ""))
         return False

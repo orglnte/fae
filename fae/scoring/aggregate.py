@@ -83,25 +83,23 @@ def rate(values: list) -> float | None:
     return round(sum(bools) / len(bools), 4) if bools else None
 
 
-# score.json is written by score_cell.py from these three sources. aggregate is
-# decoupled from score_cell — it only globs the records — so it will happily
-# print a scoreboard built from records that predate a scoring-rule change,
-# and that table looks identical to a correct one. mtime is a coarse signal
-# but a free one, and it catches the case that actually happens — a source
-# rewritten after its record.
-_SCORE_SOURCES = ("metrics.json", "iterations.log", "cell.env")
+def _cell(ws: Path):
+    from fae.cell.cell import Cell
+    return Cell(ws.name, workspaces=ws.parent)
 
 
 def stale_records() -> list[tuple[str, str]]:
-    """(cell, newer_source) for every score.json older than one of its inputs."""
+    """(cell, newer_source) for every score.json older than one of its inputs
+    (the cell's env, ledger or metrics). aggregate only globs the records, so
+    a table built from records that predate a scoring-rule change looks
+    identical to a correct one; mtime is a coarse signal but a free one."""
     out = []
     if not WORKSPACES.is_dir():
         return out
     for p in sorted(WORKSPACES.glob("*/score.json")):
-        rec_mtime = p.stat().st_mtime
-        for src in _SCORE_SOURCES:
-            s = p.parent / src
-            if s.is_file() and s.stat().st_mtime > rec_mtime:
+        rec_mtime = p.stat().st_mtime_ns
+        for src, mt in _cell(p.parent).mtimes().items():
+            if mt is not None and mt > rec_mtime:
                 out.append((p.parent.name, src))
                 break
     return out
@@ -129,8 +127,8 @@ def first_taint(ws: Path) -> str | None:
     """The validator's verdict for the cell: None when VALID (or never
     validated), else the first taint's text."""
     try:
-        v = json.loads((ws / "validation.json").read_text())
-    except (OSError, json.JSONDecodeError):
+        v = json.loads(_cell(ws).read_derived("validation.json") or "{}")
+    except json.JSONDecodeError:
         return None
     if v.get("verdict") != "TAINTED":
         return None
@@ -144,13 +142,7 @@ PREVIOUS_IMPL = {"fae": "py", "py": "bash"}
 def impl_of(ws: Path) -> str:
     """The cell driver from cell.env, for a score.json written before the
     record carried it."""
-    try:
-        for line in (ws / "cell.env").read_text().splitlines():
-            if line.startswith("IMPL="):
-                return line.partition("=")[2].strip() or "bash"
-    except OSError:
-        pass
-    return "bash"
+    return _cell(ws).impl or "bash"
 
 
 def filter_cells(cells: list[dict], variant: str | None = None,

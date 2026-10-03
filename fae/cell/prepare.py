@@ -24,7 +24,6 @@ from . import experiment as _experiment
 from .surface import Surface
 
 from fae import paths as _paths  # noqa: E402
-from fae import plane as _plane  # noqa: E402
 
 ROOT = _paths.ROOT
 
@@ -69,21 +68,6 @@ def safe_wipe(target, workspaces):
     dest = tbd / target.name
     shutil.move(str(target), str(dest))
     return dest
-
-
-def _transitions_log(root):
-    return Path(os.environ.get("TRANSITIONS_LOG")
-                or _plane.transitions_log(root))
-
-
-def _log_retire(root, cid, moved):
-    """A wiped workspace ends the cell under that id; the id's next events are
-    a new cell. The conformance replay needs the boundary, or it judges the new
-    cell's Admit against the old cell's verdict."""
-    log = _transitions_log(root)
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("a") as f:
-        f.write(f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}\tRetire\t{cid}\tmoved={moved}\n")
 
 
 def _copy_tree(src, dst):
@@ -164,7 +148,9 @@ def prepare(cid, task, vid, rep, workspaces, root=ROOT, fresh=False, reference=F
     if fresh:
         moved = safe_wipe(ws, workspaces)
         if moved is not None:
-            _log_retire(root, cid, moved)
+            # the id's next events are a new cell: the replay needs the boundary
+            from .cell import Cell
+            Cell(cid, workspaces=workspaces, root=root).retired(moved)
     (ws / "artifacts").mkdir(parents=True, exist_ok=True)
     (ws / "PROMPT.md").write_text(PROMPT)
 

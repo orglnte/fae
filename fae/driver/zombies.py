@@ -158,10 +158,8 @@ def _docker_age_s(name):
 
 
 def _iter_age_s(cid):
-    try:
-        return awake_age((common.WS / cid / "iterations.log").stat().st_mtime)
-    except OSError:
-        return None
+    mt = common.cell(cid).mtimes()["ledger"]
+    return awake_age(mt / 1e9) if mt is not None else None
 
 
 def _fd_holders(path):
@@ -294,8 +292,11 @@ def find_zombies():
         if ppid == 1:
             zs.append(("tee", str(pid), cid, "orphaned logger (ppid 1)"))
     for ws in _workspace_entries():
-        if ws.is_dir() and (ws / ".loop").exists() and state.heartbeat(ws) is None:
-            zs.append(("heartbeat", str(ws / ".loop"), ws.name, "corpse file"))
+        if not ws.is_dir():
+            continue
+        c = state._cell(ws)
+        if c.heartbeat() is not None and state.heartbeat(ws, c) is None:
+            zs.append(("heartbeat", str(ws), ws.name, "corpse file"))
     # No stale-lock class: a lock is held by fd, so the kernel frees it when
     # its holder dies. What can outlive a holder is INFRA, and an arm
     # slot's last-holder sidecar is the cheapest place to notice it.
@@ -351,10 +352,10 @@ def reap_zombies(zs):
                 # Re-confirm the corpse: a new loop may have written a fresh
                 # .loop in the interval, and deleting a LIVE heartbeat costs
                 # the phase/WAITING display for the rest of the attempt.
-                if state.heartbeat(Path(ident).parent) is not None:
+                if state.heartbeat(Path(ident)) is not None:
                     done.append(f"skipped heartbeat {ident} — beating again")
                     continue
-                ws = Path(ident).parent
+                ws = Path(ident)
                 if not common.cell(ws.name, workspaces=ws.parent).clear_heartbeat():
                     done.append(f"skipped heartbeat {ident} — its cell is held")
                     continue

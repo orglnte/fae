@@ -397,7 +397,7 @@ class TestTheModelLearnsAboutKilledLoops(unittest.TestCase):
         # makes their Crash both true and once-only.
         src = (Path(ROOT) / "fae" / "driver" / "supervise.py").read_text()
         body = src[src.index("def supervise_pass"):]
-        emits = re.findall(r'_emit_transition\("Crash", cid, "([^"]+)"\)', body)
+        emits = re.findall(r'\.crashed\("([^"]+)"\)', body)
         self.assertEqual(sorted(emits), ["limit-wall", "silent-hang"])
 
 
@@ -514,7 +514,8 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         # The Resume is gated on the LEDGER pause, exactly as replay judges
         # it — so the fixture seeds the Pause `stop` emits.
         log = runs.common.TRANSITIONS_LOG
-        runs.common._emit_transition("Pause", cid, "reason=stopped")
+        with log.open("a") as f:
+            f.write(f"{TS}\tPause\t{cid}\treason=stopped\n")
         runs.ops._spawn_detached(["bash", "-c", "exit 0"], dict(os.environ), cid, "spawn")
         self.assertEqual([l.split("\t")[1] for l in log.read_text().splitlines()
                           if l.split("\t")[2] == cid], ["Pause", "Resume"])
@@ -526,7 +527,8 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         self.addCleanup(shutil.rmtree, runs.common.WS / cid, True)
         (runs.common.WS / cid / ".paused").write_text("killed by=operator\n")
         (runs.common.WS / cid / ".cancelled").write_text("by=operator\n")
-        runs.common._emit_transition("Kill", cid, "reason=killed")
+        with runs.common.TRANSITIONS_LOG.open("a") as f:
+            f.write(f"{TS}\tKill\t{cid}\treason=killed\n")
         runs.ops._spawn_detached(["bash", "-c", "exit 0"], dict(os.environ), cid, "spawn")
         self.assertNotIn("\tResume\t", runs.common.TRANSITIONS_LOG.read_text())
         self.assertTrue((runs.common.WS / cid / ".paused").exists())
@@ -1113,7 +1115,7 @@ class TestSpawnTagsSmokeCells(unittest.TestCase):
 class TestRespawnKeepsTheCellsImplementation(unittest.TestCase):
     """_respawn hardcoded the bash driver: any resumed py cell silently became
     a bash cell from that attempt on. The respawn must ask the cell which
-    implementation it records (cell.env IMPL, via _impl_of)."""
+    implementation it records (Cell.impl)."""
 
     def test_the_respawn_argv_comes_from_the_recorded_impl(self):
         import inspect
@@ -1122,10 +1124,10 @@ class TestRespawnKeepsTheCellsImplementation(unittest.TestCase):
                       inspect.getsource(runs.ops.start_cell))
         self.assertIn('"-m", "fae.cell"', inspect.getsource(runs.ops._cell_argv))
 
-    def test_impl_of_reads_the_cell_env(self):
+    def test_the_cell_reads_its_impl(self):
         with tempfile.TemporaryDirectory() as d:
             cid = "opus_high_beta_apidocs_T1_r96"
             (Path(d) / cid).mkdir()
             (Path(d) / cid / "cell.env").write_text("TASK=T1\nIMPL=py\n")
             with mock.patch.object(runs.common, "WS", Path(d)):
-                self.assertEqual(runs._impl_of(cid), "py")
+                self.assertEqual(runs.common.cell(cid).impl, "py")

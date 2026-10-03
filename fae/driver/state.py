@@ -19,7 +19,7 @@ from pathlib import Path
 
 from fae.driver import common
 from fae.driver.common import (
-    parse_cell_id, awake_age, VALIDATION, ledger, faults,
+    parse_cell_id, awake_age, ledger, faults,
 )
 
 def loop_pids():
@@ -124,66 +124,53 @@ def wait_reason(ws):
 WAIT_PHASES = {"verify-lock", "limit"}
 
 
+def _cell(where):
+    """The Cell for a cid (in WS) or for a workspace path."""
+    if isinstance(where, Path):
+        return common.cell(where.name, workspaces=where.parent)
+    return common.cell(where)
+
+
 def pause_lock(cid):
     """The operator's stop request for ONE cell: its reason, or None. Intent
-    lives IN THE WORKSPACE (.paused beside .cancelled) — a tmp/ wipe must
+    lives IN THE WORKSPACE (beside the cancellation) — a tmp/ wipe must
     never erase an operator decision."""
-    try:
-        return (common.WS / cid / ".paused").read_text().split()[0]
-    except (FileNotFoundError, OSError, IndexError):
-        return None
+    r = _cell(cid).pause_request()
+    return r.reason if r else None
 
 
 def pause_meta(cid):
     """(reason, who, at_epoch) of the cell's stop request, or None. `who`
-    and `at` are None when the file predates them."""
-    try:
-        parts = (common.WS / cid / ".paused").read_text().split()
-    except OSError:
-        return None
-    if not parts:
-        return None
-    who = at = None
-    for t in parts[1:]:
-        if t.startswith("by="):
-            who = t[3:]
-        elif t.startswith("at="):
-            try:
-                at = (datetime.strptime(t[3:], "%Y-%m-%dT%H:%M:%SZ")
-                      .replace(tzinfo=timezone.utc).timestamp())
-            except ValueError:
-                at = None
-    return parts[0], who, at
+    and `at` are None when the request predates them."""
+    r = _cell(cid).pause_request()
+    return (r.reason, r.who, r.at) if r and r.reason else None
 
 
 def pause_detail(cid):
-    """The first line after the header of a cell's .paused — the driver writes
-    the violation it stood down on there."""
-    try:
-        lines = (common.WS / cid / ".paused").read_text().splitlines()
-    except OSError:
-        return ""
-    return lines[1][:120] if len(lines) > 1 else ""
+    """The violation the driver stood down on, written under its stop request."""
+    r = _cell(cid).pause_request()
+    return r.detail if r else ""
 
 
 def flagged(cid):
     """Quarantined for a human: no repair, no admission until resumed."""
-    return (common.WS / cid / "reconcile.flagged").exists()
+    return _cell(cid).flagged
 
 
 def cancelled(cid):
-    return (common.WS / cid / ".cancelled").exists()
+    return _cell(cid).cancelled
 
 
-def cell_intent(ws):
+def cell_intent(ws, cell=None):
     """AXIS 2 — (intent, why). Everything but 'run' comes from a marker
     somebody wrote on purpose, so a deliberate stop can never be mistaken for
     a crash (or the reverse)."""
-    if (ws / ".cancelled").exists():
+    c = cell or _cell(ws)
+    if c.cancelled:
         return "cancel", "cancelled"
-    reason = pause_lock(ws.name)
-    if reason:
-        return "pause", reason
+    r = c.pause_request()
+    if r and r.reason:
+        return "pause", r.reason
     return "run", ""
 
 
@@ -213,7 +200,7 @@ def run_cell_pids():
     return _PIDCACHE["v"]
 
 
-def heartbeat(ws):
+def heartbeat(ws, cell=None):
     """The loop's DECLARED liveness — dict(pid, phase, attempt, age) or None.
 
     run_cell writes $ws/.loop at every phase transition. Declared beats
@@ -222,26 +209,17 @@ def heartbeat(ws):
     loop survived orphaned), and the phase is a fact rather than a guess off
     the last log line. A file whose pid is no longer a run_cell process is a
     corpse's leftover and makes no liveness claim."""
-    f = ws / ".loop"
+    kv = (cell or _cell(ws)).heartbeat()
     try:
-        kv = dict(l.split("=", 1) for l in f.read_text().split() if "=" in l)
         pid = int(kv["pid"])
-    except (FileNotFoundError, OSError, ValueError, KeyError):
+    except (TypeError, ValueError, KeyError):
         return None
     if pid not in run_cell_pids():
         return None
     if kv.get("cid") not in (None, ws.name):
         return None   # a recycled pid validated another cell's corpse file —
                       # identity, not mere pid-liveness (audit finding 7)
-    # f.stat() sits OUTSIDE the try above, so a .loop unlinked between the read
-    # and here raised FileNotFoundError straight out of heartbeat — and both
-    # prestart_clean and the heartbeat reaper unlink exactly this file
-    # concurrently. The exception escaped cell_state into status / reconcile /
-    # worker as a traceback.
-    try:
-        kv["pid"], kv["age"] = pid, awake_age(f.stat().st_mtime)
-    except OSError:
-        return None
+    kv["pid"], kv["age"] = pid, awake_age(kv.pop("mtime"))
     # How long this phase has been current. NOT derivable from `age` or `ts`:
     # the ticker rewrites .loop every HB_TICK precisely to keep its mtime
     # young, so both say "seconds" no matter how long the cell has been stuck.
@@ -269,7 +247,7 @@ def _dur(secs):
     return f"{d}d{h:02d}h" if h else f"{d}d"
 
 
-def cell_liveness(ws, boxes):
+def cell_liveness(ws, boxes, cell=None):
     """AXIS 3 — (state, why, detail) from MECHANISM alone: no verdicts, no
     operator markers. Prefers the declared heartbeat; falls back to the older
     inference for loops started before heartbeats existed.
@@ -279,7 +257,7 @@ def cell_liveness(ws, boxes):
     discarded. Dropped 2026-07-30.
     """
     cid = ws.name
-    hb = heartbeat(ws)
+    hb = heartbeat(ws, cell)
     if hb:
         phase = hb.get("phase", "?")
         if phase in WAIT_PHASES:
@@ -341,13 +319,10 @@ def never_started(st):
     return bool(st.get("prepared")) and st["events"] == 1
 
 
-def _e2e_failed(ws):
-    """metrics.json is rewritten by every arrangement, so this reads the one
+def _e2e_failed(cell):
+    """The metrics are rewritten by every arrangement, so this reads the one
     in flight only while a verify runs."""
-    try:
-        met = json.loads((ws / "metrics.json").read_text())
-    except (OSError, json.JSONDecodeError):
-        return False
+    met = cell.read_metrics()
     return bool(met.get("e2e_total")) and met.get("e2e_pass") != met.get("e2e_total")
 
 
@@ -365,18 +340,16 @@ def cell_state(ws, loops, boxes):
 
 def _cell_state(ws, loops, boxes):
     parsed = parse_cell_id(ws.name)
-    if not parsed or not (ws / "iterations.log").exists():
+    if not parsed:
+        return None
+    c = _cell(ws)
+    if not c.has_ledger:
         return None
     agent, variant, task, rep = parsed
-    L = ledger.parse(ws, gate_n=common.definition().gate.arity)
-    budget, mver = "?", "-"
-    envf = ws / "cell.env"
-    if envf.exists():
-        _envtxt = envf.read_text()
-        m = re.search(r"ATTEMPT_BUDGET=(\d+)", _envtxt)
-        budget = m.group(1) if m else "?"
-        m = re.search(r"^AGENT_MODEL=(.+)$", _envtxt, re.M)
-        mver = m.group(1).strip() if m else "-"
+    L = c.read_ledger(gate_n=common.definition().gate.arity)
+    env = c.env
+    budget = env.get("ATTEMPT_BUDGET") if env.get("ATTEMPT_BUDGET", "").isdigit() else "?"
+    mver = env.get("AGENT_MODEL") or "-"
     st = dict(cid=ws.name, agent=agent, variant=variant,
               task=task, rep=int(rep), att=L["att"], budget=budget,
               hist=ledger.hist(L), events=L["events"], agent_model=mver,
@@ -395,19 +368,18 @@ def _cell_state(ws, loops, boxes):
     # flight, so leaving it there reads as a gate stuck for the whole verify.
     # Starred, because it is a count in progress rather than a verdict.
     # An X after the star: the in-flight arrangement's e2e stage failed.
-    _hbs = heartbeat(ws)
-    if _hbs and _hbs.get("phase") == "verify" and not L["reverify_active"]:
-        st["shape"] = f"{L['live_shape_pass']}/{L['gate_n']}*" + ("X" if _e2e_failed(ws) else "")
+    hb = heartbeat(ws, c)
+    if hb and hb.get("phase") == "verify" and not L["reverify_active"]:
+        st["shape"] = f"{L['live_shape_pass']}/{L['gate_n']}*" + ("X" if _e2e_failed(c) else "")
     try:
-        _val = json.loads((ws / VALIDATION).read_text())
-        st["taint"] = _val["verdict"] == "TAINTED"
-    except (OSError, json.JSONDecodeError, KeyError):
+        st["taint"] = json.loads(c.read_derived("validation.json") or "{}").get("verdict") == "TAINTED"
+    except json.JSONDecodeError:
         st["taint"] = False
 
     # --- compose: cancel > outcome > pause > liveness ------------------------
     # The ONLY place precedence between the axes is decided. Outcome comes
     # from THE ledger library; intent and liveness resolve as before.
-    intent, why = cell_intent(ws)
+    intent, why = cell_intent(ws, c)
     if intent == "cancel":
         st["state"], st["why"] = "DONE", "cancelled"
         return st
@@ -426,7 +398,7 @@ def _cell_state(ws, loops, boxes):
             st["detail"] = fails[-1].split("FAIL", 1)[-1][:70] if fails else ""
         return st
     st["att"] = max(L["att"] + (0 if L["last_ev"] == "ITER" else 1), 1)
-    live = cell_liveness(ws, boxes)
+    live = cell_liveness(ws, boxes, c)
     # LIVE column: e2e OK/NOK + in-flight shape-gate progress for the
     # attempt that hasn't been judged yet — `gate`/`hist` are frozen at the
     # last JUDGED attempt, so a cell deep in a 6-arrangement shape gate
@@ -435,18 +407,15 @@ def _cell_state(ws, loops, boxes):
     # (heartbeat phase `verify`, which now spans the whole gate — the separate
     # `shape` phase was display-only and is gone) — metrics.json is overwritten
     # by each arrangement, so outside that window it would just be stale.
-    hb = heartbeat(ws)
+    hb = heartbeat(ws, c)
     if hb and hb.get("phase") == "verify":
-        try:
-            met = json.loads((ws / "metrics.json").read_text())
-            e2ep, e2et = met.get("e2e_pass"), met.get("e2e_total")
-            if e2et:
-                # OK/NOK already says whether e2ep == e2et; printing the pair
-                # again spent width on a fact the verdict carries.
-                st["live"] = (f"e2e:{'OK' if e2ep == e2et else 'NOK'} "
-                               f"{L['live_shape_pass']}/{L['gate_n']}")
-        except (OSError, json.JSONDecodeError):
-            pass
+        met = c.read_metrics()
+        e2ep, e2et = met.get("e2e_pass"), met.get("e2e_total")
+        if e2et:
+            # OK/NOK already says whether e2ep == e2et; printing the pair
+            # again spent width on a fact the verdict carries.
+            st["live"] = (f"e2e:{'OK' if e2ep == e2et else 'NOK'} "
+                           f"{L['live_shape_pass']}/{L['gate_n']}")
     if intent == "pause" and live[0] == "CRASHED":
         # asked to stop and no longer running: the request is honoured
         st["state"], st["why"] = "PAUSED", why

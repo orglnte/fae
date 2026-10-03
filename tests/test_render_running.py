@@ -59,11 +59,11 @@ class TestTheInFlightE2E(unittest.TestCase):
     def test_a_failed_e2e_reads_as_an_x(self):
         with tempfile.TemporaryDirectory() as d:
             ws = Path(d)
-            self.assertFalse(runs.state._e2e_failed(ws))
+            self.assertFalse(runs.state._e2e_failed(runs.state._cell(ws)))
             (ws / "metrics.json").write_text(json.dumps({"e2e_pass": 7, "e2e_total": 7}))
-            self.assertFalse(runs.state._e2e_failed(ws))
+            self.assertFalse(runs.state._e2e_failed(runs.state._cell(ws)))
             (ws / "metrics.json").write_text(json.dumps({"e2e_pass": 5, "e2e_total": 7}))
-            self.assertTrue(runs.state._e2e_failed(ws))
+            self.assertTrue(runs.state._e2e_failed(runs.state._cell(ws)))
 
 
 if __name__ == "__main__":

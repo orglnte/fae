@@ -62,12 +62,6 @@ PER_AGENT_CAP = int(os.environ.get("PER_AGENT_CAP", 1))
 # "raise the budget and resume" path would be a standing exception to sealing.
 ATTEMPT_BUDGET = 10
 
-# A cell that reached a terminal verdict is finished evidence: the driver
-# writes <ws>/.sealed, and this side refuses to start, resume or queue it again.
-SEAL_MARKER = ".sealed"
-SEAL_EXIT = 46          # the driver's refusal code: "finished", not "broken"
-VALIDATION = "validation.json"  # per-cell validator output; mandatory at DONE
-
 # THE ledger parser, THE filesystem mutex, THE provider-fault vocabulary:
 # one module each, imported (the driver decides "retry this attempt" and
 # faults decides "cool this lane" on one text).
@@ -195,32 +189,18 @@ def hhmm():
     return f"{datetime.now(timezone.utc):%H:%M:%S}"
 
 
-# --- sealing + the global transition log --------------------------------------
-# A cell that reached a terminal verdict is finished evidence: the driver writes
-# <ws>/.sealed, and the orchestrator refuses to start/resume/queue it again.
-# There is no unseal: redoing a cell is delete-and-requeue.
-
-def _impl_of(cid):
-    """Which implementation ran this cell. Absent means bash (the driver every
-    cell sealed before the field existed); the python driver is the only one
-    that starts cells now."""
-    try:
-        m = re.search(r"^IMPL=(\w+)$", (WS / cid / "cell.env").read_text(), re.M)
-        return m.group(1) if m else "bash"
-    except OSError:
-        return "bash"
-
+# --- sealing ------------------------------------------------------------------
+# A cell that reached a terminal verdict is finished evidence (Cell.seal), and
+# the driver refuses to start, resume or queue it again. There is no unseal:
+# redoing a cell is delete-and-requeue.
 
 def is_sealed(cid):
-    return (WS / cid / SEAL_MARKER).exists()
+    return cell(cid).sealed
 
 
 def seal_reason(cid):
     """The seal's own record — verdict, attempts, who sealed it."""
-    try:
-        return (WS / cid / SEAL_MARKER).read_text().splitlines()[0].replace("\t", " ")
-    except (OSError, IndexError):
-        return "sealed"
+    return cell(cid).seal_record().replace("\t", " ") or "sealed"
 
 
 def queues():
@@ -237,15 +217,9 @@ def _queue_refusal(cid):
     return f"SEALED — {seal_reason(cid)}" if is_sealed(cid) else None
 
 
-# TLA+ live-trace conformance: the one transitions log every cell writes; the
-# driver records here the Crash of a loop that could not record its own.
+# TLA+ live-trace conformance: the one transitions log every cell writes
+# (through Cell, by appending), read here for each cell's last transition.
 TRANSITIONS_LOG = _plane.transitions_log(ROOT)
-
-
-def _emit_transition(action, cid, extra=""):
-    TRANSITIONS_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with TRANSITIONS_LOG.open("a") as f:
-        f.write(f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}\t{action}\t{cid}\t{extra}\n")
 
 
 def cell(cid, task=None, variant=None, rep=1, agent=None, reference=False,

@@ -15,10 +15,9 @@ import csv
 from datetime import datetime, timezone
 
 from fae import archive as _archive
-from fae import metrics as _metrics
 from fae.driver import common
 from fae.driver.common import (
-    parse_cell_id, ledger, faults, VALIDATION,
+    parse_cell_id, faults,
 )
 
 # The rules this validator keeps are the engine's own: a provider wall
@@ -34,12 +33,12 @@ def _validate_cell(ws):
     Re-runnable: rules can improve and be re-applied retroactively — the file
     records the rule set's verdict. Raises Busy while the cell is held."""
     taints, warns = [], []
+    cell = common.cell(Path(ws).name, workspaces=Path(ws).parent)
     rc_text = common.definition().report_text(ws)
     v_log = ws / "verify.log"
     v_text = v_log.read_text(errors="replace") if v_log.exists() else ""
-    it_text = ((ws / "iterations.log").read_text(errors="replace")
-               if (ws / "iterations.log").exists() else "")
-    metrics = _metrics.read(ws)
+    it_text = cell.ledger_text()
+    metrics = cell.read_metrics()
 
     # A verify that changed the cell's record (Cell._record_changes): the cell
     # paused for the operator, and nothing it recorded can stand unexamined.
@@ -83,7 +82,7 @@ def _validate_cell(ws):
     warns += archive_warns(ws, it_text)
     # the experiment's rules, and the fields it records beside the verdict
     rules = common.definition().taint_rules
-    verdict = ledger.parse(ws)["verdict"]
+    verdict = cell.read_ledger()["verdict"]
     xt, xw, fields = rules(ws, common.WS, metrics, it_text, v_text, rc_text, verdict) \
         if rules else ([], [], {})
     taints += xt
@@ -103,9 +102,8 @@ def _validate_cell(ws):
            # rig-output rule (a verify that left a required output unwritten).
            "rule_set": 9,
            "at": f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}"}
-    cell = common.cell(Path(ws).name, workspaces=Path(ws).parent)
     with cell.changing():
-        cell.write_derived(VALIDATION, json.dumps(doc, indent=1))
+        cell.write_derived("validation.json", json.dumps(doc, indent=1))
         cell.seal_taints(taints)
     return doc
 

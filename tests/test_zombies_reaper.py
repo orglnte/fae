@@ -225,7 +225,7 @@ class TestFindZombiesHeartbeat(FindZombiesCase):
         (cell / ".loop").write_text("x")
         with mock.patch.object(state, "heartbeat", return_value=None):
             zs = zombies.find_zombies()
-        self.assertIn(("heartbeat", str(cell / ".loop"), "cid1", "corpse file"), zs)
+        self.assertIn(("heartbeat", str(cell), "cid1", "corpse file"), zs)
 
     def test_a_beating_loop_file_is_not_a_corpse(self):
         ws = common.WS
@@ -296,9 +296,9 @@ class TestReapZombies(unittest.TestCase):
             p.write_text("x")
             with mock.patch.object(state, "heartbeat", return_value=None), \
                     mock.patch.object(zombies.common, "LOCKS", Path(d) / ".locks"):
-                done = zombies.reap_zombies([("heartbeat", str(p), "cid1", "note")])
+                done = zombies.reap_zombies([("heartbeat", str(p.parent), "cid1", "note")])
             self.assertFalse(p.exists())
-            self.assertIn(f"reaped heartbeat {p} (cid1)", done)
+            self.assertIn(f"reaped heartbeat {p.parent} (cid1)", done)
 
     def test_a_heartbeat_beating_again_is_skipped(self):
         with tempfile.TemporaryDirectory() as d:

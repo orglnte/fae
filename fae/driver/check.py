@@ -232,7 +232,7 @@ def _infra(ctx):
 
 
 def _invariants(ctx):
-    from fae import ledger, mutex
+    from fae import mutex
     from fae.cell import config as _config, prepare as _prep, rig as _rig, verify as _verify
     from fae.cell.variants import files as _files
     from fae.driver import state
@@ -240,7 +240,7 @@ def _invariants(ctx):
     missing = [f"{mod.__name__}.{name}"
                for mod, names in ((_rig, ("fp", "free_port_from")),
                                   (_verify, ("run_verifier", "call", "run_in_thread")),
-                                  (mutex, ("pause_requested", "open_lock", "try_fd", "wait_fds")),
+                                  (mutex, ("open_lock", "try_fd", "wait_fds")),
                                   (_prep, ("prepare", "seed", "safe_wipe")),
                                   (_config, ("load", "opencode_key_file", "stage_agent")))
                for name in names if not callable(getattr(mod, name, None))]
@@ -269,7 +269,7 @@ def _invariants(ctx):
                 continue
             st = state.cell_state(ws, {}, set())
             if st and st["state"] == "DONE" and st["why"] in ("green", "failed", "revoked"):
-                if ledger.parse(ws)["verdict"] != st["why"]:
+                if state._cell(ws).read_ledger()["verdict"] != st["why"]:
                     disagree.append(ws.name)
     out.append(Finding(not disagree, "every finished cell's ledger agrees with its state" if not disagree
                        else f"ledger and state disagree: {', '.join(disagree[:5])}",

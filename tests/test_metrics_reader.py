@@ -13,7 +13,7 @@ from unittest import mock
 from _ctx import runs
 
 from fae import metrics
-from fae.scoring import score_cell
+from fae.cell.cell import Cell
 
 
 def _ws(doc):
@@ -46,8 +46,9 @@ class TestTheReader(unittest.TestCase):
 
 class TestTheReadersUseIt(unittest.TestCase):
 
-    def test_scoring_reads_numbers(self):
-        self.assertEqual(score_cell.read_metrics(_ws({"load_total": "10", "load_errors": "1"})),
+    def test_the_cell_reads_numbers(self):
+        ws = _ws({"load_total": "10", "load_errors": "1"})
+        self.assertEqual(Cell(ws.name, workspaces=ws.parent).read_metrics(),
                          {"load_total": 10, "load_errors": 1})
 
     def test_validation_hands_the_rules_numbers(self):
