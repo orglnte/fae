@@ -105,9 +105,9 @@ def _spawn_detached(argv, env, cid, what="spawn"):
     # two stores of intent — the .paused marker and the trace — in step;
     # without it a stop/spawn pair leaves the marker to be wiped by a --fresh
     # prepare and no Resume is ever recorded, so every later event on the cell
-    # replays as an illegal transition. _unpause is a no-op when no pause
+    # replays as an illegal transition. unpause is a no-op when no pause
     # exists, and refuses to lift a cancellation.
-    state._unpause(cid)
+    state.unpause(cid)
     _crash_before_spawn(cid)
     common.CONDUCT.mkdir(parents=True, exist_ok=True)
     # The driver's stderr for its whole life, not just the probe window: a
@@ -140,7 +140,7 @@ def _cell_argv(task, variant, rep):
     return [sys.executable, "-m", "fae.cell", task, variant, str(rep)]
 
 
-def _spawn_spec(agent, spec, cid, what):
+def spawn_spec(agent, spec, cid, what):
     """Start one cell from its spec. Returns the spawn rc (None = alive)."""
     prestart_clean(cid)
     env = dict(os.environ, AGENT=agent)
@@ -262,7 +262,7 @@ def _selector_list(args):
     return list(sels)
 
 
-def _is_blanket(sels):
+def is_blanket(sels):
     """'resume all' semantics: standing operator decisions (roster/manual
     pauses, killed intent) survive a BLANKET resume but yield to a named one.
     The invocation is blanket only when it is exactly the wildcard — `resume
@@ -356,7 +356,8 @@ def reverify(args):
     if len(cids) > 1 and not args.all:
         sys.exit(f"{len(cids)} cells match — re-verify takes the rig for "
                  f"~15 minutes each. Name one, or pass --all.")
-    pid = common.conduct_pid()
+    from fae.driver.conduct import Conduct
+    pid = Conduct().pid()
     if pid:
         print(f"WARNING: conduct is running (pid {pid}); this re-verify queues for the "
               f"verify lock behind its cells and holds it for the whole gate", flush=True)
@@ -399,7 +400,7 @@ def resume(args):
         sys.exit(f"`resume` acts on exactly ONE cell; {' '.join(sels)!r} "
                  f"matches {len(matches)} — bulk resume goes through: "
                  f"experiment resume AGENT...|all")
-    blanket = _is_blanket(sels)
+    blanket = is_blanket(sels)
     parents = state.loop_parents()
     touched = 0
     for cid in matches:
@@ -435,7 +436,7 @@ def resume(args):
             # must not soften it.
             done_acts = []
             if state.pause_lock(cid) and state.pause_lock(cid) != "killed":
-                state._unpause(cid)
+                state.unpause(cid)
                 done_acts.append("pause lifted")
             # A terminal cell's spec is finished work: retire it here rather
             # than leave the lane reporting it as backlog and naming it as
@@ -466,9 +467,9 @@ def resume(args):
             continue
         acted = []
         if state.pause_lock(cid):
-            state._unpause(cid); acted.append("pause lifted")
-        if (ws / "reconcile.flagged").exists():
-            (ws / "reconcile.flagged").unlink(); acted.append("flag cleared")
+            state.unpause(cid); acted.append("pause lifted")
+        if unflag(cid):
+            acted.append("flag cleared")
         # Per-agent cap holds on resume too: locks are lifted above either
         # way, but the RESPAWN defers while the agent already has a live
         # loop (this call's own respawns included), unless --force pushes
@@ -500,7 +501,7 @@ def resume(args):
         # a spawn that never starts hands it straight back to the lane front.
         # Without this the loop runs while its spec still reads as backlog.
         claimed = None
-        if not _claimed(cid):
+        if not is_claimed(cid):
             for q in qs.lane_specs(agent):
                 if qs.spec_cid(q) == cid:
                     try:
@@ -634,7 +635,7 @@ def _variant_teardown(variant, cid, timeout=None):
                  f"— abandoned (inspect the {variant} infra by hand)")
 
 
-def _teardown_cell(cid, variant=None, *, reason, grace=STOP_GRACE_S,
+def teardown_cell(cid, variant=None, *, reason, grace=STOP_GRACE_S,
                    unblock_agent=False, dry=False):
     """THE one way a cell dies by conduct's hand. Returns what it took:
     "cooperative" | "termed" | "killed" | "absent".
@@ -943,7 +944,7 @@ MAX_RESPAWNS = int(os.environ.get("MAX_RESPAWNS", 3))
 RESPAWN_BOOK = common.CONDUCT / "reconcile.respawns.json"
 
 
-def _respawn_count(cid, bump=False):
+def respawn_count(cid, bump=False):
     if not bump:
         book = {}
         if RESPAWN_BOOK.exists():
@@ -965,6 +966,39 @@ def _respawn_count(cid, bump=False):
         return book[cid]
 
 
+def reset_respawn_budgets(cids):
+    """Forget each cell's repair count; returns how many had one."""
+    common.CONDUCT.mkdir(parents=True, exist_ok=True)
+    with common.mutex.fs_lock(common.CONDUCT / "respawn-book.lock"):
+        book = {}
+        if RESPAWN_BOOK.exists():
+            try:
+                book = json.loads(RESPAWN_BOOK.read_text())
+            except json.JSONDecodeError:
+                book = {}
+        n = sum(book.pop(c, None) is not None for c in cids)
+        if n:
+            RESPAWN_BOOK.write_text(json.dumps(book))
+        return n
+
+
+def flag(cid):
+    """Quarantine a cell for a human. A cell with no workspace has nowhere to
+    carry the flag."""
+    ws = common.WS / cid
+    if ws.is_dir():
+        (ws / "reconcile.flagged").touch()
+
+
+def unflag(cid):
+    """Lift the quarantine; True if there was one."""
+    f = common.WS / cid / "reconcile.flagged"
+    if not f.exists():
+        return False
+    f.unlink()
+    return True
+
+
 def _respawn(st, dry):
     """Resume a cell: same spawn as `spawn`, NEVER --fresh (attempts persist).
 
@@ -972,7 +1006,7 @@ def _respawn(st, dry):
     must put it back if it was not.
     """
     cid = st["cid"]
-    n = _respawn_count(cid)
+    n = respawn_count(cid)
     if n >= MAX_RESPAWNS:
         # --dry-run must not WRITE. reconcile.flagged makes every future
         # reconcile skip this cell permanently until a human resumes it, so
@@ -998,11 +1032,11 @@ def _respawn(st, dry):
         # be flagged for a human, with the real cause never reported anywhere.
         common._rec_log(f"{cid} respawn FAILED to start — budget not charged")
         return False
-    _respawn_count(cid, bump=True)
+    respawn_count(cid, bump=True)
     return True
 
 
-def _claimed(cid):
+def is_claimed(cid):
     """Is this cell's spec claimed — i.e. is conduct already responsible for
     restarting it?"""
     return common.queues().is_claimed(cid.split("_", 1)[0], cid)

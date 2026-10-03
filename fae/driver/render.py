@@ -260,15 +260,8 @@ def render(flat=False, running_only=False):
         if qsec:
             out.extend(qsec)
         live = sum(1 for n in boxes if n.startswith(common.AGENT_CONTAINER_PREFIX))
-        _cp = common.CONDUCT / "conduct.pid"
-        conduct_s = "run: DOWN"
-        if _cp.exists():
-            try:
-                _pid, _, _cap = _cp.read_text().partition(" ")
-                os.kill(int(_pid), 0)
-                conduct_s = f"run: UP ({_cap.strip() or '?'})"
-            except (OSError, ValueError):
-                conduct_s = "run: DOWN (stale pidfile)"
+        from fae.driver.conduct import Conduct
+        conduct_s = Conduct().run_line()
         out.append(f"\n{live} containers, {n_loops} loops, {conduct_s}, {datetime.now(timezone.utc):%H:%M:%S}Z")
         _mp = common.mem_pressure()
         if _mp["label"]:

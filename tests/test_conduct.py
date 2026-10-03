@@ -72,15 +72,15 @@ class ConductCase(OrchTmpCase):
         return {"task": "T1", "variant": variant,
                 "rep": rep, "budget": 10, "fresh": False}
 
-    def run_conduct(self, n=5, supervise=0):
+    def run_conduct(self, n=5, supervise=0, conductor=None):
         """supervise=0 keeps the scheduler tests pure-scheduler; the
         supervision tests below mock the pass and turn it on."""
         out = io.StringIO()
         # Preflight shells out to docker; these tests are about scheduling.
         with contextlib.redirect_stdout(out), \
                 contextlib.suppress(KeyboardInterrupt), \
-                mock.patch.object(runs.conduct, "_conduct_preflight", return_value=True):
-            runs.conduct.conduct(SimpleNamespace(limit=n, interval=self.CADENCE,
+                mock.patch.object(runs.conduct.Conduct, "preflight", return_value=True):
+            (conductor or runs.conduct.Conduct()).run(SimpleNamespace(limit=n, interval=self.CADENCE,
                                          per_agent=self.per_agent,
                                          supervise_interval=supervise))
         return out.getvalue()
@@ -279,7 +279,7 @@ class TestPreflight(unittest.TestCase):
         with mock.patch.object(runs.subprocess, "run", side_effect=fake), \
                 mock.patch.object(runs.conduct.image, "ensure_agent", self.ensured), \
                 contextlib.redirect_stdout(io.StringIO()):
-            return runs.conduct._conduct_preflight(), calls
+            return runs.conduct.Conduct().preflight(), calls
 
     def test_a_dead_daemon_stops_conduct_before_it_admits(self):
         ok, calls = self._run({"docker info": 1})
@@ -302,7 +302,7 @@ class TestPreflight(unittest.TestCase):
     def test_every_arm_is_probed_and_a_refusal_is_a_note(self):
         # The experiment's infra (its daemons, images, tools) is the
         # variants' own preflight; conduct runs it and reports, never installs.
-        with mock.patch.object(runs.rig, "_probe_variants", return_value=2) as probe:
+        with mock.patch.object(runs.rig, "probe_variants", return_value=2) as probe:
             ok, calls = self._run({})
         self.assertTrue(ok, "a refused arm is a note, not a stop")
         self.assertEqual(probe.call_count, 1)
@@ -508,7 +508,7 @@ class TestAInfraHaltSpendsARepair(ConductCase):
         self.assertIn("infra HALT at admission", out)
         self.assertNotIn("FROZEN", out)
         cid = self.spawned[0]
-        self.assertGreaterEqual(runs.ops._respawn_count(cid), 1)
+        self.assertGreaterEqual(runs.ops.respawn_count(cid), 1)
 
 
 class TestAGenericCrashSpendsARepair(ConductCase):
@@ -524,7 +524,7 @@ class TestAGenericCrashSpendsARepair(ConductCase):
         self.assertIn("crash at admission", out)
         self.assertNotIn("FROZEN", out)
         cid = self.spawned[0]
-        self.assertGreaterEqual(runs.ops._respawn_count(cid), 1)
+        self.assertGreaterEqual(runs.ops.respawn_count(cid), 1)
 
 class TestSystemicFreeze(ConductCase):
     def test_immediate_systemic_death_freezes_the_lane(self):
@@ -574,7 +574,7 @@ class TestSupervision(ConductCase):
 
     def _run(self, supervise, rounds=3):
         self.max_rounds = rounds
-        with mock.patch.object(runs.supervise, "_supervise_pass") as sp, \
+        with mock.patch.object(runs.supervise, "supervise_pass") as sp, \
              mock.patch.object(runs.zombies, "find_zombies", return_value=[]) as fz, \
              mock.patch.object(runs.zombies, "reap_zombies", return_value=[]):
             self.q("aaa", [self.spec()])
@@ -586,7 +586,7 @@ class TestSupervision(ConductCase):
         admitting, so the sweep fires immediately, not after the interval."""
         sp, _ = self._run(supervise=3600)
         self.assertEqual(sp.call_count, 1)
-        sp.assert_called_with(dry=False)
+        self.assertEqual(sp.call_args.kwargs, {"dry": False})
 
     def test_zero_disables_supervision(self):
         sp, fz = self._run(supervise=0)
@@ -597,7 +597,7 @@ class TestSupervision(ConductCase):
         z = ("container", "fae-agent-x", "x", "no live loop")
         self.max_rounds = 3
         reaped = []
-        with mock.patch.object(runs.supervise, "_supervise_pass"), \
+        with mock.patch.object(runs.supervise, "supervise_pass"), \
              mock.patch.object(runs.zombies, "find_zombies", return_value=[z]), \
              mock.patch.object(runs.zombies, "reap_zombies",
                                side_effect=lambda zs: reaped.extend(zs) or []):
@@ -727,7 +727,7 @@ class TestConvergeBranches(ConductCase):
     def _converge(self, frozen=None):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            runs.conduct._converge_running(frozen if frozen is not None else set())
+            runs.conduct.Conduct()._converge_running(frozen if frozen is not None else set())
         return out.getvalue()
 
     def test_a_paused_claim_is_handed_back_to_the_lane(self):
@@ -781,14 +781,15 @@ class TestDiagnose(ConductCase):
                                return_value=[("container", "fae-agent-x",
                                               "x", "no live loop")]), \
              mock.patch.object(runs.zombies, "janitor_lines", return_value=[]), \
-             mock.patch.object(runs.supervise, "_supervise_pass") as sp:
-            runs.supervise.conduct_diagnose(SimpleNamespace())
+             mock.patch.object(runs.supervise, "supervise_pass") as sp:
+            runs.conduct.Conduct().diagnose(SimpleNamespace())
         return out.getvalue(), sp
 
     def test_reports_supervision_zombies_and_admission(self):
         self.q("aaa", [self.spec()])
         out, sp = self._diagnose()
-        sp.assert_called_once_with(dry=True)
+        sp.assert_called_once()
+        self.assertEqual(sp.call_args.kwargs, {"dry": True})
         self.assertIn("SUPERVISION (dry run)", out)
         self.assertIn("fae-agent-x", out)
         self.assertIn("would admit", out)
@@ -824,7 +825,7 @@ class TestSpawnAndAdoptEdges(ConductCase):
         with mock.patch.object(runs.ops, "_spawn_detached",
                                side_effect=lambda argv, env, cid, what:
                                seen.update(env) or None):
-            runs.ops._spawn_spec("aaa", dict(self.spec(), fresh=True),
+            runs.ops.spawn_spec("aaa", dict(self.spec(), fresh=True),
                              "aaa_high_beta_apidocs_T1_r1", "test")
         self.assertEqual(seen.get("FRESH"), "1")
 
@@ -835,7 +836,7 @@ class TestSpawnAndAdoptEdges(ConductCase):
         with mock.patch.object(runs.state, "cell_state", return_value=None):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
-                runs.conduct._adopt_live_cells()
+                runs.conduct.Conduct()._adopt_live_cells()
         self.assertEqual(runs.queues.running_specs(), [])
         self.assertNotIn("adopted", out.getvalue())
 
@@ -879,20 +880,21 @@ class TestConductLiftsItsOwnStandDowns(ConductCase):
             f"{reason} by={who} at={at:%Y-%m-%dT%H:%M:%SZ}\n")
         self.q("aaa", [self.spec()])
 
-    def run_lift(self):
+    def run_lift(self, conductor=None):
         with mock.patch.object(runs.common, "TRANSITIONS_LOG",
                                self.plane / "transitions.log"):
-            return self.run_conduct()
+            return self.run_conduct(conductor=conductor)
 
     def test_a_cooled_stand_down_is_lifted_and_costs_a_repair(self):
         self.stood_down()
-        runs.common._ARM_ALERTED.add(self.CID)
-        out = self.run_lift()
+        c = runs.conduct.Conduct()
+        c.alerts.arm.add(self.CID)
+        out = self.run_lift(conductor=c)
         self.assertIn("lifted", out)
         self.assertFalse((self.ws / self.CID / ".paused").exists())
         self.assertEqual(self.spawned, [self.CID])
-        self.assertEqual(runs.ops._respawn_count(self.CID), 1)
-        self.assertNotIn(self.CID, runs.common._ARM_ALERTED)
+        self.assertEqual(runs.ops.respawn_count(self.CID), 1)
+        self.assertNotIn(self.CID, c.alerts.arm)
 
     def test_a_fresh_stand_down_waits_out_the_cool_off(self):
         self.stood_down(age_s=10)
@@ -929,7 +931,7 @@ class TestConductLiftsItsOwnStandDowns(ConductCase):
     def test_a_spent_budget_flags_instead_of_lifting(self):
         self.stood_down()
         for _ in range(runs.ops.MAX_RESPAWNS):
-            runs.ops._respawn_count(self.CID, bump=True)
+            runs.ops.respawn_count(self.CID, bump=True)
         out = self.run_lift()
         self.assertIn("FLAGGED", out)
         self.assertTrue((self.ws / self.CID / ".paused").exists())
@@ -1119,7 +1121,6 @@ class TestMemoryPressureMonitor(unittest.TestCase):
 
     def test_conduct_logs_on_the_rising_edge_into_pressure(self):
         # WARNING/CRITICAL is logged once when it is first seen, not every pass.
-        runs.supervise._MEM_ALERTED["level"] = 1
         crit = {"label": "CRITICAL", "level": 4, "avail_pct": 8,
                 "used_gb": 14.7, "total_gb": 16.0,
                 "swap_used_mb": 40000.0, "swap_total_mb": 41000.0}
@@ -1134,8 +1135,9 @@ class TestMemoryPressureMonitor(unittest.TestCase):
              mock.patch.object(runs.supervise, "_agent_io", return_value={}), \
              mock.patch.object(runs.supervise, "_agent_io_book", return_value={}), \
              mock.patch.object(runs.common, "_rec_log") as rec:
-            runs.supervise._supervise_pass(dry=True)
-            runs.supervise._supervise_pass(dry=True)   # second pass must NOT re-log
+            alerts = runs.supervise.Alerts()
+            runs.supervise.supervise_pass(alerts, dry=True)
+            runs.supervise.supervise_pass(alerts, dry=True)   # second pass must NOT re-log
         msgs = [c.args[0] for c in rec.call_args_list]
         hits = [m for m in msgs if "MEMORY PRESSURE" in m]
         self.assertEqual(len(hits), 1, msgs)

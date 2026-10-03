@@ -139,7 +139,7 @@ def mem_pressure():
                 "total_gb": 0.0, "swap_used_mb": 0.0, "swap_total_mb": 0.0}
     def _n(name, default=0):
         # str() coerces a mocked/non-string sh() result so a test that patches
-        # runs.sh and calls _supervise_pass never trips on the sysctl parse.
+        # runs.sh and calls supervise_pass never trips on the sysctl parse.
         try:
             return int(str(sh(["sysctl", "-n", name])).strip() or default)
         except (ValueError, TypeError):
@@ -155,16 +155,6 @@ def mem_pressure():
     return {"label": label, "level": level, "avail_pct": avail,
             "used_gb": used_gb, "total_gb": total_gb,
             "swap_used_mb": su, "swap_total_mb": su + sf}
-
-
-def conduct_pid():
-    """The live scheduler's pid, or None when no conduct is running."""
-    try:
-        pid = int((CONDUCT / "conduct.pid").read_text().partition(" ")[0])
-        os.kill(pid, 0)
-        return pid
-    except (OSError, ValueError):
-        return None
 
 
 def cell_id(agent, variant, rep, task="T1", effort="high", smoke=False):
@@ -201,7 +191,7 @@ def parse_cell_id(cid):
     return t[0], variant, t[-2], rep.group(1)
 
 
-def _hhmm():
+def hhmm():
     return f"{datetime.now(timezone.utc):%H:%M:%S}"
 
 

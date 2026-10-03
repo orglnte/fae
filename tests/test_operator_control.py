@@ -41,7 +41,7 @@ class OperatorTestCase(OrchTmpCase):
             (self.ws / c).mkdir()
         self.spawned = []
         self.patches = [
-            # _teardown_cell waits for the loop to exit, and these suites
+            # teardown_cell waits for the loop to exit, and these suites
             # patch os.kill with a bare Mock — every pid then looks alive
             # forever and the full grace is burned in a unit test.
             mock.patch.object(runs.ops, "_await_exit", return_value=True),
@@ -228,7 +228,7 @@ class TestConductStop(OperatorTestCase):
         with mock.patch.object(runs.state, "loop_parents", return_value=live or {}), \
              mock.patch.object(runs.state, "containers", return_value=[]), \
              mock.patch.object(runs.ops, "request_pause") as rp:
-            runs.conduct.conduct_stop(mock.Mock(scope=scope, yes=yes))
+            runs.conduct.Conduct().stop(mock.Mock(scope=scope, yes=yes))
         return rp
 
     def test_the_backlog_survives_a_blanket_stop(self):
@@ -264,7 +264,7 @@ class TestConductStop(OperatorTestCase):
              mock.patch.object(runs.ops, "request_pause") as rp, \
              mock.patch.object(runs.state, "loop_parents", return_value={}), \
              mock.patch.object(runs.state, "containers", return_value=[]):
-            runs.conduct.conduct_stop(mock.Mock(scope=["all"], yes=False))
+            runs.conduct.Conduct().stop(mock.Mock(scope=["all"], yes=False))
         rp.assert_not_called()
 
     def test_a_non_terminal_without_yes_does_nothing(self):
@@ -272,7 +272,7 @@ class TestConductStop(OperatorTestCase):
              mock.patch.object(runs.ops, "request_pause") as rp, \
              mock.patch.object(runs.state, "loop_parents", return_value={}), \
              mock.patch.object(runs.state, "containers", return_value=[]):
-            runs.conduct.conduct_stop(mock.Mock(scope=["all"], yes=False))
+            runs.conduct.Conduct().stop(mock.Mock(scope=["all"], yes=False))
         rp.assert_not_called()
 
     def test_the_warning_names_the_loops_it_will_kill(self):
@@ -281,9 +281,9 @@ class TestConductStop(OperatorTestCase):
         with mock.patch.object(runs.state, "loop_parents", return_value=live), \
              mock.patch.object(runs.state, "containers", return_value=[]), \
              mock.patch.object(runs.ops, "request_pause"), \
-             mock.patch.object(runs.ops, "_teardown_cell"), \
+             mock.patch.object(runs.ops, "teardown_cell"), \
              contextlib.redirect_stdout(buf):
-            runs.conduct.conduct_stop(mock.Mock(scope=["all"], yes=True))
+            runs.conduct.Conduct().stop(mock.Mock(scope=["all"], yes=True))
         out = buf.getvalue()
         self.assertIn("WARNING", out)
         self.assertIn("MID-ATTEMPT", out)
@@ -318,7 +318,7 @@ class TestStopConductor(OperatorTestCase):
             raise AssertionError("signalled a dead pid")
 
         with mock.patch.object(runs.os, "kill", probe_dead):
-            self.assertFalse(runs.conduct._stop_conductor())
+            self.assertFalse(runs.conduct.Conduct().stop_conductor())
         self.assertFalse((self.conduct / "conduct.pid").exists())
 
     def test_live_conduct_is_termed_and_pidfile_cleared(self):
@@ -326,13 +326,13 @@ class TestStopConductor(OperatorTestCase):
         sent = []
         with mock.patch.object(runs.os, "kill",
                                lambda pid, sig: sent.append((pid, sig))):
-            self.assertTrue(runs.conduct._stop_conductor())
+            self.assertTrue(runs.conduct.Conduct().stop_conductor())
         self.assertIn((4242, runs.signal.SIGTERM), sent)
         self.assertFalse((self.conduct / "conduct.pid").exists())
 
     def test_garbage_pidfile_is_cleared(self):
         (self.conduct / "conduct.pid").write_text("not-a-pid")
-        self.assertFalse(runs.conduct._stop_conductor())
+        self.assertFalse(runs.conduct.Conduct().stop_conductor())
         self.assertFalse((self.conduct / "conduct.pid").exists())
 
 
@@ -522,7 +522,7 @@ class TestConductResume(OperatorTestCase):
              mock.patch.object(runs.state, "cell_state", side_effect=_cs), \
              mock.patch.object(runs.ops, "RESPAWN_BOOK",
                                self.conduct / "reconcile.respawns.json"):
-            runs.conduct.conduct_resume(mock.Mock(scope=scope))
+            runs.conduct.Conduct().resume(mock.Mock(scope=scope))
 
     def test_no_loop_is_ever_spawned(self):
         for c in CIDS:
@@ -728,7 +728,7 @@ class TestLimitWall(OperatorTestCase):
              mock.patch.object(runs.state, "cell_state", side_effect=_cs), \
              mock.patch.object(runs.ops, "RESPAWN_BOOK",
                                self.conduct / "reconcile.respawns.json"):
-            runs.supervise._supervise_pass(dry=dry)
+            runs.supervise.supervise_pass(runs.supervise.Alerts(), dry=dry)
 
     def test_walled_cell_is_stood_down_and_lane_cooled(self):
         cid = CIDS[0]
@@ -796,7 +796,7 @@ class TestLimitWall(OperatorTestCase):
              mock.patch.object(runs.subprocess, "run"), \
              mock.patch.object(runs.ops, "RESPAWN_BOOK",
                                self.conduct / "reconcile.respawns.json"):
-            runs.supervise._supervise_pass(dry=False)
+            runs.supervise.supervise_pass(runs.supervise.Alerts(), dry=False)
         until = runs.queues.cooldown_until("sonnet")
         self.assertGreater(until, _t.time() + 2 * 86400, "no day-scale cooldown")
         self.assertEqual([runs.queues.spec_cid(p) for p in runs.queues.running_specs("sonnet")],
@@ -886,7 +886,7 @@ class TestConductPause(OperatorTestCase):
     def test_partial_parks_and_pauses(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         with mock.patch.object(runs.ops, "request_pause") as rp:
-            runs.conduct.conduct_pause(mock.Mock(scope=["sonnet"], admission_only=False,
+            runs.conduct.Conduct().pause(mock.Mock(scope=["sonnet"], admission_only=False,
                                          dry_run=False, interval=1))
         self.assertTrue(runs.queues.lane_dir("sonnet", parked=True).is_dir())
         paused = rp.call_args[0][0]
@@ -896,14 +896,14 @@ class TestConductPause(OperatorTestCase):
     def test_admission_only_leaves_running_cells_alone(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         with mock.patch.object(runs.ops, "request_pause") as rp:
-            runs.conduct.conduct_pause(mock.Mock(scope=["sonnet"], admission_only=True,
+            runs.conduct.Conduct().pause(mock.Mock(scope=["sonnet"], admission_only=True,
                                          dry_run=False, interval=1))
         self.assertTrue(runs.queues.lane_dir("sonnet", parked=True).is_dir())
         rp.assert_not_called()
 
     def test_admission_only_is_rejected_fleet_wide(self):
         with self.assertRaises(SystemExit):
-            runs.conduct.conduct_pause(mock.Mock(scope=["all"], admission_only=True,
+            runs.conduct.Conduct().pause(mock.Mock(scope=["all"], admission_only=True,
                                          dry_run=False, interval=1))
 
 
@@ -1031,8 +1031,8 @@ class TestConductPauseDryRun(OperatorTestCase):
              mock.patch.object(runs.state, "loop_pids", return_value={}), \
              mock.patch.object(runs.state, "containers", return_value=set()), \
              mock.patch.object(runs.ops, "request_pause") as rp, \
-             mock.patch.object(runs.conduct, "_stop_conductor") as sc:
-            runs.conduct.conduct_pause(mock.Mock(scope=scope, admission_only=admission_only,
+             mock.patch.object(runs.conduct.Conduct, "stop_conductor") as sc:
+            runs.conduct.Conduct().pause(mock.Mock(scope=scope, admission_only=admission_only,
                                          dry_run=True, interval=1))
         return out.getvalue(), rp, sc
 
@@ -1082,13 +1082,13 @@ class TestConductPauseFullWindow(OperatorTestCase):
         import io, contextlib
         out = io.StringIO()
         with contextlib.redirect_stdout(out), \
-             mock.patch.object(runs.conduct, "_stop_conductor", return_value=True) as sc, \
+             mock.patch.object(runs.conduct.Conduct, "stop_conductor", return_value=True) as sc, \
              mock.patch.object(runs.state, "loop_parents", return_value={}), \
              mock.patch.object(runs.state, "loop_pids", return_value={}), \
              mock.patch.object(runs.state, "containers", return_value=set()), \
              mock.patch.object(runs.common, "sh", return_value=""), \
              mock.patch.object(runs.ops, "request_pause") as rp:
-            runs.conduct.conduct_pause(mock.Mock(scope=["all"], admission_only=False,
+            runs.conduct.Conduct().pause(mock.Mock(scope=["all"], admission_only=False,
                                          dry_run=False, interval=1))
         sc.assert_called_once()
         self.assertEqual(rp.call_args[0][1], "drain")
@@ -1101,14 +1101,14 @@ class TestConductPauseFullWindow(OperatorTestCase):
         seen = ["python3 /x/cli.py cell reverify cell", ""]
         out = io.StringIO()
         with contextlib.redirect_stdout(out), \
-             mock.patch.object(runs.conduct, "_stop_conductor", return_value=False), \
+             mock.patch.object(runs.conduct.Conduct, "stop_conductor", return_value=False), \
              mock.patch.object(runs.state, "loop_parents", return_value={}), \
              mock.patch.object(runs.state, "loop_pids", return_value={}), \
              mock.patch.object(runs.state, "containers", return_value=set()), \
              mock.patch.object(runs.common, "sh", side_effect=lambda *a, **k: seen.pop(0) if seen else ""), \
              mock.patch.object(runs.time, "sleep", lambda s: None), \
              mock.patch.object(runs.ops, "request_pause"):
-            runs.conduct.conduct_pause(mock.Mock(scope=["all"], admission_only=False,
+            runs.conduct.Conduct().pause(mock.Mock(scope=["all"], admission_only=False,
                                          dry_run=False, interval=1))
         self.assertIn("FP-pinned process", out.getvalue())
         self.assertIn("DRAIN COMPLETE", out.getvalue())
@@ -1199,11 +1199,11 @@ class TestVerbEdges(OperatorTestCase):
     # --- experiment stop / resume ------------------------------------------
     def test_conduct_stop_refuses_an_unknown_lane(self):
         with self.assertRaises(SystemExit):
-            runs.conduct.conduct_stop(mock.Mock(scope=["nosuchmodel"]))
+            runs.conduct.Conduct().stop(mock.Mock(scope=["nosuchmodel"]))
 
     def test_conduct_resume_refuses_an_unknown_lane(self):
         with self.assertRaises(SystemExit):
-            runs.conduct.conduct_resume(mock.Mock(scope=["nosuchmodel"]))
+            runs.conduct.Conduct().resume(mock.Mock(scope=["nosuchmodel"]))
 
     def test_conduct_stop_terms_conduct_and_the_scope_loops(self):
         (self.conduct / "conduct.pid").write_text("4242 cap=7")
@@ -1216,7 +1216,7 @@ class TestVerbEdges(OperatorTestCase):
              mock.patch.object(runs.subprocess, "run") as sub, \
              mock.patch.object(runs.os, "kill",
                                side_effect=lambda p, s: killed.append((p, s))):
-            out = self.out_of(runs.conduct.conduct_stop, mock.Mock(scope=["all"]))
+            out = self.out_of(runs.conduct.Conduct().stop, mock.Mock(scope=["all"]))
         self.assertIn("conduct stopped (TERM)", out)
         # Cells stand down cooperatively and exit through their own teardown
         # trap, which is the only path that releases infra in order. A
@@ -1233,7 +1233,7 @@ class TestVerbEdges(OperatorTestCase):
              mock.patch.object(runs.state, "containers", return_value=set()), \
              mock.patch.object(runs.ops, "request_pause"), \
              mock.patch.object(runs.os, "kill", side_effect=ProcessLookupError):
-            out = self.out_of(runs.conduct.conduct_stop, mock.Mock(scope=["all"]))
+            out = self.out_of(runs.conduct.Conduct().stop, mock.Mock(scope=["all"]))
         self.assertIn("stopped [all]", out)
 
     def test_conduct_resume_refuses_to_merge_a_conflicting_lane(self):
@@ -1244,7 +1244,7 @@ class TestVerbEdges(OperatorTestCase):
              mock.patch.object(runs.state, "loop_pids", return_value={}), \
              mock.patch.object(runs.state, "containers", return_value=set()), \
              mock.patch.object(runs.state, "cell_state", return_value=None):
-            out = self.out_of(runs.conduct.conduct_resume, mock.Mock(scope=["sonnet"]))
+            out = self.out_of(runs.conduct.Conduct().resume, mock.Mock(scope=["sonnet"]))
         self.assertIn("refusing to clobber", out)
 
     def test_conduct_resume_clears_a_flag_and_a_corrupt_budget_book(self):
@@ -1262,7 +1262,7 @@ class TestVerbEdges(OperatorTestCase):
                                                  why="loop", agent="sonnet",
                                                  variant="beta_apidocs", task="T1",
                                                  rep="1", budget=10)):
-            out = self.out_of(runs.conduct.conduct_resume, mock.Mock(scope=["sonnet"]))
+            out = self.out_of(runs.conduct.Conduct().resume, mock.Mock(scope=["sonnet"]))
         self.assertIn("flag cleared", out)
         self.assertFalse((self.ws / cid / "reconcile.flagged").exists())
 
@@ -1280,7 +1280,7 @@ class TestStandingStateSurvivesBulkVerbs(OperatorTestCase):
              mock.patch.object(runs.state, "loop_parents", return_value={}), \
              mock.patch.object(runs.state, "containers", return_value=set()), \
              mock.patch.object(runs.ops, "request_pause"):
-            runs.conduct.conduct_stop(mock.Mock(scope=["all"]))
+            runs.conduct.Conduct().stop(mock.Mock(scope=["all"]))
         out = buf.getvalue()
         self.assertIn("stay paused", out)
         self.assertIn("cli.py experiment resume all", out)
@@ -1322,27 +1322,27 @@ class TestResumeAnswersTheLedgerNotTheFile(OperatorTestCase):
         cid = CIDS[0]
         self._log(("Pause", cid, "reason=manual"))
         # no .paused file — the operator removed it by hand
-        runs.state._unpause(cid)
+        runs.state.unpause(cid)
         self.assertEqual(len(self._resumes()), 1)
 
     def test_no_resume_when_the_ledger_never_paused(self):
         cid = CIDS[0]
         self._log(("Spawn", cid, ""))
         (self.ws / cid / ".paused").write_text("raw file, never honored\n")
-        runs.state._unpause(cid)
+        runs.state.unpause(cid)
         self.assertEqual(self._resumes(), [])
         self.assertFalse((self.ws / cid / ".paused").exists())
 
     def test_an_epoch_seeded_pause_counts(self):
         cid = CIDS[0]
         self._log(("EPOCH", cid, "outcome=none intent=paused loop=none"))
-        runs.state._unpause(cid)
+        runs.state.unpause(cid)
         self.assertEqual(len(self._resumes()), 1)
 
     def test_a_ledger_resume_clears_the_pause(self):
         cid = CIDS[0]
         self._log(("Pause", cid, ""), ("Resume", cid, ""))
-        runs.state._unpause(cid)
+        runs.state.unpause(cid)
         self.assertEqual(len(self._resumes()), 1)   # only the pre-existing one
 
 
@@ -1354,7 +1354,7 @@ class TestConductRefusesAnAlternativeRoot(OperatorTestCase):
     def test_refuses_before_touching_anything(self):
         with mock.patch.dict(os.environ, {"WORKSPACES_DIR": "/x/ws-test.nosync"}), \
              mock.patch.object(runs.common, "CONDUCT", self.conduct / "never"):
-            rc = runs.conduct.conduct(SimpleNamespace(limit=1))
+            rc = runs.conduct.Conduct().run(SimpleNamespace(limit=1))
         self.assertEqual(rc, 2)
         self.assertFalse((self.conduct / "never").exists())
 
@@ -1413,7 +1413,7 @@ class TestTheWeeklyWallCoolsTheLane(OperatorTestCase):
                                st if Path(w).name == cid else None), \
              mock.patch.object(runs.ops, "RESPAWN_BOOK",
                                self.conduct / "reconcile.respawns.json"):
-            runs.supervise._supervise_pass(dry=False)
+            runs.supervise.supervise_pass(runs.supervise.Alerts(), dry=False)
         self.assertEqual(runs.state.pause_lock(cid), "limit-wall")
         until = runs.queues.cooldown_until("sonnet")
         import time as _t

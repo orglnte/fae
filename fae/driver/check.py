@@ -224,7 +224,7 @@ def _seeds(ctx):
 
 def _infra(ctx):
     from fae.driver import rig
-    bad = rig._probe_variants(ctx.selected())
+    bad = rig.probe_variants(ctx.selected())
     return [Finding(not bad, "every variant's infra and verify image" if not bad
                     else f"{bad} variant(s) refused this host (the lines above name why)",
                     "fix what the refused variant's line names; then "

@@ -1,12 +1,13 @@
 """THE scheduler: the only thing that turns queued specs into cells, and the
 only spawner and supervisor at once — every --supervise-interval it runs
-fae/driver/supervise.py's sweep, so repairs are convergence (a crashed cell's
-spec is still claimed in running/, and the next pass restarts it) rather
-than a second controller racing the first.
+the supervision pass (fae/driver/supervise.py), so repairs are convergence (a
+crashed cell's spec is still claimed in running/, and the next pass restarts
+it) rather than a second controller racing the first.
 
-Depends on fae/driver/ops.py (spawn/teardown/select_cells/request_pause/...) and
-fae/driver/supervise.py (_supervise_pass) — one direction only, nothing in
-either calls back into conduct.
+A `Conduct` owns the scheduler's state: conduct.pid in .conduct/ and what the
+supervision pass has already reported. The CLI builds one for every operator
+verb that acts on the run as a whole (run, pause, resume, stop, status,
+diagnose, repair); only `run` loops.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ import subprocess
 import sys
 import time
 import ujson as json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fae.driver import common
@@ -26,196 +28,8 @@ from fae.driver import state
 from fae.driver import supervise
 from fae.driver import zombies
 
-def _next_admissible(agent, boxes):
-    """The lane's first spec that may start now, with the ones it skipped
-    accounted for. Returns (path, cid) or (None, reason).
-
-    Nothing is moved while deciding — a spec only leaves the queue when it is
-    claimed, so an interrupted decision costs nothing."""
-    qs = common.queues()
-    for p in qs.lane_specs(agent):
-        cid = qs.spec_cid(p)
-        ws = common.WS / cid
-        if ws.is_dir():
-            # A flagged cell is quarantined from admission too: repair stops
-            # bringing it back, and a pending spec would otherwise respawn it
-            # right past the flag. The operator's resume clears the flag.
-            if (ws / "reconcile.flagged").exists():
-                continue
-            st = state.cell_state(ws, {}, boxes)
-            if st and st["state"] == "DONE":
-                qs.finish(agent, p)
-                continue
-        if state.pause_lock(cid) or state.loop_parents().get(cid):
-            continue
-        return p, cid
-    return None, "none-admissible"
-
-
-def _adopt_live_cells():
-    """Claim any live cell conduct did not admit itself.
-
-    A cell outliving the conduct that started it (Ctrl-C, restart) has no
-    claim, so its lane would read as free and admit a second cell. Adoption
-    makes the claim match reality before the first admission."""
-    n = 0
-    for cid, _pid in state.loop_parents().items():
-        if ops._claimed(cid):
-            continue
-        st = state.cell_state(common.WS / cid, {}, set())
-        if not st:
-            continue
-        common.queues().adopt(cid.split("_", 1)[0], cid, _spec_of(st))
-        n += 1
-    if n:
-        print(f"run: adopted {n} live cell(s) started outside this run",
-              flush=True)
-
-
 STANDDOWN_COOL_S = int(os.environ.get("STANDDOWN_COOL_S", 300))
 CONDUCT_LIFTED = ("arm-stuck", "verify-wedged", "silent-hang", "phase-stalled-")
-
-
-def _lift_conduct_standdowns(agents, now_t):
-    for m in agents:
-        for cid in ops.select_cells(m):
-            meta = state.pause_meta(cid)
-            if not meta:
-                continue
-            reason, who, at = meta
-            if who != "conduct" or not reason.startswith(CONDUCT_LIFTED):
-                continue
-            if (common.WS / cid / ".cancelled").exists() \
-                    or (common.WS / cid / "reconcile.flagged").exists():
-                continue
-            if at is not None and common.awake_age(at, now_t) < STANDDOWN_COOL_S:
-                continue
-            n = ops._respawn_count(cid)
-            if n >= ops.MAX_RESPAWNS:
-                (common.WS / cid / "reconcile.flagged").touch()
-                print(f"  [{common._hhmm()}] FLAGGED  {cid}: {n} stand-downs "
-                      f"({reason}) — human needed, spec held in the queue "
-                      f"until you resume it", flush=True)
-                continue
-            state._unpause(cid)
-            ops._respawn_count(cid, bump=True)
-            common._ARM_ALERTED.discard(cid)
-            for k in [k for k in common._PHASE_ALERTED if k[0] == cid]:
-                common._PHASE_ALERTED.discard(k)
-            print(f"  [{common._hhmm()}] lifted {cid}: {reason} stand-down "
-                  f"(repair {n + 1} of {ops.MAX_RESPAWNS})", flush=True)
-
-
-def _converge_running(frozen):
-    """Make the world match the claimed specs: every file under running/ is a
-    lane's cell and must be alive, finished, or handed back.
-
-    This is the whole repair path — a claimed spec sits in running/ until it
-    reaches a verdict, so a conduct that dies mid-attempt (or a cell killed by
-    a hang sweep) is recovered by the next pass with no journal to replay."""
-    qs = common.queues()
-    live = state.loop_parents()
-    boxes = state.containers()
-    for p in qs.running_specs():
-        agent, cid = p.parent.name, qs.spec_cid(p)
-        if live.get(cid):
-            continue
-        st = state.cell_state(common.WS / cid, {}, boxes)
-        if st and st["state"] == "DONE":
-            qs.finish(agent, p)
-            continue
-        if state.pause_lock(cid):
-            # operator (or a wall stand-down) owns this cell: hand the spec
-            # back so the lane can serve the rest of its backlog
-            qs.release(agent, p)
-            continue
-        if qs.cooldown_until(agent) > time.time():
-            continue                      # lane is walled: restarting its cell
-                                          # only walls again
-        n = ops._respawn_count(cid)
-        if n >= ops.MAX_RESPAWNS:
-            if (common.WS / cid).is_dir():   # a cell that never got a workspace has
-                                      # nowhere to carry the flag; the spec
-                                      # going back to the queue is the record
-                (common.WS / cid / "reconcile.flagged").touch()
-            qs.release(agent, p)
-            print(f"  [{common._hhmm()}] FLAGGED  {cid}: {n} repairs — human needed, "
-                  f"spec held in the queue until you resume it", flush=True)
-            continue
-        try:
-            spec = qs.read_spec(p)
-        except (OSError, ValueError):
-            qs.shelve(p, "unreadable")
-            continue
-        rc = ops._spawn_spec(agent, spec, cid, "repair")
-        if rc is None:
-            ops._respawn_count(cid, bump=True)
-            print(f"  [{common._hhmm()}] repaired {cid} (attempt {n + 1} of "
-                  f"{ops.MAX_RESPAWNS})", flush=True)
-        elif rc in (common.LOCK_EXIT_RC, common.PAUSE_EXIT_RC):
-            pass                       # owned or paused meanwhile: next pass
-        elif rc in (common.INFRA_EXIT_RC, common.GENERIC_CRASH_EXIT_RC):
-            # the infra failed, or the driver crashed outright, under the
-            # fresh attempt: a repair that spends budget like any other, so a
-            # deterministic host-level fault cannot spin forever uncounted.
-            ops._respawn_count(cid, bump=True)
-            kind = "infra HALT" if rc == common.INFRA_EXIT_RC else "crash"
-            print(f"  [{common._hhmm()}] {kind} on repair of {cid} "
-                  f"(repair {n + 1} of {ops.MAX_RESPAWNS})", flush=True)
-        elif rc in common.SYSTEMIC_EXITS:
-            frozen.add(agent)
-            print(f"  [{common._hhmm()}] lane {agent} FROZEN: repair spawn died "
-                  f"rc={rc} — fix the cause, then restart `experiment run`", flush=True)
-
-
-def _conduct_preflight():
-    """Make the infra usable before admitting anything, or say why not.
-
-    Builds the agent image when it is missing — a fresh clone and a reset
-    Docker VM look identical from here, and every spawn dies at preflight
-    until it exists. Docker itself and the arm tools are NOT installed: that
-    is a machine-level change, and it is reported instead.
-    """
-    ok, why = common.mutex.fs_enforces_flock(common.LOCKS)
-    if not ok:
-        print(f"run: STOP — filesystem locking is not enforced on\n"
-              f"  {common.LOCKS}\n"
-              f"  detected: {why}\n"
-              f"  Every arm cap, work slot and verify lock in this rig is a "
-              f"flock(2) on a file in that directory. Without enforcement each "
-              f"one succeeds for everyone at once: two access cells provision "
-              f"two infra and the host falls over, silently.\n"
-              f"  Fix: put workspaces.nosync on a local disk. A network mount, "
-              f"a synced folder, or some virtiofs/9p shares are the usual "
-              f"causes.\n"
-              f"  Probe it yourself: python3 fae/mutex.py fscheck {common.LOCKS}",
-              flush=True)
-        return False
-    if subprocess.run(["docker", "info"], capture_output=True).returncode != 0:
-        print("run: STOP — the docker daemon is not reachable. Start "
-              "Docker, then run `experiment run` again.", flush=True)
-        return False
-    local, fstype = common.mutex.fs_is_local(common.WS)
-    if local is False:
-        print(f"run: WARNING — {common.WS} is on {fstype}, not a local disk. Cells and "
-              f"conduct append to the same ledgers; appends interleave safely only on a "
-              f"local disk.", flush=True)
-    # the agent image every spawn uses: the base (built when missing, its
-    # clients current) and the experiment's layer over it
-    if not image.ensure_agent(log=lambda t: print(f"run: {t}", flush=True)):
-        print("run: STOP — the agent image could not be built. "
-              "Every spawn would die at preflight.", flush=True)
-        return False
-    # Every variant's own preflight — its daemon, its images (built here,
-    # not under a cell), its tools — and a sweep of its stale infra:
-    # what `cli.py experiment infra` shows, run once before admission.
-    from fae.driver import rig as _rig
-    print("run: infra preflight", flush=True)
-    bad = _rig._probe_variants()
-    if bad:
-        print(f"run: NOTE — {bad} variant(s) refused their preflight; cells of "
-              f"those variants will HALT.", flush=True)
-    return True
 
 
 def _default_ws():
@@ -231,314 +45,6 @@ def _ws_is_default():
     return not override or Path(override).resolve() == _default_ws().resolve()
 
 
-def conduct(args):
-    """THE scheduler — the ONLY thing that turns queued specs into cells.
-
-    Foreground: run it and watch it (the narration IS the monitoring).
-    Ctrl-C detaches: live cells keep running (they are setsid-detached) and
-    nothing new starts until conduct is run again.
-
-    ONE LIVE CELL PER NON-EMPTY LANE is the invariant. `--per-agent` (1) is
-    what enforces it; `-n` is the global ceiling and should equal the lane
-    count — conduct warns when it does not, because a lower cap silently
-    starves lanes. Lanes admit starved-first, round-robin.
-
-    Arm serialization (an arm with a lock) is NOT an admission concern: the lane's
-    cell parks on the arm lock in-cell and takes the arm the moment it frees,
-    and one-cell-per-lane already bounds how many can wait.
-
-    A lane whose spawn dies immediately with a systemic code (creds, empty
-    AGENT_CMD, seed FATAL) is FROZEN and reported instead of drained into the
-    failure; exit 43 (loop lock already held) just skips the spec. A parked
-    lane (see `experiment pause M`) is never admitted from and never counts as
-    'done' — conduct idles while only parked backlog remains.
-
-    Also the SUPERVISOR: every --supervise-interval it runs _supervise_pass
-    (hang/crash classification, DONE validation, zombie reap). Repairs are
-    convergence, not respawns: a crashed cell's spec is still claimed in
-    running/, and the next pass restarts it. One controller, one spawner.
-    """
-    qs = common.queues()
-    n = args.limit
-    if not _ws_is_default():
-        # The backlog lives in the GLOBAL .queues: a scheduler running against
-        # an alternative root would drain the scored queue into it. The test
-        # root is spawn-by-hand only.
-        print(f"the run refuses: WORKSPACES_DIR={common.WS} is not the scored root "
-              f"({_default_ws()}); the backlog is global and would be drained "
-              f"into the wrong tree. Spawn validation cells by hand.",
-              file=sys.stderr)
-        return 2
-    common.CONDUCT.mkdir(parents=True, exist_ok=True)
-    pidfile = common.CONDUCT / "conduct.pid"
-    if pidfile.exists():
-        try:
-            _pid, _, _ = pidfile.read_text().partition(" ")
-            os.kill(int(_pid), 0)
-            print(f"run: already running (pid {_pid}) — refusing a second "
-                  f"instance: two schedulers would each think they own the cap",
-                  flush=True)
-            return
-        except (OSError, ValueError):
-            pass                                # stale pidfile: take over
-    pidfile.write_text(f"{os.getpid()} cap={n}")
-    # Tee the narration to tmp/conduct-<PID>.log: if this instance dies from
-    # outside, the per-pid file records what it did and when output stopped.
-    _logdir = Path(os.environ.get("CONDUCT_LOG_DIR", common.ROOT / "tmp"))
-    _logdir.mkdir(parents=True, exist_ok=True)
-    _logf = (_logdir / f"conduct-{os.getpid()}.log").open("a")
-
-    class _Tee:
-        def __init__(self, *streams): self.streams = streams
-
-        def write(self, s):
-            for st in self.streams:
-                st.write(s)
-            _logf.flush()
-
-        def flush(self):
-            for st in self.streams:
-                st.flush()
-
-    _old_out, _old_err = sys.stdout, sys.stderr
-    sys.stdout = _Tee(_old_out, _logf)
-    sys.stderr = _Tee(_old_err, _logf)
-    print(f"run[{os.getpid()}]: logging to {_logf.name}", flush=True)
-    if not _conduct_preflight():
-        pidfile.unlink(missing_ok=True)
-        sys.stdout, sys.stderr = _old_out, _old_err
-        return
-    _adopt_live_cells()
-    frozen: set[str] = set()
-    rr = 0
-    admitted: set[str] = set()      # narrated at admission; skip their START
-    prev_states, first = {}, True
-    parked_announced = False
-    sup_interval = getattr(args, "supervise_interval", 300)
-    last_sweep = None               # None = sweep on the FIRST iteration, so
-                                    # a conduct starting after an outage
-                                    # validates/repairs before admitting
-    zombie_seen: set[str] = set()   # 2nd-consecutive-sighting reap (watch's rule)
-    poll_i = 0                      # liveness tick cadence
-    warned_lanes = None             # re-warn only when the lane count moves
-    per_agent_override = getattr(args, "per_agent_override", None) or {}
-    override_txt = (f", override {per_agent_override}" if per_agent_override else "")
-    print(f"run: global cap {n}, {args.per_agent}/agent{override_txt}, "
-          f"round-robin, poll {args.interval}s"
-          + (f", supervision every {sup_interval}s" if sup_interval else
-             ", supervision OFF") +
-          ". Ctrl-C detaches (cells keep running).", flush=True)
-    try:
-        while True:
-            common.host_sleep_observe()
-            # Supervision inside the ONE controller: repair requeues at the
-            # lane front and the admission below picks it up — conduct is the
-            # only spawner. (reconcile --watch is gone; this replaced it.)
-            if sup_interval and (last_sweep is None or
-                                 time.time() - last_sweep >= sup_interval):
-                last_sweep = time.time()
-                supervise._supervise_pass(dry=False)
-                zs = zombies.find_zombies()
-                ripe = [z for z in zs if z[1] in zombie_seen]
-                for line in (zombies.reap_zombies(ripe) if ripe else []):
-                    print(f"  [{common._hhmm()}] zombie: {line}", flush=True)
-                zombie_seen = {z[1] for z in zs}
-            _converge_running(frozen)
-            agents = [qs.lane_agent(d) for d in qs.lane_dirs()]
-            pending = {m: len(qs.lane_specs(m)) for m in agents}
-            active = [m for m in agents if pending[m]]
-            if warned_lanes != len(active) and active and len(active) != n:
-                print(f"  [{common._hhmm()}] WARNING: global cap {n} != {len(active)} "
-                      f"non-empty lane(s) — "
-                      + ("lanes will starve" if n < len(active)
-                         else "the cap is not what limits admission")
-                      + f"; one cell per lane needs -n {len(active)}",
-                      flush=True)
-            warned_lanes = len(active)
-            live = state.loop_parents()
-            boxes = state.containers()
-
-            # Narrate state changes: cells STARTing (not admitted by us —
-            # reconcile respawns, operator spawns), reaching a verdict,
-            # crashing. First pass establishes the baseline silently.
-            states, _, _ = state.all_states()
-            now = {s["cid"]: f"{s['state']}·{s['why']}" for s in states}
-            if first:
-                first = False
-            else:
-                for cid, st in sorted(now.items()):
-                    was = prev_states.get(cid)
-                    if was == st:
-                        continue
-                    if was is None:
-                        if cid not in admitted:
-                            print(f"  [{common._hhmm()}] START    {cid}", flush=True)
-                    elif st.startswith("DONE"):
-                        extra = ""
-                        if st == "DONE·green":
-                            try:
-                                L = common.ledger.parse(common.WS / cid,
-                                                        gate_n=common.definition().gate.arity)
-                                extra = (f" (attempt {L.get('green_at', '?')}"
-                                         f"/{L.get('att', '?')}, "
-                                         f"gate {L.get('gate', 0)}/{L.get('gate_n', 6)})")
-                            except OSError:
-                                pass
-                        print(f"  [{common._hhmm()}] {st.split('·')[1].upper():<8} "
-                              f"{cid}{extra}", flush=True)
-                    elif st.startswith("CRASHED"):
-                        print(f"  [{common._hhmm()}] CRASHED  {cid} ({st})", flush=True)
-                    elif st.startswith("PAUSED"):
-                        # only the driver's own stand-downs: an operator pause
-                        # flips whole lanes at once and already narrates itself
-                        meta = state.pause_meta(cid)
-                        if meta and meta[1] == "driver":
-                            print(f"  [{common._hhmm()}] STOOD-DOWN {cid} ({st}) — "
-                                  f"{state._pause_detail(cid)}", flush=True)
-            prev_states = now
-
-            if not any(pending.values()) and not live and not qs.running_specs():
-                parked_n = qs.parked_count()
-                if parked_n:
-                    if not parked_announced:
-                        print(f"  [{common._hhmm()}] all live lanes empty, {parked_n} "
-                              f"spec(s) parked — idling (experiment resume to "
-                              f"reactivate)", flush=True)
-                        parked_announced = True
-                    time.sleep(args.interval)
-                    continue
-                print(f"  [{common._hhmm()}] backlog empty, no loops — done.", flush=True)
-                pidfile.unlink(missing_ok=True)
-                return
-            parked_announced = False
-            # Limit cooldowns: an expired one lifts the lane's limit-wall
-            # locks and admission retries; a live one keeps the lane out of
-            # the round entirely. If the wall persists, the retried cell
-            # walls again and the next sweep re-arms the cooldown.
-            now_t = time.time()
-            for m in agents:
-                cu = qs.cooldown_until(m)
-                if cu and cu <= now_t:
-                    qs.clear_cooldown(m)
-                    lifted = 0
-                    for c2 in ops.select_cells(m):
-                        if state.pause_lock(c2) == "limit-wall":
-                            state._unpause(c2); lifted += 1
-                    print(f"  [{common._hhmm()}] lane {m}: limit cooldown expired — "
-                          f"{lifted} lock(s) lifted, retrying", flush=True)
-            _lift_conduct_standdowns(agents, now_t)
-            qs.weekly_budget_apply(qs.weekly_cap_observe(now=now_t), now_t)
-            agents = [qs.lane_agent(d) for d in qs.lane_dirs()]   # a hold changes the lanes
-            pending = {m: len(qs.lane_specs(m)) for m in agents}
-            order = [m for m in agents if pending.get(m) and m not in frozen
-                     and qs.cooldown_until(m) <= now_t]
-            # Starvation guard: lanes with no live cell admit first, so the lane
-            # left out by the cap rotates instead of sticking to one agent.
-            lane_live = {m: sum(1 for c in live if c.startswith(m + "_")) for m in order}
-            order.sort(key=lambda m: lane_live[m])
-            idle_sweep = 0
-            while order and idle_sweep < len(order):
-                live = state.loop_parents()
-                if len(live) >= n:
-                    break
-                m = order[rr % len(order)]
-                rr += 1
-                if len(qs.running_specs(m)) >= per_agent_override.get(m, args.per_agent):
-                    idle_sweep += 1
-                    continue
-                p, cid = _next_admissible(m, boxes)
-                if p is None:
-                    idle_sweep += 1
-                    continue
-                claimed = qs.claim(m, p)          # QUEUED -> RUNNING, one rename
-                spec = qs.read_spec(claimed)
-                image.ensure_agent(log=lambda t: print(f"  [{common._hhmm()}] {t}", flush=True))
-                rc = ops._spawn_spec(m, spec, cid, "conduct")
-                if rc is None:
-                    idle_sweep = 0
-                    admitted.add(cid)
-                    print(f"  [{common._hhmm()}] admitted {cid} "
-                          f"({len(state.loop_parents())}/{n} live)", flush=True)
-                elif rc in (common.LOCK_EXIT_RC, common.PAUSE_EXIT_RC):
-                    # LOCK_EXIT: workspace already owned; PAUSE: a pause landed
-                    # in the claim->spawn window. Cell-specific, not lane-wide:
-                    # the claim stands and the next converge decides.
-                    idle_sweep += 1
-                elif rc in (common.INFRA_EXIT_RC, common.GENERIC_CRASH_EXIT_RC):
-                    # the infra failed, or the driver crashed outright,
-                    # under the driver at admission: keep the claim for
-                    # converge, but count it toward the cap
-                    ops._respawn_count(cid, bump=True)
-                    kind = "infra HALT" if rc == common.INFRA_EXIT_RC else "crash"
-                    print(f"  [{common._hhmm()}] {kind} at admission of {cid} "
-                          f"— counted toward its {ops.MAX_RESPAWNS} repairs", flush=True)
-                    idle_sweep += 1
-                elif rc in common.SYSTEMIC_EXITS:
-                    qs.release(m, claimed)
-                    frozen.add(m)
-                    print(f"  [{common._hhmm()}] lane {m} FROZEN: spawn died rc={rc} — "
-                          f"fix the cause, then restart `experiment run`", flush=True)
-                    break                      # order is stale; next round excludes it
-                else:
-                    # unknown non-systemic death: hand the spec back to the
-                    # head for a later round, don't condemn the lane
-                    qs.release(m, claimed)
-                    idle_sweep += 1
-                    print(f"  [{common._hhmm()}] {cid} spawn died rc={rc} — spec "
-                          f"back at the head, lane NOT frozen", flush=True)
-            if frozen and set(m for m in agents if pending.get(m)) <= frozen:
-                print(f"  [{common._hhmm()}] every pending lane is frozen ({sorted(frozen)}) "
-                      f"— exiting", flush=True)
-                pidfile.unlink(missing_ok=True)
-                return
-            poll_i += 1
-            if poll_i % 10 == 0:      # sign of life on a quiet fleet
-                cool = sorted(m for m in agents
-                              if qs.cooldown_until(m) > time.time())
-                print(f"  [{common._hhmm()}] alive — {len(state.loop_parents())}/{n} live, "
-                      f"{sum(pending.values())} pending"
-                      + (f", cooling: {', '.join(cool)}" if cool else "")
-                      + f", {qs.weekly_line()}", flush=True)
-            time.sleep(args.interval)
-    except KeyboardInterrupt:
-        pidfile.unlink(missing_ok=True)
-        print(f"\nrun: detached — {len(state.loop_parents())} loop(s) keep "
-              f"running; nothing new starts until `cli.py experiment run` runs again.")
-    finally:
-        sys.stdout, sys.stderr = _old_out, _old_err
-        _logf.close()
-
-
-def _stop_conductor():
-    """TERM a live conduct and clear its pidfile. Returns True if one was
-    signalled.
-
-    Shared by experiment pause all and experiment stop all: conduct is the ONLY thing that turns a
-    queued spec into a running cell, so anything claiming to have stopped the
-    fleet has to stop it. Liveness-checks the pid before signalling — a
-    SIGKILLed conduct never reaches its own pidfile.unlink(), so a stale file
-    can name a RECYCLED pid, and TERMing that hits an unrelated process.
-    """
-    pf = common.CONDUCT / "conduct.pid"
-    if not pf.exists():
-        return False
-    try:
-        pid_s, _, _ = pf.read_text().partition(" ")
-        pid = int(pid_s)
-    except (OSError, ValueError):
-        pf.unlink(missing_ok=True)
-        return False
-    stopped = False
-    try:
-        os.kill(pid, 0)
-        os.kill(pid, signal.SIGTERM)
-        stopped = True
-    except (ProcessLookupError, PermissionError):
-        pass
-    pf.unlink(missing_ok=True)
-    return stopped
-
-
 def _spec_of(st):
     """The queue-spec equivalent of a cell's state — how an interrupted cell
     re-enters the backlog (experiment resume, supervision repair). NEVER fresh:
@@ -552,226 +58,6 @@ def _known_agents():
     known |= {d.name.split("_", 1)[0] for d in common.WS.iterdir()
               if d.is_dir() and common.parse_cell_id(d.name)}
     return known
-
-
-def conduct_resume(args):
-    """Bulk resume WITHOUT spawning: unpark lanes, lift pause locks, requeue
-    interrupted cells at the FRONT of their lane. Only a running conduct
-    turns them back into loops, under its caps.
-
-    This is the burst-race fix (2026-08-12): the old `resume all` respawned
-    directly, and each spawn raced the stale loop_parents() view of the ones
-    before it — ~15 loops started against a 1/agent cap. At bulk scale
-    conduct is the only spawner; `cell resume CID` keeps the direct path
-    because n=1 cannot burst.
-
-    Blanket (`all`): standing operator decisions survive — roster/manual
-    pauses and cancelled cells are skipped, exactly the old `resume all`
-    guard (the 2026-07-24 resurrection incident). Naming agents lifts
-    roster/manual for those agents."""
-    qs = common.queues()
-    scope = list(args.scope)
-    blanket = ops._is_blanket(scope)
-    if not blanket:
-        known = _known_agents()
-        bad = [m for m in scope if m not in known]
-        if bad:
-            sys.exit(f"unknown agent(s): {', '.join(bad)} — experiment resume "
-                     f"takes AGENT names or `all` (lanes present: "
-                     f"{', '.join(sorted(known)) or 'none'})")
-    lanes = sorted(qs.lane_agent(d) for d in qs.parked_lanes()) if blanket \
-        else scope
-    for m in lanes:
-        r = qs.unpark_lane(m)
-        if r == "resumed":
-            print(f"  queue[{m}]: unparked — the run admits from it again")
-            qs.weekly_hold_clear(m)
-        elif r == "conflict":
-            print(f"  queue[{m}]: BOTH the live and the parked lane exist — "
-                  f"merge by hand, refusing to clobber")
-    parents = state.loop_parents()
-    pids, boxes = state.loop_pids(), state.containers()   # once — per-cell ps/docker
-                                              # calls made resume-all crawl
-    requeued, lifted = 0, 0
-    budget_resets = []
-    for cid in ops.select_cells_many(["all"] if blanket else scope):
-        ws = common.WS / cid
-        st = state.cell_state(ws, pids, boxes)
-        if st is None:
-            continue
-        reason = state.pause_lock(cid)
-        if reason == "killed":
-            continue      # cancel is terminal; only `cell resume CID` names it back
-        if reason == "contract":
-            continue      # the driver's own stand-down: the operator digs, then names the cell
-        if reason in ("roster", "manual") and blanket:
-            continue      # standing operator decisions survive a blanket resume
-        acted = []
-        if reason:
-            state._unpause(cid); acted.append("pause lifted"); lifted += 1
-        if (ws / "reconcile.flagged").exists():
-            (ws / "reconcile.flagged").unlink(); acted.append("flag cleared")
-        # the flag means 'a human must look'; a bulk resume IS that human —
-        # budget resets are collected here and written under ONE lock below
-        # (a per-cell fs_lock costs its 1s settle 400+ times over a fleet)
-        budget_resets.append(cid)
-        if st["state"] == "DONE" or parents.get(cid):
-            if acted:
-                print(f"  {cid}: {', '.join(acted)} (no requeue — "
-                      f"{'done' if st['state'] == 'DONE' else 'loop alive'})")
-            continue
-        agent = cid.split("_", 1)[0]
-        if qs.enqueue(agent, _spec_of(st), front=True) is None:
-            acted.append("already queued")
-        else:
-            acted.append("requeued at FRONT")
-            requeued += 1
-        if acted:
-            print(f"  {cid}: {', '.join(acted)}")
-    if budget_resets:
-        common.CONDUCT.mkdir(parents=True, exist_ok=True)
-        with common.mutex.fs_lock(common.CONDUCT / "respawn-book.lock"):
-            book = {}
-            if ops.RESPAWN_BOOK.exists():
-                try:
-                    book = json.loads(ops.RESPAWN_BOOK.read_text())
-                except json.JSONDecodeError:
-                    book = {}
-            n_reset = sum(book.pop(c, None) is not None for c in budget_resets)
-            if n_reset:
-                ops.RESPAWN_BOOK.write_text(json.dumps(book))
-                print(f"  respawn budgets reset for {n_reset} cell(s)")
-    hint = ("a live `experiment run` admits them under its caps"
-            if (common.CONDUCT / "conduct.pid").exists()
-            else "the run is DOWN — nothing starts until you run: "
-                 "python3 cli.py experiment run")
-    print(f"experiment resume: {lifted} lock(s) lifted, {requeued} cell(s) "
-          f"requeued at front, NO loops spawned — {hint}")
-
-
-def conduct_pause(args):
-    """GRACEFUL bulk pause (the old `drain`); nothing is killed mid-attempt;
-    queues are PRESERVED.
-
-    `all` (full drain): stop conduct FIRST — it is the only admission path —
-    then pause every non-terminal cell and wait for zero loops (plus
-    FP-pinned verifiers). THE maintenance window for editing FP-guarded
-    files, whose fingerprint is pinned per loop at start. Release with
-    `experiment resume all` and restart conduct deliberately (it does NOT come
-    back on its own).
-
-    AGENT names (partial): park those lanes, pause those agents' running
-    cells, return immediately; conduct keeps serving the other lanes.
-    `--admission-only` parks the lanes and leaves the running cells to
-    finish (the old queue-pause). Release with `experiment resume M...`.
-
-    Cells report PAUSED·drain. Same per-cell locks as `cell pause`, same
-    cooperative exit — no separate mechanism and no separate state."""
-    qs = common.queues()
-    scope = list(args.scope)
-    blanket = ops._is_blanket(scope)
-    agents = [] if blanket else scope
-    admission_only = getattr(args, "admission_only", False)
-    if blanket and admission_only:
-        sys.exit("--admission-only is per-lane; the fleet-wide admission stop "
-                 "is stopping the run itself (Ctrl-C, or experiment pause all)")
-    if agents:
-        known = _known_agents()
-        bad = [m for m in agents if m not in known]
-        if bad:
-            sys.exit(f"unknown agent(s): {', '.join(bad)} — experiment pause "
-                     f"takes AGENT names or `all` (lanes present: "
-                     f"{', '.join(sorted(known)) or 'none'})")
-    cids = ops.select_cells_many(agents or ["all"])
-    if args.dry_run:
-        parents = {c: p for c, p in state.loop_parents().items() if p > 1}
-        if agents:
-            parents = {c: p for c, p in parents.items()
-                       if c.split("_", 1)[0] in set(agents)}
-        for cid in sorted(parents):
-            st = state.cell_state(common.WS / cid, state.loop_pids(), state.containers())
-            print(f"would pause {cid} ({st['state']}·{st['why']})" if st
-                  else f"would pause {cid}")
-        if agents:
-            for m in agents:
-                if not qs.is_parked(m):
-                    print(f"would park queue[{m}]")
-            if admission_only:
-                print("would leave the running cells undisturbed (--admission-only)")
-            print("would leave conduct running for the other lanes")
-        else:
-            if (common.CONDUCT / "conduct.pid").exists():
-                print("would stop conduct (TERM)")
-            queued = ops.queued_cids("all")
-            if queued:
-                print(f"would leave {len(queued)} queued spec(s) in place — "
-                      f"conduct, the only thing that admits them, is stopped")
-        return
-    if agents:
-        # PARTIAL: park the lanes (stops admission for their backlog) and,
-        # unless --admission-only, pause their running cells. Returns
-        # immediately — the pause is cooperative and the FP window needs a
-        # FULL pause anyway (any live loop pins the fingerprint).
-        for m in agents:
-            if qs.park_lane(m) == "parked":
-                print(f"  queue[{m}]: parked — conduct stops admitting from it")
-        if admission_only:
-            print(f"admission stopped for {', '.join(agents)} — running cells "
-                  f"finish undisturbed. Release with: experiment resume "
-                  f"{' '.join(agents)}")
-            return
-        ops.request_pause(cids, "drain")
-        print(f"pause requested [drain] for {len(cids)} cell(s) of "
-              f"{', '.join(agents)} — each loop stops at its next safe point. "
-              f"Release with: experiment resume {' '.join(agents)}")
-        return
-    # FULL drain. STOP CONDUCT FIRST. Pausing only covers cells that already
-    # have a workspace; the scheduler is free to pop a spec that has none, and
-    # pause_lock on a nonexistent workspace returns None, so the new cell
-    # starts and the window is not a window. On 2026-07-30 a drain leaked five
-    # cells this way — the queue went 20 -> 15 while it was "draining" (via
-    # the old per-agent workers; conduct inherited the same hazard and drain
-    # never stopped it). Conduct is the only thing that starts a cell from
-    # the queue, so stopping it is what closes the window. It does NOT come
-    # back with `resume all`; restart it deliberately.
-    if _stop_conductor():
-        print("stopped conduct — queued specs stay queued; restart conduct "
-              "yourself after the window")
-    ops.request_pause(cids, "drain")
-    print(f"pause requested [drain] for {len(cids)} cell(s) — waiting for loops "
-          f"to reach a safe point", flush=True)
-    while True:
-        parents = {c: p for c, p in state.loop_parents().items() if p > 1}
-        # Cell loops are not the only FP-pinned processes: a reverify, an
-        # exp1 verify or a smoke run holds a pinned fingerprint too, and
-        # "DRAIN COMPLETE" while one runs invited an edit that voided it
-        # mid-batch (audit finding 9). Wait for them as well.
-        others = [l for l in common.sh(["ps", "-axww", "-o", "pid=,command="]).splitlines()
-                  if re.search(zombies._VERIFY_HOLDER_ARGV, l)]
-        if not parents and not others:
-            break
-        if not parents and others:
-            print(f"waiting: {len(others)} non-loop FP-pinned process(es) "
-                  f"(reverify/exp1/smoke verify)", flush=True)
-            time.sleep(args.interval)
-            continue
-        pids, boxes = state.loop_pids(), state.containers()
-        lbl = []
-        for c in sorted(parents):
-            st = state.cell_state(common.WS / c, pids, boxes)
-            lbl.append(f"{c}[{st['why'] or st['state'] if st else '?'}]")
-        print(f"waiting: {len(parents)} loop(s) still up: {', '.join(lbl)}", flush=True)
-        time.sleep(args.interval)
-    for pid in state.loop_pids():   # tees: reap ORPHANS only (ppid 1) — a live
-        try:                   # reverify's tee dies with its owner, not here
-            ppid = int(common.sh(["ps", "-o", "ppid=", "-p", str(pid)]).strip() or 0)
-            if ppid == 1:
-                os.kill(pid, signal.SIGTERM)
-        except (ProcessLookupError, ValueError):
-            pass
-    print("DRAIN COMPLETE — no loops left; safe to edit FP-guarded files. "
-          "Release the window with: python3 cli.py experiment resume all  "
-          "(then restart the scheduler: python3 cli.py experiment run)")
 
 
 def _confirm_stop(blanket, agents, loops, pending, assume_yes):
@@ -809,56 +95,857 @@ def _confirm_stop(blanket, agents, loops, pending, assume_yes):
         return False
 
 
-def conduct_stop(args):
-    """HARD halt NOW, scoped: TERM loops mid-attempt and remove containers.
-    `all` also TERMs conduct. Queues are left alone — a stop halts what is
-    RUNNING, and the backlog is not run state. RESUMABLE: cells read
-    PAUSED·stopped and come back via experiment resume. The terminal verdict
-    lives elsewhere (`cell stop --cancel`). Confirms before acting."""
-    qs = common.queues()
-    scope = list(args.scope)
-    blanket = ops._is_blanket(scope)
-    agents = None if blanket else scope
-    if agents:
-        known = _known_agents()
-        bad = [m for m in agents if m not in known]
+class Conduct:
+    """The scheduler and supervisor of one experiment root."""
+
+    def __init__(self):
+        self.pidfile = common.CONDUCT / "conduct.pid"
+        self.alerts = supervise.Alerts()
+
+    def pid(self):
+        """The live scheduler's pid, or None when none is running."""
+        try:
+            pid = int(self.pidfile.read_text().partition(" ")[0])
+            os.kill(pid, 0)
+            return pid
+        except (OSError, ValueError):
+            return None
+
+    def run_line(self):
+        """`run: UP (cap=N)`, `run: DOWN`, or `run: DOWN (stale pidfile)`."""
+        if not self.pidfile.exists():
+            return "run: DOWN"
+        try:
+            pid_s, _, cap = self.pidfile.read_text().partition(" ")
+            os.kill(int(pid_s), 0)
+            return f"run: UP ({cap.strip() or '?'})"
+        except (OSError, ValueError):
+            return "run: DOWN (stale pidfile)"
+
+    def started_at(self):
+        """Epoch of the current run's start (conduct.pid's mtime), or None."""
+        try:
+            return self.pidfile.stat().st_mtime
+        except OSError:
+            return None
+
+    def status(self, args):
+        from fae.driver import render
+        return render.status(args)
+
+    def diagnose(self, _args):
+        """READ-ONLY one-shot: the conduct loop's judgment without waiting for
+        (or running) the loop — what supervision would do, what is zombie, what
+        admission would do next. Mutates nothing: supervision runs dry, zombies
+        are listed not reaped, queue lines are read but never popped."""
+        qs = common.queues()
+        print("— SUPERVISION (dry run) " + "—" * 36)
+        supervise.supervise_pass(self.alerts, dry=True)
+        zs = zombies.find_zombies()
+        print(f"\n— ZOMBIES ({len(zs)}) — listed only; a live `experiment run` reaps "
+              f"on the 2nd consecutive sighting")
+        for kind, ident, owner, note in zs:
+            print(f"  {kind:<10} {ident}  owner={owner}  {note}")
+        live = state.loop_parents()
+        up = self.pidfile.exists()
+        print(f"\n— ADMISSION PREVIEW — {len(live)} live loop(s), per-agent cap "
+              f"{common.PER_AGENT_CAP}, run {'UP' if up else 'DOWN'}"
+              + ("" if up else " (nothing admits until `experiment run`)"))
+        for d in qs.lane_dirs(include_parked=True):
+            m = qs.lane_agent(d)
+            parked = d.name.endswith(".parked")
+            paths = qs.specs_in(d)
+            claims = qs.running_specs(m)
+            _cu = qs.cooldown_until(m)
+            if parked:
+                note = "parked — no admission until experiment resume"
+            elif _cu > time.time():
+                note = (f"limit-cooling until "
+                        f"{datetime.fromtimestamp(_cu, timezone.utc):%m-%d %H:%M}Z "
+                        f"— the run retries then")
+            elif len(claims) >= common.PER_AGENT_CAP:
+                held = ", ".join(sorted(qs.spec_cid(p) for p in claims))
+                note = f"HELD at {common.PER_AGENT_CAP}/lane — claimed: {held}"
+            else:
+                skipped = 0
+                for p in paths:
+                    cid = qs.spec_cid(p)
+                    ws = common.WS / cid
+                    if ws.is_dir():
+                        if state.flagged(cid):
+                            skipped += 1
+                            continue
+                        st = state.cell_state(ws, {}, set())
+                        if st and st["state"] == "DONE":
+                            skipped += 1
+                            continue
+                    if state.pause_lock(cid) or live.get(cid):
+                        skipped += 1
+                        continue
+                    note = f"next: {cid} — would admit"
+                    break
+                else:
+                    note = "nothing admissible"
+                if skipped:
+                    note += f" ({skipped} flagged/done/paused ahead of it)"
+            print(f"  {m:<8}{len(paths):>4} pending{' [PAUSED]' if parked else '':<9} "
+                  f"{len(claims)} claimed  {note}")
+        for l in zombies.janitor_lines():
+            print(l)
+
+    def repair(self, args):
+        """One-shot supervision sweep. A live `run` runs the same pass every
+        --supervise-interval, so this is never a second controller."""
+        supervise.supervise_pass(self.alerts, dry=args.dry_run, only=args.only or "")
+        if args.dry_run:
+            for kind, ident, owner, note in zombies.find_zombies():
+                print(f"would reap {kind:<10} {ident}  owner={owner}  {note}")
+            return
+        for line in zombies.reap_sweep():
+            print(line)
+
+    def run(self, args):
+        """THE scheduler — the ONLY thing that turns queued specs into cells.
+
+        Foreground: run it and watch it (the narration IS the monitoring).
+        Ctrl-C detaches: live cells keep running (they are setsid-detached) and
+        nothing new starts until conduct is run again.
+
+        ONE LIVE CELL PER NON-EMPTY LANE is the invariant. `--per-agent` (1) is
+        what enforces it; `-n` is the global ceiling and should equal the lane
+        count — conduct warns when it does not, because a lower cap silently
+        starves lanes. Lanes admit starved-first, round-robin.
+
+        Arm serialization (an arm with a lock) is NOT an admission concern: the lane's
+        cell parks on the arm lock in-cell and takes the arm the moment it frees,
+        and one-cell-per-lane already bounds how many can wait.
+
+        A lane whose spawn dies immediately with a systemic code (creds, empty
+        AGENT_CMD, seed FATAL) is FROZEN and reported instead of drained into the
+        failure; exit 43 (loop lock already held) just skips the spec. A parked
+        lane (see `experiment pause M`) is never admitted from and never counts as
+        'done' — conduct idles while only parked backlog remains.
+
+        Also the SUPERVISOR: every --supervise-interval it runs supervise_pass
+        (hang/crash classification, DONE validation, zombie reap). Repairs are
+        convergence, not respawns: a crashed cell's spec is still claimed in
+        running/, and the next pass restarts it. One controller, one spawner.
+        """
+        qs = common.queues()
+        n = args.limit
+        if not _ws_is_default():
+            # The backlog lives in the GLOBAL .queues: a scheduler running against
+            # an alternative root would drain the scored queue into it. The test
+            # root is spawn-by-hand only.
+            print(f"the run refuses: WORKSPACES_DIR={common.WS} is not the scored root "
+                  f"({_default_ws()}); the backlog is global and would be drained "
+                  f"into the wrong tree. Spawn validation cells by hand.",
+                  file=sys.stderr)
+            return 2
+        common.CONDUCT.mkdir(parents=True, exist_ok=True)
+        pidfile = self.pidfile
+        if pidfile.exists():
+            try:
+                _pid, _, _ = pidfile.read_text().partition(" ")
+                os.kill(int(_pid), 0)
+                print(f"run: already running (pid {_pid}) — refusing a second "
+                      f"instance: two schedulers would each think they own the cap",
+                      flush=True)
+                return
+            except (OSError, ValueError):
+                pass                                # stale pidfile: take over
+        pidfile.write_text(f"{os.getpid()} cap={n}")
+        # Tee the narration to tmp/conduct-<PID>.log: if this instance dies from
+        # outside, the per-pid file records what it did and when output stopped.
+        _logdir = Path(os.environ.get("CONDUCT_LOG_DIR", common.ROOT / "tmp"))
+        _logdir.mkdir(parents=True, exist_ok=True)
+        _logf = (_logdir / f"conduct-{os.getpid()}.log").open("a")
+
+        class _Tee:
+            def __init__(self, *streams): self.streams = streams
+
+            def write(self, s):
+                for st in self.streams:
+                    st.write(s)
+                _logf.flush()
+
+            def flush(self):
+                for st in self.streams:
+                    st.flush()
+
+        _old_out, _old_err = sys.stdout, sys.stderr
+        sys.stdout = _Tee(_old_out, _logf)
+        sys.stderr = _Tee(_old_err, _logf)
+        print(f"run[{os.getpid()}]: logging to {_logf.name}", flush=True)
+        if not self.preflight():
+            pidfile.unlink(missing_ok=True)
+            sys.stdout, sys.stderr = _old_out, _old_err
+            return
+        self._adopt_live_cells()
+        frozen: set[str] = set()
+        rr = 0
+        admitted: set[str] = set()      # narrated at admission; skip their START
+        prev_states, first = {}, True
+        parked_announced = False
+        sup_interval = getattr(args, "supervise_interval", 300)
+        last_sweep = None               # None = sweep on the FIRST iteration, so
+                                        # a conduct starting after an outage
+                                        # validates/repairs before admitting
+        zombie_seen: set[str] = set()   # 2nd-consecutive-sighting reap (watch's rule)
+        poll_i = 0                      # liveness tick cadence
+        warned_lanes = None             # re-warn only when the lane count moves
+        per_agent_override = getattr(args, "per_agent_override", None) or {}
+        override_txt = (f", override {per_agent_override}" if per_agent_override else "")
+        print(f"run: global cap {n}, {args.per_agent}/agent{override_txt}, "
+              f"round-robin, poll {args.interval}s"
+              + (f", supervision every {sup_interval}s" if sup_interval else
+                 ", supervision OFF") +
+              ". Ctrl-C detaches (cells keep running).", flush=True)
+        try:
+            while True:
+                common.host_sleep_observe()
+                # Supervision inside the ONE controller: repair requeues at the
+                # lane front and the admission below picks it up — conduct is the
+                # only spawner. (reconcile --watch is gone; this replaced it.)
+                if sup_interval and (last_sweep is None or
+                                     time.time() - last_sweep >= sup_interval):
+                    last_sweep = time.time()
+                    supervise.supervise_pass(self.alerts, dry=False)
+                    zs = zombies.find_zombies()
+                    ripe = [z for z in zs if z[1] in zombie_seen]
+                    for line in (zombies.reap_zombies(ripe) if ripe else []):
+                        print(f"  [{common.hhmm()}] zombie: {line}", flush=True)
+                    zombie_seen = {z[1] for z in zs}
+                self._converge_running(frozen)
+                agents = [qs.lane_agent(d) for d in qs.lane_dirs()]
+                pending = {m: len(qs.lane_specs(m)) for m in agents}
+                active = [m for m in agents if pending[m]]
+                if warned_lanes != len(active) and active and len(active) != n:
+                    print(f"  [{common.hhmm()}] WARNING: global cap {n} != {len(active)} "
+                          f"non-empty lane(s) — "
+                          + ("lanes will starve" if n < len(active)
+                             else "the cap is not what limits admission")
+                          + f"; one cell per lane needs -n {len(active)}",
+                          flush=True)
+                warned_lanes = len(active)
+                live = state.loop_parents()
+                boxes = state.containers()
+
+                # Narrate state changes: cells STARTing (not admitted by us —
+                # reconcile respawns, operator spawns), reaching a verdict,
+                # crashing. First pass establishes the baseline silently.
+                states, _, _ = state.all_states()
+                now = {s["cid"]: f"{s['state']}·{s['why']}" for s in states}
+                if first:
+                    first = False
+                else:
+                    for cid, st in sorted(now.items()):
+                        was = prev_states.get(cid)
+                        if was == st:
+                            continue
+                        if was is None:
+                            if cid not in admitted:
+                                print(f"  [{common.hhmm()}] START    {cid}", flush=True)
+                        elif st.startswith("DONE"):
+                            extra = ""
+                            if st == "DONE·green":
+                                try:
+                                    L = common.ledger.parse(common.WS / cid,
+                                                            gate_n=common.definition().gate.arity)
+                                    extra = (f" (attempt {L.get('green_at', '?')}"
+                                             f"/{L.get('att', '?')}, "
+                                             f"gate {L.get('gate', 0)}/{L.get('gate_n', 6)})")
+                                except OSError:
+                                    pass
+                            print(f"  [{common.hhmm()}] {st.split('·')[1].upper():<8} "
+                                  f"{cid}{extra}", flush=True)
+                        elif st.startswith("CRASHED"):
+                            print(f"  [{common.hhmm()}] CRASHED  {cid} ({st})", flush=True)
+                        elif st.startswith("PAUSED"):
+                            # only the driver's own stand-downs: an operator pause
+                            # flips whole lanes at once and already narrates itself
+                            meta = state.pause_meta(cid)
+                            if meta and meta[1] == "driver":
+                                print(f"  [{common.hhmm()}] STOOD-DOWN {cid} ({st}) — "
+                                      f"{state.pause_detail(cid)}", flush=True)
+                prev_states = now
+
+                if not any(pending.values()) and not live and not qs.running_specs():
+                    parked_n = qs.parked_count()
+                    if parked_n:
+                        if not parked_announced:
+                            print(f"  [{common.hhmm()}] all live lanes empty, {parked_n} "
+                                  f"spec(s) parked — idling (experiment resume to "
+                                  f"reactivate)", flush=True)
+                            parked_announced = True
+                        time.sleep(args.interval)
+                        continue
+                    print(f"  [{common.hhmm()}] backlog empty, no loops — done.", flush=True)
+                    pidfile.unlink(missing_ok=True)
+                    return
+                parked_announced = False
+                # Limit cooldowns: an expired one lifts the lane's limit-wall
+                # locks and admission retries; a live one keeps the lane out of
+                # the round entirely. If the wall persists, the retried cell
+                # walls again and the next sweep re-arms the cooldown.
+                now_t = time.time()
+                for m in agents:
+                    cu = qs.cooldown_until(m)
+                    if cu and cu <= now_t:
+                        qs.clear_cooldown(m)
+                        lifted = 0
+                        for c2 in ops.select_cells(m):
+                            if state.pause_lock(c2) == "limit-wall":
+                                state.unpause(c2); lifted += 1
+                        print(f"  [{common.hhmm()}] lane {m}: limit cooldown expired — "
+                              f"{lifted} lock(s) lifted, retrying", flush=True)
+                self._lift_standdowns(agents, now_t)
+                qs.weekly_budget_apply(qs.weekly_cap_observe(now=now_t), now_t)
+                agents = [qs.lane_agent(d) for d in qs.lane_dirs()]   # a hold changes the lanes
+                pending = {m: len(qs.lane_specs(m)) for m in agents}
+                order = [m for m in agents if pending.get(m) and m not in frozen
+                         and qs.cooldown_until(m) <= now_t]
+                # Starvation guard: lanes with no live cell admit first, so the lane
+                # left out by the cap rotates instead of sticking to one agent.
+                lane_live = {m: sum(1 for c in live if c.startswith(m + "_")) for m in order}
+                order.sort(key=lambda m: lane_live[m])
+                idle_sweep = 0
+                while order and idle_sweep < len(order):
+                    live = state.loop_parents()
+                    if len(live) >= n:
+                        break
+                    m = order[rr % len(order)]
+                    rr += 1
+                    if len(qs.running_specs(m)) >= per_agent_override.get(m, args.per_agent):
+                        idle_sweep += 1
+                        continue
+                    p, cid = self._next_admissible(m, boxes)
+                    if p is None:
+                        idle_sweep += 1
+                        continue
+                    claimed = qs.claim(m, p)          # QUEUED -> RUNNING, one rename
+                    spec = qs.read_spec(claimed)
+                    image.ensure_agent(log=lambda t: print(f"  [{common.hhmm()}] {t}", flush=True))
+                    rc = ops.spawn_spec(m, spec, cid, "conduct")
+                    if rc is None:
+                        idle_sweep = 0
+                        admitted.add(cid)
+                        print(f"  [{common.hhmm()}] admitted {cid} "
+                              f"({len(state.loop_parents())}/{n} live)", flush=True)
+                    elif rc in (common.LOCK_EXIT_RC, common.PAUSE_EXIT_RC):
+                        # LOCK_EXIT: workspace already owned; PAUSE: a pause landed
+                        # in the claim->spawn window. Cell-specific, not lane-wide:
+                        # the claim stands and the next converge decides.
+                        idle_sweep += 1
+                    elif rc in (common.INFRA_EXIT_RC, common.GENERIC_CRASH_EXIT_RC):
+                        # the infra failed, or the driver crashed outright,
+                        # under the driver at admission: keep the claim for
+                        # converge, but count it toward the cap
+                        ops.respawn_count(cid, bump=True)
+                        kind = "infra HALT" if rc == common.INFRA_EXIT_RC else "crash"
+                        print(f"  [{common.hhmm()}] {kind} at admission of {cid} "
+                              f"— counted toward its {ops.MAX_RESPAWNS} repairs", flush=True)
+                        idle_sweep += 1
+                    elif rc in common.SYSTEMIC_EXITS:
+                        qs.release(m, claimed)
+                        frozen.add(m)
+                        print(f"  [{common.hhmm()}] lane {m} FROZEN: spawn died rc={rc} — "
+                              f"fix the cause, then restart `experiment run`", flush=True)
+                        break                      # order is stale; next round excludes it
+                    else:
+                        # unknown non-systemic death: hand the spec back to the
+                        # head for a later round, don't condemn the lane
+                        qs.release(m, claimed)
+                        idle_sweep += 1
+                        print(f"  [{common.hhmm()}] {cid} spawn died rc={rc} — spec "
+                              f"back at the head, lane NOT frozen", flush=True)
+                if frozen and set(m for m in agents if pending.get(m)) <= frozen:
+                    print(f"  [{common.hhmm()}] every pending lane is frozen ({sorted(frozen)}) "
+                          f"— exiting", flush=True)
+                    pidfile.unlink(missing_ok=True)
+                    return
+                poll_i += 1
+                if poll_i % 10 == 0:      # sign of life on a quiet fleet
+                    cool = sorted(m for m in agents
+                                  if qs.cooldown_until(m) > time.time())
+                    print(f"  [{common.hhmm()}] alive — {len(state.loop_parents())}/{n} live, "
+                          f"{sum(pending.values())} pending"
+                          + (f", cooling: {', '.join(cool)}" if cool else "")
+                          + f", {qs.weekly_line()}", flush=True)
+                time.sleep(args.interval)
+        except KeyboardInterrupt:
+            pidfile.unlink(missing_ok=True)
+            print(f"\nrun: detached — {len(state.loop_parents())} loop(s) keep "
+                  f"running; nothing new starts until `cli.py experiment run` runs again.")
+        finally:
+            sys.stdout, sys.stderr = _old_out, _old_err
+            _logf.close()
+
+    def pause(self, args):
+        """GRACEFUL bulk pause (the old `drain`); nothing is killed mid-attempt;
+        queues are PRESERVED.
+
+        `all` (full drain): stop conduct FIRST — it is the only admission path —
+        then pause every non-terminal cell and wait for zero loops (plus
+        FP-pinned verifiers). THE maintenance window for editing FP-guarded
+        files, whose fingerprint is pinned per loop at start. Release with
+        `experiment resume all` and restart conduct deliberately (it does NOT come
+        back on its own).
+
+        AGENT names (partial): park those lanes, pause those agents' running
+        cells, return immediately; conduct keeps serving the other lanes.
+        `--admission-only` parks the lanes and leaves the running cells to
+        finish (the old queue-pause). Release with `experiment resume M...`.
+
+        Cells report PAUSED·drain. Same per-cell locks as `cell pause`, same
+        cooperative exit — no separate mechanism and no separate state."""
+        qs = common.queues()
+        scope = list(args.scope)
+        blanket = ops.is_blanket(scope)
+        agents = [] if blanket else scope
+        admission_only = getattr(args, "admission_only", False)
+        if blanket and admission_only:
+            sys.exit("--admission-only is per-lane; the fleet-wide admission stop "
+                     "is stopping the run itself (Ctrl-C, or experiment pause all)")
+        if agents:
+            known = _known_agents()
+            bad = [m for m in agents if m not in known]
+            if bad:
+                sys.exit(f"unknown agent(s): {', '.join(bad)} — experiment pause "
+                         f"takes AGENT names or `all` (lanes present: "
+                         f"{', '.join(sorted(known)) or 'none'})")
+        cids = ops.select_cells_many(agents or ["all"])
+        if args.dry_run:
+            parents = {c: p for c, p in state.loop_parents().items() if p > 1}
+            if agents:
+                parents = {c: p for c, p in parents.items()
+                           if c.split("_", 1)[0] in set(agents)}
+            for cid in sorted(parents):
+                st = state.cell_state(common.WS / cid, state.loop_pids(), state.containers())
+                print(f"would pause {cid} ({st['state']}·{st['why']})" if st
+                      else f"would pause {cid}")
+            if agents:
+                for m in agents:
+                    if not qs.is_parked(m):
+                        print(f"would park queue[{m}]")
+                if admission_only:
+                    print("would leave the running cells undisturbed (--admission-only)")
+                print("would leave conduct running for the other lanes")
+            else:
+                if self.pidfile.exists():
+                    print("would stop conduct (TERM)")
+                queued = ops.queued_cids("all")
+                if queued:
+                    print(f"would leave {len(queued)} queued spec(s) in place — "
+                          f"conduct, the only thing that admits them, is stopped")
+            return
+        if agents:
+            # PARTIAL: park the lanes (stops admission for their backlog) and,
+            # unless --admission-only, pause their running cells. Returns
+            # immediately — the pause is cooperative and the FP window needs a
+            # FULL pause anyway (any live loop pins the fingerprint).
+            for m in agents:
+                if qs.park_lane(m) == "parked":
+                    print(f"  queue[{m}]: parked — conduct stops admitting from it")
+            if admission_only:
+                print(f"admission stopped for {', '.join(agents)} — running cells "
+                      f"finish undisturbed. Release with: experiment resume "
+                      f"{' '.join(agents)}")
+                return
+            ops.request_pause(cids, "drain")
+            print(f"pause requested [drain] for {len(cids)} cell(s) of "
+                  f"{', '.join(agents)} — each loop stops at its next safe point. "
+                  f"Release with: experiment resume {' '.join(agents)}")
+            return
+        # FULL drain. STOP CONDUCT FIRST. Pausing only covers cells that already
+        # have a workspace; the scheduler is free to pop a spec that has none, and
+        # pause_lock on a nonexistent workspace returns None, so the new cell
+        # starts and the window is not a window. On 2026-07-30 a drain leaked five
+        # cells this way — the queue went 20 -> 15 while it was "draining" (via
+        # the old per-agent workers; conduct inherited the same hazard and drain
+        # never stopped it). Conduct is the only thing that starts a cell from
+        # the queue, so stopping it is what closes the window. It does NOT come
+        # back with `resume all`; restart it deliberately.
+        if self.stop_conductor():
+            print("stopped conduct — queued specs stay queued; restart conduct "
+                  "yourself after the window")
+        ops.request_pause(cids, "drain")
+        print(f"pause requested [drain] for {len(cids)} cell(s) — waiting for loops "
+              f"to reach a safe point", flush=True)
+        while True:
+            parents = {c: p for c, p in state.loop_parents().items() if p > 1}
+            # Cell loops are not the only FP-pinned processes: a reverify, an
+            # exp1 verify or a smoke run holds a pinned fingerprint too, and
+            # "DRAIN COMPLETE" while one runs invited an edit that voided it
+            # mid-batch (audit finding 9). Wait for them as well.
+            others = [l for l in common.sh(["ps", "-axww", "-o", "pid=,command="]).splitlines()
+                      if re.search(zombies.VERIFY_HOLDER_ARGV, l)]
+            if not parents and not others:
+                break
+            if not parents and others:
+                print(f"waiting: {len(others)} non-loop FP-pinned process(es) "
+                      f"(reverify/exp1/smoke verify)", flush=True)
+                time.sleep(args.interval)
+                continue
+            pids, boxes = state.loop_pids(), state.containers()
+            lbl = []
+            for c in sorted(parents):
+                st = state.cell_state(common.WS / c, pids, boxes)
+                lbl.append(f"{c}[{st['why'] or st['state'] if st else '?'}]")
+            print(f"waiting: {len(parents)} loop(s) still up: {', '.join(lbl)}", flush=True)
+            time.sleep(args.interval)
+        for pid in state.loop_pids():   # tees: reap ORPHANS only (ppid 1) — a live
+            try:                   # reverify's tee dies with its owner, not here
+                ppid = int(common.sh(["ps", "-o", "ppid=", "-p", str(pid)]).strip() or 0)
+                if ppid == 1:
+                    os.kill(pid, signal.SIGTERM)
+            except (ProcessLookupError, ValueError):
+                pass
+        print("DRAIN COMPLETE — no loops left; safe to edit FP-guarded files. "
+              "Release the window with: python3 cli.py experiment resume all  "
+              "(then restart the scheduler: python3 cli.py experiment run)")
+
+    def resume(self, args):
+        """Bulk resume WITHOUT spawning: unpark lanes, lift pause locks, requeue
+        interrupted cells at the FRONT of their lane. Only a running conduct
+        turns them back into loops, under its caps.
+
+        This is the burst-race fix (2026-08-12): the old `resume all` respawned
+        directly, and each spawn raced the stale loop_parents() view of the ones
+        before it — ~15 loops started against a 1/agent cap. At bulk scale
+        conduct is the only spawner; `cell resume CID` keeps the direct path
+        because n=1 cannot burst.
+
+        Blanket (`all`): standing operator decisions survive — roster/manual
+        pauses and cancelled cells are skipped, exactly the old `resume all`
+        guard (the 2026-07-24 resurrection incident). Naming agents lifts
+        roster/manual for those agents."""
+        qs = common.queues()
+        scope = list(args.scope)
+        blanket = ops.is_blanket(scope)
+        if not blanket:
+            known = _known_agents()
+            bad = [m for m in scope if m not in known]
+            if bad:
+                sys.exit(f"unknown agent(s): {', '.join(bad)} — experiment resume "
+                         f"takes AGENT names or `all` (lanes present: "
+                         f"{', '.join(sorted(known)) or 'none'})")
+        lanes = sorted(qs.lane_agent(d) for d in qs.parked_lanes()) if blanket \
+            else scope
+        for m in lanes:
+            r = qs.unpark_lane(m)
+            if r == "resumed":
+                print(f"  queue[{m}]: unparked — the run admits from it again")
+                qs.weekly_hold_clear(m)
+            elif r == "conflict":
+                print(f"  queue[{m}]: BOTH the live and the parked lane exist — "
+                      f"merge by hand, refusing to clobber")
+        parents = state.loop_parents()
+        pids, boxes = state.loop_pids(), state.containers()   # once — per-cell ps/docker
+                                                  # calls made resume-all crawl
+        requeued, lifted = 0, 0
+        budget_resets = []
+        for cid in ops.select_cells_many(["all"] if blanket else scope):
+            ws = common.WS / cid
+            st = state.cell_state(ws, pids, boxes)
+            if st is None:
+                continue
+            reason = state.pause_lock(cid)
+            if reason == "killed":
+                continue      # cancel is terminal; only `cell resume CID` names it back
+            if reason == "contract":
+                continue      # the driver's own stand-down: the operator digs, then names the cell
+            if reason in ("roster", "manual") and blanket:
+                continue      # standing operator decisions survive a blanket resume
+            acted = []
+            if reason:
+                state.unpause(cid); acted.append("pause lifted"); lifted += 1
+            if ops.unflag(cid):
+                acted.append("flag cleared")
+            # the flag means 'a human must look'; a bulk resume IS that human —
+            # budget resets are collected here and written under ONE lock below
+            # (a per-cell fs_lock costs its 1s settle 400+ times over a fleet)
+            budget_resets.append(cid)
+            if st["state"] == "DONE" or parents.get(cid):
+                if acted:
+                    print(f"  {cid}: {', '.join(acted)} (no requeue — "
+                          f"{'done' if st['state'] == 'DONE' else 'loop alive'})")
+                continue
+            agent = cid.split("_", 1)[0]
+            if qs.enqueue(agent, _spec_of(st), front=True) is None:
+                acted.append("already queued")
+            else:
+                acted.append("requeued at FRONT")
+                requeued += 1
+            if acted:
+                print(f"  {cid}: {', '.join(acted)}")
+        n_reset = ops.reset_respawn_budgets(budget_resets) if budget_resets else 0
+        if n_reset:
+            print(f"  respawn budgets reset for {n_reset} cell(s)")
+        hint = ("a live `experiment run` admits them under its caps"
+                if self.pidfile.exists()
+                else "the run is DOWN — nothing starts until you run: "
+                     "python3 cli.py experiment run")
+        print(f"experiment resume: {lifted} lock(s) lifted, {requeued} cell(s) "
+              f"requeued at front, NO loops spawned — {hint}")
+
+    def stop(self, args):
+        """HARD halt NOW, scoped: TERM loops mid-attempt and remove containers.
+        `all` also TERMs conduct. Queues are left alone — a stop halts what is
+        RUNNING, and the backlog is not run state. RESUMABLE: cells read
+        PAUSED·stopped and come back via experiment resume. The terminal verdict
+        lives elsewhere (`cell stop --cancel`). Confirms before acting."""
+        qs = common.queues()
+        scope = list(args.scope)
+        blanket = ops.is_blanket(scope)
+        agents = None if blanket else scope
+        if agents:
+            known = _known_agents()
+            bad = [m for m in agents if m not in known]
+            if bad:
+                sys.exit(f"unknown agent(s): {', '.join(bad)} — experiment stop "
+                         f"takes AGENT names or `all` (lanes present: "
+                         f"{', '.join(sorted(known)) or 'none'})")
+        def _in_scope(cid):
+            return blanket or cid.split("_", 1)[0] in set(agents)
+        _loops_now = sorted(c for c in state.loop_parents() if _in_scope(c))
+        _pending = sum(len(qs.specs_in(d)) for d in qs.lane_dirs(include_parked=True)
+                       if not agents or qs.lane_agent(d) in set(agents))
+        if not _confirm_stop(blanket, agents, _loops_now, _pending,
+                             getattr(args, "yes", False)):
+            print("aborted — nothing stopped")
+            return
+        # intent FIRST: without locks the stopped cells read CRASHED and a
+        # supervision sweep requeues them into the operator stop within minutes —
+        # the same gap stop_cells closes, forgotten here (audit finding 4).
+        # Existing locks keep their reasons (request_pause never overwrites).
+        ops.request_pause([c for c in ops.select_cells("all") if _in_scope(c)], "stopped")
+        # Scoped stops leave conduct running: the lane's cells stop and the other
+        # lanes keep being served.
+        if blanket and self.stop_conductor():
+            print("conduct stopped (TERM)")
+        loops = {c: p for c, p in state.loop_parents().items() if _in_scope(c)}
+        # Through the one teardown path. TERM alone left the dind sidecar, every
+        # anonymous volume and the cell's kind cluster behind whenever the EXIT
+        # trap did not complete, and the arm slot with them.
+        for cid in loops:
+            ops.teardown_cell(cid, reason="stopped")
+        _held = sorted(c for c in ops.select_cells("all")
+                       if _in_scope(c) and state.pause_lock(c))
+        if _held:
+            # pause locks are operator decisions, not run state: stopping the fleet
+            # must not silently un-pause a roster somebody parked on purpose
+            print(f"note: {len(_held)} cell(s) stay paused ({', '.join(_held[:3])}"
+                  f"{'...' if len(_held) > 3 else ''}) — release with: "
+                  f"cli.py experiment resume {' '.join(agents) if agents else 'all'}")
+        print(f"stopped [{'all' if blanket else ', '.join(agents)}]: "
+              f"{'conduct stopped, ' if blanket else ''}"
+              f"{len(loops)} loop(s) TERMed, containers removed "
+              f"(workspaces and queues preserved)")
+
+    def stop_conductor(self):
+        """TERM a live conduct and clear its pidfile. Returns True if one was
+        signalled.
+
+        Shared by experiment pause all and experiment stop all: conduct is the ONLY thing that turns a
+        queued spec into a running cell, so anything claiming to have stopped the
+        fleet has to stop it. Liveness-checks the pid before signalling — a
+        SIGKILLed conduct never reaches its own pidfile.unlink(), so a stale file
+        can name a RECYCLED pid, and TERMing that hits an unrelated process.
+        """
+        pf = self.pidfile
+        if not pf.exists():
+            return False
+        try:
+            pid_s, _, _ = pf.read_text().partition(" ")
+            pid = int(pid_s)
+        except (OSError, ValueError):
+            pf.unlink(missing_ok=True)
+            return False
+        stopped = False
+        try:
+            os.kill(pid, 0)
+            os.kill(pid, signal.SIGTERM)
+            stopped = True
+        except (ProcessLookupError, PermissionError):
+            pass
+        pf.unlink(missing_ok=True)
+        return stopped
+
+    def preflight(self):
+        """Make the infra usable before admitting anything, or say why not.
+
+        Builds the agent image when it is missing — a fresh clone and a reset
+        Docker VM look identical from here, and every spawn dies at preflight
+        until it exists. Docker itself and the arm tools are NOT installed: that
+        is a machine-level change, and it is reported instead.
+        """
+        ok, why = common.mutex.fs_enforces_flock(common.LOCKS)
+        if not ok:
+            print(f"run: STOP — filesystem locking is not enforced on\n"
+                  f"  {common.LOCKS}\n"
+                  f"  detected: {why}\n"
+                  f"  Every arm cap, work slot and verify lock in this rig is a "
+                  f"flock(2) on a file in that directory. Without enforcement each "
+                  f"one succeeds for everyone at once: two access cells provision "
+                  f"two infra and the host falls over, silently.\n"
+                  f"  Fix: put workspaces.nosync on a local disk. A network mount, "
+                  f"a synced folder, or some virtiofs/9p shares are the usual "
+                  f"causes.\n"
+                  f"  Probe it yourself: python3 fae/mutex.py fscheck {common.LOCKS}",
+                  flush=True)
+            return False
+        if subprocess.run(["docker", "info"], capture_output=True).returncode != 0:
+            print("run: STOP — the docker daemon is not reachable. Start "
+                  "Docker, then run `experiment run` again.", flush=True)
+            return False
+        local, fstype = common.mutex.fs_is_local(common.WS)
+        if local is False:
+            print(f"run: WARNING — {common.WS} is on {fstype}, not a local disk. Cells and "
+                  f"conduct append to the same ledgers; appends interleave safely only on a "
+                  f"local disk.", flush=True)
+        # the agent image every spawn uses: the base (built when missing, its
+        # clients current) and the experiment's layer over it
+        if not image.ensure_agent(log=lambda t: print(f"run: {t}", flush=True)):
+            print("run: STOP — the agent image could not be built. "
+                  "Every spawn would die at preflight.", flush=True)
+            return False
+        # Every variant's own preflight — its daemon, its images (built here,
+        # not under a cell), its tools — and a sweep of its stale infra:
+        # what `cli.py experiment infra` shows, run once before admission.
+        from fae.driver import rig as _rig
+        print("run: infra preflight", flush=True)
+        bad = _rig.probe_variants()
         if bad:
-            sys.exit(f"unknown agent(s): {', '.join(bad)} — experiment stop "
-                     f"takes AGENT names or `all` (lanes present: "
-                     f"{', '.join(sorted(known)) or 'none'})")
-    def _in_scope(cid):
-        return blanket or cid.split("_", 1)[0] in set(agents)
-    _loops_now = sorted(c for c in state.loop_parents() if _in_scope(c))
-    _pending = sum(len(qs.specs_in(d)) for d in qs.lane_dirs(include_parked=True)
-                   if not agents or qs.lane_agent(d) in set(agents))
-    if not _confirm_stop(blanket, agents, _loops_now, _pending,
-                         getattr(args, "yes", False)):
-        print("aborted — nothing stopped")
-        return
-    # intent FIRST: without locks the stopped cells read CRASHED and a
-    # supervision sweep requeues them into the operator stop within minutes —
-    # the same gap stop_cells closes, forgotten here (audit finding 4).
-    # Existing locks keep their reasons (request_pause never overwrites).
-    ops.request_pause([c for c in ops.select_cells("all") if _in_scope(c)], "stopped")
-    # Scoped stops leave conduct running: the lane's cells stop and the other
-    # lanes keep being served.
-    if blanket and _stop_conductor():
-        print("conduct stopped (TERM)")
-    loops = {c: p for c, p in state.loop_parents().items() if _in_scope(c)}
-    # Through the one teardown path. TERM alone left the dind sidecar, every
-    # anonymous volume and the cell's kind cluster behind whenever the EXIT
-    # trap did not complete, and the arm slot with them.
-    for cid in loops:
-        ops._teardown_cell(cid, reason="stopped")
-    _held = sorted(c for c in ops.select_cells("all")
-                   if _in_scope(c) and state.pause_lock(c))
-    if _held:
-        # pause locks are operator decisions, not run state: stopping the fleet
-        # must not silently un-pause a roster somebody parked on purpose
-        print(f"note: {len(_held)} cell(s) stay paused ({', '.join(_held[:3])}"
-              f"{'...' if len(_held) > 3 else ''}) — release with: "
-              f"cli.py experiment resume {' '.join(agents) if agents else 'all'}")
-    print(f"stopped [{'all' if blanket else ', '.join(agents)}]: "
-          f"{'conduct stopped, ' if blanket else ''}"
-          f"{len(loops)} loop(s) TERMed, containers removed "
-          f"(workspaces and queues preserved)")
+            print(f"run: NOTE — {bad} variant(s) refused their preflight; cells of "
+                  f"those variants will HALT.", flush=True)
+        return True
+
+    def _next_admissible(self, agent, boxes):
+        """The lane's first spec that may start now, with the ones it skipped
+        accounted for. Returns (path, cid) or (None, reason).
+
+        Nothing is moved while deciding — a spec only leaves the queue when it is
+        claimed, so an interrupted decision costs nothing."""
+        qs = common.queues()
+        for p in qs.lane_specs(agent):
+            cid = qs.spec_cid(p)
+            ws = common.WS / cid
+            if ws.is_dir():
+                # A flagged cell is quarantined from admission too: repair stops
+                # bringing it back, and a pending spec would otherwise respawn it
+                # right past the flag. The operator's resume clears the flag.
+                if state.flagged(cid):
+                    continue
+                st = state.cell_state(ws, {}, boxes)
+                if st and st["state"] == "DONE":
+                    qs.finish(agent, p)
+                    continue
+            if state.pause_lock(cid) or state.loop_parents().get(cid):
+                continue
+            return p, cid
+        return None, "none-admissible"
+
+    def _adopt_live_cells(self):
+        """Claim any live cell conduct did not admit itself.
+
+        A cell outliving the conduct that started it (Ctrl-C, restart) has no
+        claim, so its lane would read as free and admit a second cell. Adoption
+        makes the claim match reality before the first admission."""
+        n = 0
+        for cid, _pid in state.loop_parents().items():
+            if ops.is_claimed(cid):
+                continue
+            st = state.cell_state(common.WS / cid, {}, set())
+            if not st:
+                continue
+            common.queues().adopt(cid.split("_", 1)[0], cid, _spec_of(st))
+            n += 1
+        if n:
+            print(f"run: adopted {n} live cell(s) started outside this run",
+                  flush=True)
+
+    def _lift_standdowns(self, agents, now_t):
+        for m in agents:
+            for cid in ops.select_cells(m):
+                meta = state.pause_meta(cid)
+                if not meta:
+                    continue
+                reason, who, at = meta
+                if who != "conduct" or not reason.startswith(CONDUCT_LIFTED):
+                    continue
+                if state.cancelled(cid) or state.flagged(cid):
+                    continue
+                if at is not None and common.awake_age(at, now_t) < STANDDOWN_COOL_S:
+                    continue
+                n = ops.respawn_count(cid)
+                if n >= ops.MAX_RESPAWNS:
+                    ops.flag(cid)
+                    print(f"  [{common.hhmm()}] FLAGGED  {cid}: {n} stand-downs "
+                          f"({reason}) — human needed, spec held in the queue "
+                          f"until you resume it", flush=True)
+                    continue
+                state.unpause(cid)
+                ops.respawn_count(cid, bump=True)
+                self.alerts.forget(cid)
+                print(f"  [{common.hhmm()}] lifted {cid}: {reason} stand-down "
+                      f"(repair {n + 1} of {ops.MAX_RESPAWNS})", flush=True)
+
+    def _converge_running(self, frozen):
+        """Make the world match the claimed specs: every file under running/ is a
+        lane's cell and must be alive, finished, or handed back.
+
+        This is the whole repair path — a claimed spec sits in running/ until it
+        reaches a verdict, so a conduct that dies mid-attempt (or a cell killed by
+        a hang sweep) is recovered by the next pass with no journal to replay."""
+        qs = common.queues()
+        live = state.loop_parents()
+        boxes = state.containers()
+        for p in qs.running_specs():
+            agent, cid = p.parent.name, qs.spec_cid(p)
+            if live.get(cid):
+                continue
+            st = state.cell_state(common.WS / cid, {}, boxes)
+            if st and st["state"] == "DONE":
+                qs.finish(agent, p)
+                continue
+            if state.pause_lock(cid):
+                # operator (or a wall stand-down) owns this cell: hand the spec
+                # back so the lane can serve the rest of its backlog
+                qs.release(agent, p)
+                continue
+            if qs.cooldown_until(agent) > time.time():
+                continue                      # lane is walled: restarting its cell
+                                              # only walls again
+            n = ops.respawn_count(cid)
+            if n >= ops.MAX_RESPAWNS:
+                ops.flag(cid)        # a cell with no workspace keeps no flag: the
+                                     # spec going back to the queue is the record
+                qs.release(agent, p)
+                print(f"  [{common.hhmm()}] FLAGGED  {cid}: {n} repairs — human needed, "
+                      f"spec held in the queue until you resume it", flush=True)
+                continue
+            try:
+                spec = qs.read_spec(p)
+            except (OSError, ValueError):
+                qs.shelve(p, "unreadable")
+                continue
+            rc = ops.spawn_spec(agent, spec, cid, "repair")
+            if rc is None:
+                ops.respawn_count(cid, bump=True)
+                print(f"  [{common.hhmm()}] repaired {cid} (attempt {n + 1} of "
+                      f"{ops.MAX_RESPAWNS})", flush=True)
+            elif rc in (common.LOCK_EXIT_RC, common.PAUSE_EXIT_RC):
+                pass                       # owned or paused meanwhile: next pass
+            elif rc in (common.INFRA_EXIT_RC, common.GENERIC_CRASH_EXIT_RC):
+                # the infra failed, or the driver crashed outright, under the
+                # fresh attempt: a repair that spends budget like any other, so a
+                # deterministic host-level fault cannot spin forever uncounted.
+                ops.respawn_count(cid, bump=True)
+                kind = "infra HALT" if rc == common.INFRA_EXIT_RC else "crash"
+                print(f"  [{common.hhmm()}] {kind} on repair of {cid} "
+                      f"(repair {n + 1} of {ops.MAX_RESPAWNS})", flush=True)
+            elif rc in common.SYSTEMIC_EXITS:
+                frozen.add(agent)
+                print(f"  [{common.hhmm()}] lane {agent} FROZEN: repair spawn died "
+                      f"rc={rc} — fix the cause, then restart `experiment run`", flush=True)

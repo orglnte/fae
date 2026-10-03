@@ -4,7 +4,7 @@ all read.
 
 loop_pids/loop_parents/containers are the process-table facts; heartbeat reads
 a workspace's own declared state; cell_state combines both into one row.
-Everything here is a query — nothing writes except pause_lock/_unpause (the
+Everything here is a query — nothing writes except pause_lock/unpause (the
 pause-request file the driver's EXIT trap reads) and the two small caches
 (_LPCACHE, _PIDCACHE), which exist only to bound how often the process table
 is swept.
@@ -161,7 +161,7 @@ def pause_meta(cid):
     return parts[0], who, at
 
 
-def _pause_detail(cid):
+def pause_detail(cid):
     """The first line after the header of a cell's .paused — the driver writes
     the violation it stood down on there."""
     try:
@@ -175,7 +175,7 @@ def _pause_file(cid):
     return common.WS / cid / ".paused"
 
 
-def _unpause(cid):
+def unpause(cid):
     # Emit Resume ONLY when a pause actually existed. This used to fire
     # unconditionally, so `resume` over a fleet logged a Resume for every cell
     # it merely looked at — 16 of them in one sweep on 2026-07-25. Against
@@ -194,6 +194,15 @@ def _unpause(cid):
     # is a transition the model does not admit — both ways the replay breaks.
     if _ledger_intent(cid) == "paused":
         common._emit_transition("Resume", cid)
+
+
+def flagged(cid):
+    """Quarantined for a human: no repair, no admission until resumed."""
+    return (common.WS / cid / "reconcile.flagged").exists()
+
+
+def cancelled(cid):
+    return (common.WS / cid / ".cancelled").exists()
 
 
 def cell_intent(ws):

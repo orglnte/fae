@@ -262,7 +262,7 @@ def experiment_run(limit: int = typer.Option(7, "-n", "--limit",
             raise typer.BadParameter(
                 f"--per-agent-override wants AGENT=N, got {part!r}")
         overrides[agent.strip()] = int(n)
-    conduct.conduct(_ns(limit=limit, per_agent=per_agent,
+    conduct.Conduct().run(_ns(limit=limit, per_agent=per_agent,
                         per_agent_override=overrides, interval=interval,
                         supervise_interval=supervise_interval))
 
@@ -272,7 +272,7 @@ def experiment_diagnose():
     """READ-ONLY one-shot: what supervision would do (dry), current zombies
     (listed, not reaped), and the admission preview per lane — the run
     loop's judgment without waiting for the loop."""
-    supervise.conduct_diagnose(_ns())
+    conduct.Conduct().diagnose(_ns())
 
 
 @experiment_app.command("pause")
@@ -287,7 +287,7 @@ def experiment_pause(scope: list[str] = typer.Argument(..., help=SCOPE),
     every cell, wait for zero loops — the FP-edit window. Agent names: park
     those lanes + pause their running cells, return immediately.
     Contrast: `experiment stop` kills NOW."""
-    conduct.conduct_pause(_ns(scope=list(scope), admission_only=admission_only,
+    conduct.Conduct().pause(_ns(scope=list(scope), admission_only=admission_only,
                               interval=interval, dry_run=dry_run))
 
 
@@ -297,7 +297,7 @@ def experiment_resume(scope: list[str] = typer.Argument(..., help=SCOPE)):
     interrupted cells at the FRONT of their lane. A live `experiment run`
     admits them under its caps — nothing starts while it is down. Blanket
     `all` leaves roster/manual pauses and cancelled cells alone."""
-    conduct.conduct_resume(_ns(scope=list(scope)))
+    conduct.Conduct().resume(_ns(scope=list(scope)))
 
 
 @experiment_app.command("stop")
@@ -308,7 +308,7 @@ def experiment_stop(scope: list[str] = typer.Argument(..., help=SCOPE),
     removed; `all` also TERMs the run. Queues are NOT touched. Warns and asks
     to confirm first. Resumable (`experiment resume`); the terminal verdict is
     `cell stop --cancel`. For a graceful stop use `experiment pause`."""
-    conduct.conduct_stop(_ns(scope=list(scope), yes=yes))
+    conduct.Conduct().stop(_ns(scope=list(scope), yes=yes))
 
 
 @experiment_app.command("repair")
@@ -319,7 +319,7 @@ def experiment_repair(dry_run: bool = typer.Option(False, "--dry-run",
     """One-shot supervision sweep — repair-requeue, DONE validation, zombie
     reap. `experiment run` calls the same sweep every --supervise-interval;
     this is the one-shot equivalent."""
-    supervise.reconcile(_ns(dry_run=dry_run, only=only))
+    conduct.Conduct().repair(_ns(dry_run=dry_run, only=only))
 
 
 @experiment_app.command("status")
@@ -338,7 +338,7 @@ def experiment_status(
     elif watch:
         render.watch(_ns(interval=watch, flat=flat, running_only=running_only))
     else:
-        render.status(_ns(flat=flat, running_only=running_only))
+        conduct.Conduct().status(_ns(flat=flat, running_only=running_only))
 
 
 # --- results ----------------------------------------------------------------

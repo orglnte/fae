@@ -2,7 +2,7 @@
 functions that matter most and had the least coverage — find_zombies()
 (what's orphaned) and reap_zombies() (what to do about it). test_cluster_
 name.py owns _cksum/_cluster_for; test_reconcile_safety.py owns
-_leaked_lock_holders/_VERIFY_HOLDER_ARGV. This file is everything else:
+_leaked_lock_holders/VERIFY_HOLDER_ARGV. This file is everything else:
 the OS-facing helpers and the zombie classes find_zombies enumerates.
 """
 import argparse
@@ -369,15 +369,15 @@ class TestTheRepairReaps(unittest.TestCase):
     run lists them; the sweep itself is a singleton with a cooldown."""
 
     def test_repair_reaps_and_a_dry_run_only_lists(self):
-        from fae.driver import supervise, zombies
-        with mock.patch.object(supervise, "_supervise_pass"), \
+        from fae.driver import conduct, supervise, zombies
+        with mock.patch.object(supervise, "supervise_pass"), \
                 mock.patch.object(zombies, "reap_sweep", return_value=["reaped x"]) as sweep, \
                 mock.patch.object(zombies, "find_zombies",
                                   return_value=[("container", "fae-dind-x", "x", "gone")]):
-            supervise.reconcile(argparse.Namespace(dry_run=False, only=""))
+            conduct.Conduct().repair(argparse.Namespace(dry_run=False, only=""))
             sweep.assert_called_once()
             sweep.reset_mock()
-            supervise.reconcile(argparse.Namespace(dry_run=True, only=""))
+            conduct.Conduct().repair(argparse.Namespace(dry_run=True, only=""))
             sweep.assert_not_called()
 
     def test_a_sweep_within_the_cooldown_does_nothing(self):

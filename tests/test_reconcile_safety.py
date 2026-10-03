@@ -397,7 +397,7 @@ class TestTheModelLearnsAboutKilledLoops(unittest.TestCase):
         # after it. The two survivors kill the loop themselves, which is what
         # makes their Crash both true and once-only.
         src = (Path(ROOT) / "fae" / "driver" / "supervise.py").read_text()
-        body = src[src.index("def _supervise_pass"):]
+        body = src[src.index("def supervise_pass"):]
         emits = re.findall(r'_emit_transition\("Crash", cid, "([^"]+)"\)', body)
         self.assertEqual(sorted(emits), ["limit-wall", "silent-hang"])
 
@@ -442,9 +442,9 @@ class TestDryRunWritesNothing(unittest.TestCase):
         self.assertTrue((self.ws / self.cid / "reconcile.flagged").exists())
 
     def test_dry_run_does_not_spawn_or_charge_the_respawn_budget(self):
-        before = runs.ops._respawn_count(self.cid)
+        before = runs.ops.respawn_count(self.cid)
         runs.ops._respawn(self.st(), dry=True)
-        self.assertEqual(runs.ops._respawn_count(self.cid), before)
+        self.assertEqual(runs.ops.respawn_count(self.cid), before)
 
     def test_dry_run_writes_no_transition(self):
         runs.ops._respawn(self.st(), dry=True)
@@ -564,9 +564,10 @@ class SweepCase(unittest.TestCase):
         self.cell = self.ws / self.cid
         self.cell.mkdir(parents=True)
         patch_plane(self, self.ws)
+        self.alerts = runs.supervise.Alerts()
         (self.cell / "iterations.log").touch()
         self.patches = [
-            # _teardown_cell waits for the loop to exit, and these suites
+            # teardown_cell waits for the loop to exit, and these suites
             # patch os.kill with a bare Mock — every pid then looks alive
             # forever and the full grace is burned in a unit test.
             mock.patch.object(runs.ops, "_await_exit", return_value=True),
@@ -596,7 +597,7 @@ class SweepCase(unittest.TestCase):
                                side_effect=validate_error) as val, \
              mock.patch.object(runs.supervise, "subprocess") as sub, \
              mock.patch.object(runs.os, "kill") as kill:
-            runs.supervise._supervise_pass(dry=dry, only=only)
+            runs.supervise.supervise_pass(self.alerts, dry=dry, only=only)
         return val, sub, kill
 
     def st(self, state="CRASHED", why="loop", **kw):
@@ -614,8 +615,6 @@ class TestSweepClassification(SweepCase):
 
     def test_a_cell_whose_validation_raises_does_not_stop_the_sweep(self):
         # one bad metrics.json must not take the scheduler down with it
-        runs.supervise._VALIDATION_FAILED.clear()
-        self.addCleanup(runs.supervise._VALIDATION_FAILED.clear)
         for _ in range(2):
             val, _, _ = self.sweep(self.st(state="DONE", why="green"),
                                    validate_error=TypeError("str / str"))
@@ -641,7 +640,7 @@ class TestSweepClassification(SweepCase):
         kill.assert_not_called()
 
     def _crashed_sweeps(self, *, queued, n):
-        with mock.patch.object(runs.ops, "_claimed", return_value=False), \
+        with mock.patch.object(runs.ops, "is_claimed", return_value=False), \
              mock.patch.object(runs.queues_module.Queues, "lane_has", return_value=queued):
             for _ in range(n):
                 self.sweep(self.st(state="CRASHED", why="loop", events=5))
@@ -723,8 +722,6 @@ class TestVerifyHeldAlert(SweepCase):
 
     def setUp(self):
         super().setUp()
-        self.addCleanup(runs.supervise._VERIFY_ALERTED.clear)
-        runs.supervise._VERIFY_ALERTED.clear()
 
     def _acquire(self, seconds_ago):
         ts = datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
@@ -861,9 +858,6 @@ class TestVerifyWedgedStandsTheCellDown(SweepCase):
 
     def setUp(self):
         super().setUp()
-        for d in (runs.supervise._VERIFY_ALERTED, runs.supervise._VERIFY_WEDGED):
-            self.addCleanup(d.clear)
-            d.clear()
 
     def _acquire(self, seconds_ago):
         ts = datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
@@ -880,7 +874,7 @@ class TestVerifyWedgedStandsTheCellDown(SweepCase):
         self._acquire(held_s)
         with mock.patch.object(runs.supervise, "VERIFY_HELD_ALERT_S", self.ALERT_S), \
              mock.patch.object(runs.supervise, "VERIFY_WEDGED_S", self.WEDGE_S), \
-             mock.patch.object(runs.ops, "_teardown_cell") as td, \
+             mock.patch.object(runs.ops, "teardown_cell") as td, \
              mock.patch.object(runs.supervise, "_reclaim"):
             self.sweep(self.st(state="RUNNING", why="verify"), dry=dry)
         return td
@@ -913,7 +907,7 @@ class TestVerifyWedgedStandsTheCellDown(SweepCase):
         self._acquire(self.WEDGE_S + 60)
         with mock.patch.object(runs.supervise, "VERIFY_HELD_ALERT_S", self.ALERT_S), \
              mock.patch.object(runs.supervise, "VERIFY_WEDGED_S", self.WEDGE_S), \
-             mock.patch.object(runs.ops, "_teardown_cell") as td, \
+             mock.patch.object(runs.ops, "teardown_cell") as td, \
              mock.patch.object(runs.supervise, "_reclaim"):
             for _ in range(3):
                 self.sweep(self.st(state="RUNNING", why="verify"))
@@ -929,8 +923,6 @@ class TestArmStuckMeasuresProgressNotLiveness(SweepCase):
 
     def setUp(self):
         super().setUp()
-        self.addCleanup(runs.common._ARM_ALERTED.clear)
-        runs.common._ARM_ALERTED.clear()
 
     def _sweep_arm(self, *, slot_age, phase_age, phase="verify"):
         st = self.st(state="RUNNING", why="agent")
@@ -939,7 +931,7 @@ class TestArmStuckMeasuresProgressNotLiveness(SweepCase):
              mock.patch.object(runs.state, "heartbeat",
                                return_value={"phase_age": phase_age,
                                              "age": 1.0, "phase": phase}), \
-             mock.patch.object(runs.ops, "_teardown_cell") as td, \
+             mock.patch.object(runs.ops, "teardown_cell") as td, \
              mock.patch.object(runs.supervise, "_reclaim"):
             self.sweep(st)
         return td
@@ -1039,13 +1031,13 @@ class TestLeakedLockHolders(unittest.TestCase):
         for argv in ("python3 cli.py experiment verb bench --reps 3",
                      "python3 cli.py cell reverify x --all",
                      "python3 cli.py experiment smoke --only alpha"):
-            self.assertRegex(argv, runs.zombies._VERIFY_HOLDER_ARGV)
+            self.assertRegex(argv, runs.zombies.VERIFY_HOLDER_ARGV)
             with mock.patch.object(runs.common, "sh", return_value=argv + "\n"):
                 self.assertTrue(runs.zombies._is_driver_pid(4242), argv)
         for argv in ("python3 cli.py experiment status", "python3 cli.py experiment run",
                      "python3 cli.py rig reverify x",    # wrong group: not a real invocation
                      "python3 cli.py experiment bench"):  # an experiment command runs only through verb
-            self.assertNotRegex(argv, runs.zombies._VERIFY_HOLDER_ARGV)
+            self.assertNotRegex(argv, runs.zombies.VERIFY_HOLDER_ARGV)
 
     def test_a_live_python_cell_holds_the_rig_lock_itself(self):
         # The cell loop takes the rig lock IN-PROCESS — there is no verifier
