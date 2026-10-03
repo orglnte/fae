@@ -476,16 +476,16 @@ def experiment_check(walk: bool = typer.Option(False, "--walk",
                                                      "the gate (experiment smoke)"),
                      variants: str = typer.Option("", "--variants",
                                                   help="comma-separated (default: every active variant)"),
-                     trace: bool = typer.Option(False, "--trace",
-                                                help="also replay the fleet's transitions against "
-                                                     "the TLA+ model of the cell lifecycle"),
+                     tla_trace: bool = typer.Option(False, "--tla-trace",
+                                                    help="also replay the fleet's transitions against "
+                                                         "the TLA+ model of the cell lifecycle"),
                      task: str = typer.Option("T1", "--task", help="the task the seeds are checked for")):
     """Whether this root's experiment is ready to run: the host, the config,
     the definition, each variant, every cell's seed, the invariants, the
     infra, the agents' images, no leftovers. Exit 1 on any failure; each
     names its fix."""
     from fae.driver import check
-    check.main(_ns(walk=walk, static=static, smoke=smoke, trace=trace, variants=variants,
+    check.main(_ns(walk=walk, static=static, smoke=smoke, tla_trace=tla_trace, variants=variants,
                    task=task))
 
 

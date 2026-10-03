@@ -311,7 +311,7 @@ answer as charged.**
 **Validated: the engine behaves as specified.**
 
 5. **State machine.** `.tla/Runs.tla` specifies the orchestration; `cli.py
-   experiment check --trace` replays the logged live transitions against it
+   experiment check --tla-trace` replays the logged live transitions against it
    when `tla_verify` is available, and names the missing checker when it is
    not.
 6. **Tests.** `tests/` is the engine's suite. `pyproject.toml` configures

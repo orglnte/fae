@@ -582,10 +582,10 @@ every prior agent's memory — cross-run leakage invisible in the results.
   selftest cases taken verbatim from real `metrics.json`.
 - **TLA+ conformance.** `.tla/Runs.tla` plus `tla_verify` (`$FAE_TLA_VERIFY`,
   else `tla_verify` on `PATH`; with neither, the check names the missing
-  checker): `--trace` replays
+  checker): `--tla-trace` replays
   one cell's ledger per attempt at verify-end; `--live-trace` replays the
   global `.orch/transitions.log` against the spec (`cli.py experiment check
-  --trace`). A
+  --tla-trace`). A
   fresh prepare that wipes a workspace logs `Retire <cid>`: the id then names
   a NEW cell, which the replay judges from Init as `<cid>#<n>` — without it
   the new cell's `Spawn` is judged against the old cell's verdict and every

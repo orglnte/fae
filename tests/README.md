@@ -54,5 +54,5 @@ recovery calls `_recover_inflight()` directly rather than `worker()`.
 
 Patch `TRANSITIONS_LOG` too, not just `WS` and `ORCH`: `_emit_transition`
 resolves the module-level path, so an unpatched test writes fabricated
-transitions into the live conformance log that `experiment check --trace` replays against
+transitions into the live conformance log that `experiment check --tla-trace` replays against
 `.tla/Runs.tla`.

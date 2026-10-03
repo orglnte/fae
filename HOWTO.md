@@ -453,7 +453,7 @@ repair` reaps them). `--walk` explains each step before running it and, on
 a failure, names the fix and waits for you to retry. Without `--walk` it
 prints a checklist and exits 1 on any failure; `--static` skips the docker
 steps while you are still writing the definition; `--smoke` adds section 8's
-reference run; `--trace` replays the fleet's recorded transitions against
+reference run; `--tla-trace` replays the fleet's recorded transitions against
 the TLA+ model of the cell lifecycle.
 
 ## 8. Run a cell with no agent

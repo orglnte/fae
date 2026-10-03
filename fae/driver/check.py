@@ -399,7 +399,7 @@ STEPS = (
     Step("trace", "The fleet's transitions replay against the model",
          "Every recorded transition of every cell is replayed against the\n"
          "TLA+ model of the cell lifecycle.",
-         "§11", _trace, needs=("config",), opt_in="--trace"),
+         "§11", _trace, needs=("config",), opt_in="--tla-trace"),
     Step("pipeline", "The reference passes the gate",
          "One reference cell per way of judging, no agent, one arrangement:\n"
          "proves the verifier judges the known answer green before any agent runs.",
@@ -427,11 +427,11 @@ def _show(findings, out, failed_only=False):
             out(f"       fix: {f.fix}")
 
 
-def run(ctx, steps=STEPS, walk=False, smoke=False, trace=False, ask=input, out=print):
+def run(ctx, steps=STEPS, walk=False, smoke=False, tla_trace=False, ask=input, out=print):
     """Run `steps` in order; returns 0 when none failed, 1 otherwise.
     `walk` pauses before each step and after a failure (`ask` reads the answer)."""
     status = {}
-    enabled = {"--smoke": smoke, "--trace": trace}
+    enabled = {"--smoke": smoke, "--tla-trace": tla_trace}
     active = [s for s in steps if not s.opt_in or enabled.get(s.opt_in)]
     for n, step in enumerate(active, 1):
         head = f"[{n}/{len(active)}] {step.title}"
@@ -501,4 +501,4 @@ def main(args):
                  "run without --walk for the checklist")
     ctx = Ctx(root=common.ROOT, variants=tuple(v for v in (args.variants or "").split(",") if v),
               task=args.task, static=args.static)
-    sys.exit(run(ctx, walk=args.walk, smoke=args.smoke, trace=getattr(args, "trace", False)))
+    sys.exit(run(ctx, walk=args.walk, smoke=args.smoke, tla_trace=getattr(args, "tla_trace", False)))
