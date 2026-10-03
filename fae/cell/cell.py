@@ -905,10 +905,17 @@ class Cell:
             if rc != 0:
                 raise RuntimeError(f"{self.variant} cell_setup failed (rc={rc}) "
                                    f"— cannot re-verify without its infra")
-            for s in self.gate_shapes:
-                results.append(self.verify(shape=s, out_dir=out))
-                if not results[-1].green:
-                    break
+            # one verify on the machine at a time, the same lock a run's gate holds
+            vlock = self.verify_lock_acquire()
+            if vlock is None:
+                raise RuntimeError(f"{self.cid} is paused (.paused): not re-verified")
+            try:
+                for s in self.gate_shapes:
+                    results.append(self.verify(shape=s, out_dir=out))
+                    if not results[-1].green:
+                        break
+            finally:
+                vlock.close()
         finally:
             for k, v in prev.items():
                 if v is None:

@@ -356,6 +356,10 @@ def reverify(args):
     if len(cids) > 1 and not args.all:
         sys.exit(f"{len(cids)} cells match — re-verify takes the rig for "
                  f"~15 minutes each. Name one, or pass --all.")
+    pid = common.conduct_pid()
+    if pid:
+        print(f"WARNING: conduct is running (pid {pid}); this re-verify queues for the "
+              f"verify lock behind its cells and holds it for the whole gate", flush=True)
     stamp = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
     for cid in cids:
         c = Cell(cid, workspaces=common.WS, root=common.ROOT)
