@@ -2,7 +2,7 @@
 """Grouped Typer front-end for the driver — 
 
 DESIGN: this is a CLI LAYER, not the orchestrator. A command acting on the
-run calls the Conduct (fae/driver/conduct.py); one acting on cells selects
+run calls the Conduct (fae/driver/conduct/); one acting on cells selects
 them and asks each Cell; one on the work list asks the Queues. What stays here
 is selection and printing. The verbs on the experiment as a whole (init,
 smoke, prepare, verb; the rig's trace-reset) are its Experiment's
@@ -54,7 +54,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from fae.cell.cell import Busy  # noqa: E402
-from fae.driver import check, common, conduct, render, score, state  # noqa: E402
+from fae.driver import check, common, conduct, render, score  # noqa: E402
+from fae.driver.conduct import Conduct  # noqa: E402
 
 
 def _ns(**kw):
@@ -126,7 +127,7 @@ def spawn(args):
     # guard one identity while the cell process runs under another
     cid = common.cell_id(args.agent, args.variant, rep, args.task,
                          smoke=bool(os.environ.get("SMOKE")))
-    live = state.loop_parents()
+    live = Conduct.loop_parents()
     if cid in live:
         print(f"refusing: loop already running for {cid} (pid {live[cid]}) — "
               f"two loops on one workspace corrupt its logs")
@@ -194,7 +195,7 @@ def stop_cells(args):
     if getattr(args, "dry_run", False):
         verb = "cancel" if cancel else "stop"
         for cid in cids:
-            st = state.cell_state(common.WS / cid, state.loop_pids(), state.containers())
+            st = Conduct.cell_state(common.WS / cid, Conduct.loop_pids(), Conduct.containers())
             print(f"would {verb} {cid}" + (f" ({st['state']}·{st['why']})" if st else ""))
         for cid in q_only:
             print(f"would drop queued spec {cid} (no workspace; backed up)")
@@ -202,7 +203,7 @@ def stop_cells(args):
         return None
     # never cancel a finished verdict: a stop halts runs, it does not relabel data
     done = [c for c in cids
-            if (st := state.cell_state(common.WS / c, {}, set())) and st["state"] == "DONE"]
+            if (st := Conduct.cell_state(common.WS / c, {}, set())) and st["state"] == "DONE"]
     cids = [c for c in cids if c not in set(done)]
     for c in done:
         print(f"  {c}: already DONE — left untouched")
@@ -229,17 +230,17 @@ def resume(args):
     matches = common.select_cells(*sels)
     _one_cell("resume", sels, len(matches))
     blanket = common.is_blanket(sels)
-    parents = state.loop_parents()
+    parents = Conduct.loop_parents()
     run = conduct.Conduct()
     touched = 0
     for cid in matches:
-        st = state.cell_state(common.WS / cid, state.loop_pids(), state.containers())
+        st = Conduct.cell_state(common.WS / cid, Conduct.loop_pids(), Conduct.containers())
         if st is None:
             continue
         c = common.cell(cid)
         if c.sealed:
             print(f"{cid}: SEALED — {common.seal_reason(cid)}; not restartable")
-        reason = state.pause_lock(cid)
+        reason = c.pause_reason
         # before the DONE/loop-alive branch: a pause is cooperative, so "paused
         # but still alive" is the normal state for a long window
         if reason in ("roster", "manual") and blanket:
@@ -277,7 +278,7 @@ def resume(args):
         agent = cid.split("_", 1)[0]
         # the per-agent cap holds on resume too, unless --force
         if not getattr(args, "force", False):
-            live_m = sum(1 for x in state.loop_parents() if x.startswith(agent + "_"))
+            live_m = sum(1 for x in Conduct.loop_parents() if x.startswith(agent + "_"))
             if live_m >= common.PER_AGENT_CAP:
                 touched += 1
                 acts.append(f"respawn DEFERRED — {agent} already has {live_m} live loop(s) "
@@ -318,10 +319,10 @@ SEALABLE = {"green": "green", "failed": "budget", "revoked": "revoked"}
 def seal(args):
     """Make terminal cells read-only (.sealed). Dry by default: sealing has
     no inverse, so writing the markers is an explicit act (--apply)."""
-    loops, boxes, live = state.loop_pids(), state.containers(), state.loop_parents()
+    loops, boxes, live = Conduct.loop_pids(), Conduct.containers(), Conduct.loop_parents()
     todo, already, skipped = [], 0, {}
     for cid in common.select_cells(args.selector):
-        st = state.cell_state(common.WS / cid, loops, boxes)
+        st = Conduct.cell_state(common.WS / cid, loops, boxes)
         if st is None:
             continue
         if common.is_sealed(cid):

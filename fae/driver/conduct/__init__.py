@@ -1,6 +1,6 @@
 """THE scheduler: the only thing that turns queued specs into cells, and the
 only spawner and supervisor at once — every --supervise-interval it runs
-the supervision pass (fae/driver/supervise.py), so repairs are convergence (a
+the supervision pass (supervise.py, here), so repairs are convergence (a
 crashed cell's spec is still claimed in running/, and the next pass restarts
 it) rather than a second controller racing the first.
 
@@ -22,9 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fae.driver import common
-from fae.driver import state
-from fae.driver import supervise
-from fae.driver import zombies
+from . import host, supervise, zombies
 
 STANDDOWN_COOL_S = int(os.environ.get("STANDDOWN_COOL_S", 300))
 MAX_RESPAWNS = int(os.environ.get("MAX_RESPAWNS", 3))
@@ -129,6 +127,52 @@ class Conduct:
         except OSError:
             return None
 
+    # --- what the run sees: read-only, for every reader ----------------------
+    # The host's view of the fleet (host.py) and the leftovers it finds
+    # (zombies.py) are the run's; readers outside it ask here.
+
+    @staticmethod
+    def loop_parents():
+        """cid -> the pid of its running cell loop."""
+        return host.loop_parents()
+
+    @staticmethod
+    def loop_pids():
+        return host.loop_pids()
+
+    @staticmethod
+    def containers():
+        """The names of the running containers."""
+        return host.containers()
+
+    @staticmethod
+    def cell_state(ws, loops=None, boxes=None):
+        """The cell in `ws` as status shows it, with what the host knows."""
+        return host.cell_state(ws, loops or {}, boxes or set())
+
+    @staticmethod
+    def all_states(running_only=False):
+        return host.all_states(running_only)
+
+    @staticmethod
+    def heartbeat(ws, cell=None):
+        """The cell's declared liveness, when its loop is alive."""
+        return host.heartbeat(ws, cell)
+
+    @staticmethod
+    def queued(cid):
+        """Does the cell's spec wait in its lane?"""
+        return host.queued(cid)
+
+    @staticmethod
+    def find_zombies():
+        """Leftovers of dead cells: [(kind, ident, owner, note)]."""
+        return zombies.find_zombies()
+
+    @staticmethod
+    def janitor_lines():
+        return zombies.janitor_lines()
+
     def act_on_requests(self):
         """The operators' requests to one cell (`cell pause`, `cell stop`),
         acted on here; while a run is up, the run acts on them at its next
@@ -229,7 +273,7 @@ class Conduct:
         common._rec_log(f"{cid} RESPAWN (resume, #{n + 1})" + (" [dry-run]" if dry else ""))
         if dry:
             return False
-        if state.loop_parents().get(cid):
+        if host.loop_parents().get(cid):
             common._rec_log(f"{cid} respawn skipped — a live loop already owns the workspace")
             return False
         refusal = self.refusal_while_up("respawn", ignore_slots)
@@ -269,7 +313,7 @@ class Conduct:
               f"on the 2nd consecutive sighting")
         for kind, ident, owner, note in zs:
             print(f"  {kind:<10} {ident}  owner={owner}  {note}")
-        live = state.loop_parents()
+        live = host.loop_parents()
         up = self.pidfile.exists()
         print(f"\n— ADMISSION PREVIEW — {len(live)} live loop(s), per-agent cap "
               f"{common.PER_AGENT_CAP}, run {'UP' if up else 'DOWN'}"
@@ -295,14 +339,14 @@ class Conduct:
                     cid = qs.spec_cid(p)
                     ws = common.WS / cid
                     if ws.is_dir():
-                        if state.flagged(cid):
+                        if common.cell(cid).flagged:
                             skipped += 1
                             continue
-                        st = state.cell_state(ws, {}, set())
+                        st = host.cell_state(ws, {}, set())
                         if st and st["state"] == "DONE":
                             skipped += 1
                             continue
-                    if state.pause_lock(cid) or live.get(cid):
+                    if common.cell(cid).pause_reason or live.get(cid):
                         skipped += 1
                         continue
                     note = f"next: {cid} — would admit"
@@ -453,13 +497,13 @@ class Conduct:
                           + f"; one cell per lane needs -n {len(active)}",
                           flush=True)
                 warned_lanes = len(active)
-                live = state.loop_parents()
-                boxes = state.containers()
+                live = host.loop_parents()
+                boxes = host.containers()
 
                 # Narrate state changes: cells STARTing (not admitted by us —
                 # reconcile respawns, operator spawns), reaching a verdict,
                 # crashing. First pass establishes the baseline silently.
-                states, _, _ = state.all_states()
+                states, _, _ = host.all_states()
                 now = {s["cid"]: f"{s['state']}·{s['why']}" for s in states}
                 if first:
                     first = False
@@ -489,10 +533,10 @@ class Conduct:
                         elif st.startswith("PAUSED"):
                             # only the driver's own stand-downs: an operator pause
                             # flips whole lanes at once and already narrates itself
-                            meta = state.pause_meta(cid)
-                            if meta and meta[1] == "driver":
+                            r = common.cell(cid).pause_request()
+                            if r and r.reason and r.who == "driver":
                                 print(f"  [{common.hhmm()}] STOOD-DOWN {cid} ({st}) — "
-                                      f"{state.pause_detail(cid)}", flush=True)
+                                      f"{r.detail}", flush=True)
                 prev_states = now
 
                 if not any(pending.values()) and not live and not qs.running_specs():
@@ -520,7 +564,7 @@ class Conduct:
                         qs.clear_cooldown(m)
                         lifted = 0
                         for c2 in common.select_cells(m):
-                            if state.pause_lock(c2) == "limit-wall":
+                            if common.cell(c2).pause_reason == "limit-wall":
                                 common.cell(c2).unpause(); lifted += 1
                         print(f"  [{common.hhmm()}] lane {m}: limit cooldown expired — "
                               f"{lifted} lock(s) lifted, retrying", flush=True)
@@ -536,7 +580,7 @@ class Conduct:
                 order.sort(key=lambda m: lane_live[m])
                 idle_sweep = 0
                 while order and idle_sweep < len(order):
-                    live = state.loop_parents()
+                    live = host.loop_parents()
                     if len(live) >= n:
                         break
                     m = order[rr % len(order)]
@@ -566,7 +610,7 @@ class Conduct:
                         idle_sweep = 0
                         admitted.add(cid)
                         print(f"  [{common.hhmm()}] admitted {cid} "
-                              f"({len(state.loop_parents())}/{n} live)", flush=True)
+                              f"({len(host.loop_parents())}/{n} live)", flush=True)
                     elif rc in (common.LOCK_EXIT_RC, common.PAUSE_EXIT_RC):
                         # LOCK_EXIT: workspace already owned; PAUSE: a pause landed
                         # in the claim->spawn window. Cell-specific, not lane-wide:
@@ -603,14 +647,14 @@ class Conduct:
                 if poll_i % 10 == 0:      # sign of life on a quiet fleet
                     cool = sorted(m for m in agents
                                   if qs.cooldown_until(m) > time.time())
-                    print(f"  [{common.hhmm()}] alive — {len(state.loop_parents())}/{n} live, "
+                    print(f"  [{common.hhmm()}] alive — {len(host.loop_parents())}/{n} live, "
                           f"{sum(pending.values())} pending"
                           + (f", cooling: {', '.join(cool)}" if cool else "")
                           + f", {qs.weekly_line()}", flush=True)
                 time.sleep(args.interval)
         except KeyboardInterrupt:
             pidfile.unlink(missing_ok=True)
-            print(f"\nrun: detached — {len(state.loop_parents())} loop(s) keep "
+            print(f"\nrun: detached — {len(host.loop_parents())} loop(s) keep "
                   f"running; nothing new starts until `cli.py experiment run` runs again.")
         finally:
             sys.stdout, sys.stderr = _old_out, _old_err
@@ -651,12 +695,12 @@ class Conduct:
                          f"{', '.join(sorted(known)) or 'none'})")
         cids = common.select_cells(*(agents or ["all"]))
         if args.dry_run:
-            parents = {c: p for c, p in state.loop_parents().items() if p > 1}
+            parents = {c: p for c, p in host.loop_parents().items() if p > 1}
             if agents:
                 parents = {c: p for c, p in parents.items()
                            if c.split("_", 1)[0] in set(agents)}
             for cid in sorted(parents):
-                st = state.cell_state(common.WS / cid, state.loop_pids(), state.containers())
+                st = host.cell_state(common.WS / cid, host.loop_pids(), host.containers())
                 print(f"would pause {cid} ({st['state']}·{st['why']})" if st
                       else f"would pause {cid}")
             if agents:
@@ -708,7 +752,7 @@ class Conduct:
         print(f"pause requested [drain] for {len(cids)} cell(s) — waiting for loops "
               f"to reach a safe point", flush=True)
         while True:
-            parents = {c: p for c, p in state.loop_parents().items() if p > 1}
+            parents = {c: p for c, p in host.loop_parents().items() if p > 1}
             # Cell loops are not the only FP-pinned processes: a reverify, an
             # exp1 verify or a smoke run holds a pinned fingerprint too, and
             # "DRAIN COMPLETE" while one runs invited an edit that voided it
@@ -722,14 +766,14 @@ class Conduct:
                       f"(reverify/exp1/smoke verify)", flush=True)
                 time.sleep(args.interval)
                 continue
-            pids, boxes = state.loop_pids(), state.containers()
+            pids, boxes = host.loop_pids(), host.containers()
             lbl = []
             for c in sorted(parents):
-                st = state.cell_state(common.WS / c, pids, boxes)
+                st = host.cell_state(common.WS / c, pids, boxes)
                 lbl.append(f"{c}[{st['why'] or st['state'] if st else '?'}]")
             print(f"waiting: {len(parents)} loop(s) still up: {', '.join(lbl)}", flush=True)
             time.sleep(args.interval)
-        for pid in state.loop_pids():   # tees: reap ORPHANS only (ppid 1) — a live
+        for pid in host.loop_pids():   # tees: reap ORPHANS only (ppid 1) — a live
             try:                   # reverify's tee dies with its owner, not here
                 ppid = int(common.sh(["ps", "-o", "ppid=", "-p", str(pid)]).strip() or 0)
                 if ppid == 1:
@@ -775,17 +819,17 @@ class Conduct:
             elif r == "conflict":
                 print(f"  queue[{m}]: BOTH the live and the parked lane exist — "
                       f"merge by hand, refusing to clobber")
-        parents = state.loop_parents()
-        pids, boxes = state.loop_pids(), state.containers()   # once — per-cell ps/docker
+        parents = host.loop_parents()
+        pids, boxes = host.loop_pids(), host.containers()   # once — per-cell ps/docker
                                                   # calls made resume-all crawl
         requeued, lifted = 0, 0
         budget_resets = []
         for cid in common.select_cells(*(["all"] if blanket else scope)):
             ws = common.WS / cid
-            st = state.cell_state(ws, pids, boxes)
+            st = host.cell_state(ws, pids, boxes)
             if st is None:
                 continue
-            reason = state.pause_lock(cid)
+            reason = common.cell(cid).pause_reason
             if reason == "killed":
                 continue      # cancel is terminal; only `cell resume CID` names it back
             if reason == "contract":
@@ -843,7 +887,7 @@ class Conduct:
                          f"{', '.join(sorted(known)) or 'none'})")
         def _in_scope(cid):
             return blanket or cid.split("_", 1)[0] in set(agents)
-        _loops_now = sorted(c for c in state.loop_parents() if _in_scope(c))
+        _loops_now = sorted(c for c in host.loop_parents() if _in_scope(c))
         _pending = sum(len(qs.specs_in(d)) for d in qs.lane_dirs(include_parked=True)
                        if not agents or qs.lane_agent(d) in set(agents))
         if not _confirm_stop(blanket, agents, _loops_now, _pending,
@@ -859,14 +903,14 @@ class Conduct:
         # lanes keep being served.
         if blanket and self.stop_conductor():
             print("conduct stopped (TERM)")
-        loops = {c: p for c, p in state.loop_parents().items() if _in_scope(c)}
+        loops = {c: p for c, p in host.loop_parents().items() if _in_scope(c)}
         # Through the one teardown path. TERM alone left the dind sidecar, every
         # anonymous volume and the cell's kind cluster behind whenever the EXIT
         # trap did not complete, and the arm slot with them.
         for cid in loops:
             common.named_cell(cid).take_down("stopped", log=common._rec_log)
         _held = sorted(c for c in common.select_cells("all")
-                       if _in_scope(c) and state.pause_lock(c))
+                       if _in_scope(c) and common.cell(c).pause_reason)
         if _held:
             # pause locks are operator decisions, not run state: stopping the fleet
             # must not silently un-pause a roster somebody parked on purpose
@@ -1067,13 +1111,13 @@ class Conduct:
                 # A flagged cell is quarantined from admission too: repair stops
                 # bringing it back, and a pending spec would otherwise respawn it
                 # right past the flag. The operator's resume clears the flag.
-                if state.flagged(cid):
+                if common.cell(cid).flagged:
                     continue
-                st = state.cell_state(ws, {}, boxes)
+                st = host.cell_state(ws, {}, boxes)
                 if st and st["state"] == "DONE":
                     qs.finish(agent, p)
                     continue
-            if state.pause_lock(cid) or state.loop_parents().get(cid):
+            if common.cell(cid).pause_reason or host.loop_parents().get(cid):
                 continue
             return p, cid
         return None, "none-admissible"
@@ -1085,10 +1129,10 @@ class Conduct:
         claim, so its lane would read as free and admit a second cell. Adoption
         makes the claim match reality before the first admission."""
         n = 0
-        for cid, _pid in state.loop_parents().items():
+        for cid, _pid in host.loop_parents().items():
             if self.is_claimed(cid):
                 continue
-            st = state.cell_state(common.WS / cid, {}, set())
+            st = host.cell_state(common.WS / cid, {}, set())
             if not st:
                 continue
             common.queues().adopt(cid.split("_", 1)[0], cid, _spec_of(st))
@@ -1100,13 +1144,14 @@ class Conduct:
     def _lift_standdowns(self, agents, now_t):
         for m in agents:
             for cid in common.select_cells(m):
-                meta = state.pause_meta(cid)
-                if not meta:
+                c = common.cell(cid)
+                r = c.pause_request()
+                if not r or not r.reason:
                     continue
-                reason, who, at = meta
+                reason, who, at = r.reason, r.who, r.at
                 if who != "conduct" or not reason.startswith(CONDUCT_LIFTED):
                     continue
-                if state.cancelled(cid) or state.flagged(cid):
+                if c.cancelled or c.flagged:
                     continue
                 if at is not None and common.awake_age(at, now_t) < STANDDOWN_COOL_S:
                     continue
@@ -1131,17 +1176,17 @@ class Conduct:
         reaches a verdict, so a conduct that dies mid-attempt (or a cell killed by
         a hang sweep) is recovered by the next pass with no journal to replay."""
         qs = common.queues()
-        live = state.loop_parents()
-        boxes = state.containers()
+        live = host.loop_parents()
+        boxes = host.containers()
         for p in qs.running_specs():
             agent, cid = p.parent.name, qs.spec_cid(p)
             if live.get(cid):
                 continue
-            st = state.cell_state(common.WS / cid, {}, boxes)
+            st = host.cell_state(common.WS / cid, {}, boxes)
             if st and st["state"] == "DONE":
                 qs.finish(agent, p)
                 continue
-            if state.pause_lock(cid):
+            if common.cell(cid).pause_reason:
                 # operator (or a wall stand-down) owns this cell: hand the spec
                 # back so the lane can serve the rest of its backlog
                 qs.release(agent, p)

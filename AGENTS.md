@@ -275,7 +275,7 @@ writes an `ALERT SETUP-FAILED` ledger line.
   name caps at the variant file's `lock_slots`. A verifier may refuse to judge on
   an overloaded host and say why, as a void.
 - **Admission is `experiment run`'s job; `WORK_SLOTS` is the backstop.**
-  `cli.py experiment run` (`fae/driver/conduct.py`) is the ONE scheduler and
+  `cli.py experiment run` (`fae/driver/conduct/`) is the ONE scheduler and
   the ONE controller: it admits queued specs up to a global cap (`-n`) and
   `--per-agent`, round-robin with starved lanes first, and every
   `--supervise-interval` it repairs crashed or hung cells by requeuing them at
@@ -292,7 +292,7 @@ writes an `ALERT SETUP-FAILED` ledger line.
 - **A reaper's predicates name every holder shape.** A cell loop, `exp1`,
   `reverify` and `smoke` all hold the verify lock in-process around a
   verifier child that inherits no fd (`_VERIFY_HOLDER_ARGV`,
-  `fae/driver/zombies.py`); a predicate that knows only the loops reads a
+  `fae/driver/conduct/zombies.py`); a predicate that knows only the loops reads a
   live verify as a leak. The verify container `fae-verify-<cid>` and the
   cell network `fae-net-<cid>` are the engine's infra
   (`fae/cell/image.py` names them; `Infra.network_up` creates the network
@@ -349,7 +349,7 @@ writes an `ALERT SETUP-FAILED` ledger line.
   alone; naming the agent lifts them.
 - **Every lock that can block declares a heartbeat phase** (`hb_phase`), or
   a queued cell displays whatever phase preceded it. `WAIT_PHASES` in
-  `fae/driver/state.py` is the set rendered as `WAITING`.
+  `fae/cell/fsm.py` is the set rendered as `WAITING`.
 - **Liveness is shown, never inferred from silence.** The LOOP declares
   itself: `.loop` is rewritten every `HB_TICK` (30 s) by a ticker that dies
   with its loop, so a phase that blocks for an hour still reads young. The
@@ -401,8 +401,8 @@ share one class. It answers:
 | `verify_teardown(ctx, env)` | the same, after the verifier stopped the artifacts, whether `verify_setup` finished or not; `run_teardown` after a kill | the world reset after the arrangement, derivable from the ctx alone |
 | `tool(argv, env, network)` | the infra's own `cell_*` pair | a tool the host does not carry, run in a throwaway container of the variant's verify image over the daemon's socket |
 | `image_context(conf)`, `agent_image_context(conf)` | `fae/cell/image.py` | sources staged beside the variant's `[verify] image_dir` (its layer over the verifier's image, `FROM $BASE`, versions pinned; none = the verifier's image as is) and `[authoring] tools` Dockerfiles |
-| `identities(cid)` | `fae/driver/zombies.py` | the names of what a cell provisions, from the one formula the provisioner uses |
-| `PREFIXES`, `stray(live, workspaces)` | `fae/driver/zombies.py` | what a reaper may DISCOVER: name prefixes to scan by, and any infra no name carries |
+| `identities(cid)` | `fae/driver/conduct/zombies.py` | the names of what a cell provisions, from the one formula the provisioner uses |
+| `PREFIXES`, `stray(live, workspaces)` | `fae/driver/conduct/zombies.py` | what a reaper may DISCOVER: name prefixes to scan by, and any infra no name carries |
 
 The artifacts are the verifier's to run: `secrunner.for_variant` builds the
 runner from the variant's `[verify.run]` (a program that `serves` kept

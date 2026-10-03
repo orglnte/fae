@@ -599,8 +599,8 @@ class Experiment:
         Every variable the replay needs, or a cell caught mid-flight by a reset
         is seeded into a state it cannot legally leave.
         """
-        from fae.driver import state
-        loops = state.loop_parents()
+        from fae.driver.conduct import Conduct
+        loops = Conduct.loop_parents()
         slot_holders, verify_holder = self.slot_holders(), self.verify_holder()
         out = []
         for cid in self.workspace.cells():
@@ -614,7 +614,7 @@ class Experiment:
                 intent = "run"
             slot = cid in slot_holders
             if cid in loops:
-                hb = state.heartbeat(c.ws, c)
+                hb = Conduct.heartbeat(c.ws, c)
                 loop = _loop_of_phase((hb or {}).get("phase") or "", slot)
             else:
                 loop = "none"
@@ -630,7 +630,10 @@ class Experiment:
 
     def verify_holder(self):
         """The cell holding the verify lock now, or ''."""
-        return _holder_of(self.workspace.locks / "verify-lock")
+        from fae.cell.cell import Cell
+        locks = self.workspace.locks
+        return Cell.shared_lock_holder(locks, "verify") if Cell.shared_lock_held(locks, "verify") \
+            else ""
 
     def reset_trace(self, dry_run=False):
         """Re-anchor transitions.log on a RECORDED state.
@@ -675,13 +678,6 @@ class Experiment:
                   f"attempt straddles the re-anchor:")
             for c in live:
                 print(f"  {c['cid']} (loop={c['loop']})")
-
-
-def _holder_of(lock):
-    """The cid holding `lock`, or '': the kernel says whether it is held, the
-    holder note says who (a note outlives its holder's release)."""
-    from fae import mutex
-    return (mutex.holder_name(lock) or "") if lock.exists() and mutex.probe_held(lock) else ""
 
 
 def _loop_of_phase(phase, slot_held):

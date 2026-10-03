@@ -17,7 +17,6 @@ from pathlib import Path
 from _ctx import ROOT
 
 HARNESS = Path(ROOT) / "fae"
-STATE_PY = (Path(ROOT) / "fae" / "driver" / "state.py").read_text()   # WAIT_PHASES lives here now
 
 # The agent attempt loop. run_cell has an earlier, separate verify for the
 # `reference` condition, so ordering must be asserted inside the loop.
@@ -55,8 +54,8 @@ class TestThePhaseSet(unittest.TestCase):
     def test_every_waiting_phase_is_one_a_cell_can_reach(self):
         # A phase WAIT_PHASES names but nothing emits renders a queued cell as
         # plain RUNNING for the whole wait.
-        declared = set(re.search(r"WAIT_PHASES = \{([^}]*)\}", STATE_PY)
-                       .group(1).replace('"', "").replace(" ", "").split(","))
+        from fae.cell.fsm import WAIT_PHASES
+        declared = set(WAIT_PHASES)
         self.assertTrue(declared <= self._emitted(),
                         f"WAIT_PHASES names phases nothing emits: {declared - self._emitted()}")
 

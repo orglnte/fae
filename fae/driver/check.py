@@ -325,7 +325,7 @@ def _invariants(ctx):
     from fae import mutex
     from fae.cell import config as _config, prepare as _prep, rig as _rig, verify as _verify
     from fae.cell.variants import files as _files
-    from fae.driver import state
+    from fae.driver.conduct import Conduct
     out = []
     missing = [f"{mod.__name__}.{name}"
                for mod, names in ((_rig, ("fp", "free_port_from")),
@@ -357,9 +357,9 @@ def _invariants(ctx):
         for ws in sorted(common.WS.iterdir()):
             if not ws.is_dir() or not common.parse_cell_id(ws.name):
                 continue
-            st = state.cell_state(ws, {}, set())
+            st = Conduct.cell_state(ws)
             if st and st["state"] == "DONE" and st["why"] in ("green", "failed", "revoked"):
-                if state._cell(ws).read_ledger()["verdict"] != st["why"]:
+                if common.cell(ws.name, workspaces=ws.parent).read_ledger()["verdict"] != st["why"]:
                     disagree.append(ws.name)
     out.append(Finding(not disagree, "every finished cell's ledger agrees with its state" if not disagree
                        else f"ledger and state disagree: {', '.join(disagree[:5])}",
@@ -368,8 +368,8 @@ def _invariants(ctx):
 
 
 def _leftovers(ctx):
-    from fae.driver import zombies
-    found = zombies.find_zombies()
+    from fae.driver.conduct import Conduct
+    found = Conduct.find_zombies()
     if not found:
         return [Finding(True, "no leftovers of dead cells")]
     return [Finding(False, f"{kind} {ident} (owner {owner}): {note}",

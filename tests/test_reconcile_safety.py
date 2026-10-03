@@ -36,43 +36,43 @@ class TestNeverStarted(unittest.TestCase):
         return base
 
     def test_v1_ledger_with_no_events_is_never_started(self):
-        self.assertTrue(runs.state.never_started(self.st()))
+        self.assertTrue(runs.Cell.never_started(self.st()))
 
     def test_v2_prepared_only_workspace_is_never_started(self):
         """THE REGRESSION: prepare_cell.sh:107 writes PREPARED, ledger.parse
         counts it, so events == 1. `cli.py experiment prepare` seeds the whole matrix and
         launches nothing — every one of those would have been respawned as a
         paid agent run."""
-        self.assertTrue(runs.state.never_started(
+        self.assertTrue(runs.Cell.never_started(
             self.st(events=1, prepared=True, att=0)))
 
     def test_a_cell_that_logged_start_is_NOT_never_started(self):
         """Keeps the 2026-07-25 fix intact: an attempt that started but never
         finished has an empty ITER history, and counting history instead of
         events stranded six paused-then-crashed cells."""
-        self.assertFalse(runs.state.never_started(
+        self.assertFalse(runs.Cell.never_started(
             self.st(events=3, prepared=True, att=0)))
 
     def test_a_cell_with_a_judged_attempt_is_NOT_never_started(self):
-        self.assertFalse(runs.state.never_started(
+        self.assertFalse(runs.Cell.never_started(
             self.st(events=5, prepared=True, att=2)))
 
     def test_att_is_not_consulted(self):
         """cell_state reassigns att to the in-flight attempt NUMBER for
         non-terminal cells, so it is never 0. A predicate keyed on att == 0
         would be permanently false — the way this guard died the first time."""
-        self.assertTrue(runs.state.never_started(
+        self.assertTrue(runs.Cell.never_started(
             self.st(events=1, prepared=True, att=1)))
 
     def test_non_crashed_states_are_never_never_started(self):
         for state in ("RUNNING", "DONE", "PAUSED", "WAITING"):
             with self.subTest(state=state):
-                self.assertFalse(runs.state.never_started(
+                self.assertFalse(runs.Cell.never_started(
                     self.st(state=state, events=1, prepared=True)))
 
     def test_prepared_flag_is_required_not_just_a_single_event(self):
         """One event that is NOT the birth event means something happened."""
-        self.assertFalse(runs.state.never_started(
+        self.assertFalse(runs.Cell.never_started(
             self.st(events=1, prepared=False, att=0)))
 
 
@@ -94,7 +94,7 @@ class TestCellStateExposesPrepared(unittest.TestCase):
             (ws / "iterations.log").write_text(
                 f"{TS}\tPREPARED\t{ws.name}\tby=prepare_cell\n")
             (ws / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
-            st = runs.state.cell_state(ws, {}, set())
+            st = runs.host.cell_state(ws, {}, set())
         self.assertIsNotNone(st)
         self.assertTrue(st["prepared"])
         self.assertEqual(st["events"], 1)
@@ -102,7 +102,7 @@ class TestCellStateExposesPrepared(unittest.TestCase):
         # (cell_state:458, max(att + 1, 1)), not a count of judged attempts —
         # it is 1 here, never 0. never_started must not test it.
         self.assertEqual(st["att"], 1)
-        self.assertTrue(runs.state.never_started(st))
+        self.assertTrue(runs.Cell.never_started(st))
 
     def test_a_workspace_with_attempts_reports_not_only_prepared(self):
         with tempfile.TemporaryDirectory() as d, \
@@ -114,10 +114,10 @@ class TestCellStateExposesPrepared(unittest.TestCase):
                 f"{TS}\tSTART\tattempt=1\n"
                 f"{TS}\tITER\tfail\tattempt=1 stage=scaling\n")
             (ws / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
-            st = runs.state.cell_state(ws, {}, set())
+            st = runs.host.cell_state(ws, {}, set())
         self.assertTrue(st["prepared"])
         self.assertEqual(st["att"], 1)
-        self.assertFalse(runs.state.never_started(st))
+        self.assertFalse(runs.Cell.never_started(st))
 
 
 class TestAgentProgress(unittest.TestCase):
@@ -266,7 +266,7 @@ class TestNoEditReachesTheStatus(unittest.TestCase):
             (ws / "artifacts").mkdir(parents=True)
             (ws / "iterations.log").write_text("".join(l + "\n" for l in lines))
             (ws / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
-            return runs.state.cell_state(ws, {}, set())
+            return runs.host.cell_state(ws, {}, set())
 
     def test_the_count_and_last_detail_are_exposed(self):
         st = self._state(
@@ -409,7 +409,7 @@ class TestTheModelLearnsAboutKilledLoops(unittest.TestCase):
         # emitting there wrote one legal Crash and an illegal one every sweep
         # after it. The two survivors kill the loop themselves, which is what
         # makes their Crash both true and once-only.
-        src = (Path(ROOT) / "fae" / "driver" / "supervise.py").read_text()
+        src = (Path(ROOT) / "fae" / "driver" / "conduct" / "supervise.py").read_text()
         body = src[src.index("def supervise_pass"):]
         emits = re.findall(r'\.crashed\("([^"]+)"\)', body)
         self.assertEqual(sorted(emits), ["limit-wall", "silent-hang"])
@@ -580,7 +580,7 @@ class SweepCase(unittest.TestCase):
             # forever and the full grace is burned in a unit test.
             mock.patch.object(Cell, "_gone", return_value=True),
             mock.patch.object(runs.common, "WS", self.ws),
-            mock.patch.object(runs.state, "loop_pids", return_value={}),
+            mock.patch.object(runs.host, "loop_pids", return_value={}),
         ]
         for p in self.patches:
             p.start()
@@ -593,11 +593,11 @@ class SweepCase(unittest.TestCase):
         doc.update(ledger_doc or {})
         # only the cell dir is a cell: the plane lives under WS and cell_state
         # returns None for it in production
-        with mock.patch.object(runs.state, "cell_state",
+        with mock.patch.object(runs.host, "cell_state",
                                side_effect=lambda w, *a: st
                                if Path(w).name == self.cid else None), \
-             mock.patch.object(runs.state, "loop_parents", return_value=live or {}), \
-             mock.patch.object(runs.state, "containers", return_value=set(boxes)), \
+             mock.patch.object(runs.host, "loop_parents", return_value=live or {}), \
+             mock.patch.object(runs.host, "containers", return_value=set(boxes)), \
              mock.patch.object(runs.ledger, "parse", return_value=doc), \
              mock.patch.object(runs.common, "sh", return_value=ps), \
              mock.patch.object(runs.taint, "_validate_cell",
@@ -834,9 +834,9 @@ class TestAStaleArmSlotSidecarIsNotAZombieForever(unittest.TestCase):
         (slots / "slot-2.holder").write_text("sonnet_high_alpha_apidocs_T1_r6 54638 1\n")
         self.patches = [
             mock.patch.object(runs.common, "WS", self.ws),
-            mock.patch.object(runs.state, "loop_parents", return_value={}),
+            mock.patch.object(runs.host, "loop_parents", return_value={}),
             mock.patch.object(runs.zombies, "_leaked_lock_holders", return_value=[]),
-            mock.patch.object(runs.state, "containers", return_value=[]),
+            mock.patch.object(runs.host, "containers", return_value=[]),
             mock.patch.object(runs.zombies, "_cluster_map", return_value={}),
             mock.patch.object(runs.zombies, "_strays", return_value=[]),
             mock.patch.object(runs.queues_module.Queues, "slot_held", return_value=False),
@@ -935,8 +935,8 @@ class TestArmStuckMeasuresProgressNotLiveness(SweepCase):
     def _sweep_arm(self, *, slot_age, phase_age, phase="verify"):
         st = self.st(state="RUNNING", why="agent")
         st["variant"] = "alpha_apidocs"
-        with mock.patch.object(runs.state, "_arm_slot_of", return_value=slot_age), \
-             mock.patch.object(runs.state, "heartbeat",
+        with mock.patch.object(runs.supervise, "_arm_slot_of", return_value=slot_age), \
+             mock.patch.object(runs.host, "heartbeat",
                                return_value={"phase_age": phase_age,
                                              "age": 1.0, "phase": phase}), \
              mock.patch.object(Cell, "take_down") as td, \
@@ -955,7 +955,7 @@ class TestArmStuckMeasuresProgressNotLiveness(SweepCase):
         """The wait phases are someone else's time: the verify-lock holder,
         a provider wall. A 30-minute queue behind six-arrangement greens is
         the fleet's normal shape, not a wedge."""
-        for phase in sorted(runs.state.WAIT_PHASES):
+        for phase in sorted(runs.supervise.WAIT_PHASES):
             with self.subTest(phase=phase):
                 td = self._sweep_arm(slot_age=runs.supervise.ARM_HELD_ALERT_S * 3,
                                      phase_age=runs.supervise.ARM_STALL_S * 3, phase=phase)
@@ -1005,7 +1005,7 @@ class TestLeakedLockHolders(unittest.TestCase):
                                    if a[0] == "pgrep" else ""), \
              mock.patch.object(runs.zombies, "_fd_holders", return_value=fd_pids), \
              mock.patch.object(runs.zombies, "_pid_alive", return_value=alive), \
-             mock.patch.object(runs.state, "loop_parents", return_value=loops or {}):
+             mock.patch.object(runs.host, "loop_parents", return_value=loops or {}):
             return runs.zombies._leaked_lock_holders()
 
     def test_a_driver_holding_the_lock_from_another_root_is_not_a_leak(self):
@@ -1020,7 +1020,7 @@ class TestLeakedLockHolders(unittest.TestCase):
              mock.patch.object(runs.common, "sh", side_effect=ps), \
              mock.patch.object(runs.zombies, "_fd_holders", return_value=[4242]), \
              mock.patch.object(runs.zombies, "_pid_alive", return_value=True), \
-             mock.patch.object(runs.state, "loop_parents", return_value={}):
+             mock.patch.object(runs.host, "loop_parents", return_value={}):
             self.assertEqual(runs.zombies._leaked_lock_holders(), [])
 
     def test_a_held_lock_with_nothing_entitled_is_a_leak(self):
@@ -1097,10 +1097,10 @@ class TestTheGateColumnIsLiveDuringAVerify(unittest.TestCase):
             (ws / "iterations.log").write_text("")
             with mock.patch.object(runs.ledger, "parse", return_value=led), \
                  mock.patch.object(runs.ledger, "hist", return_value=[]), \
-                 mock.patch.object(runs.state, "heartbeat",
+                 mock.patch.object(runs.host, "heartbeat",
                                    return_value={"phase": phase, "pid": 1,
                                                  "phase_age": 5, "attempt": "2"}):
-                st = runs.state.cell_state(ws, {}, set())
+                st = runs.host.cell_state(ws, {}, set())
         return st["shape"] if st else None
 
     def test_mid_verify_shows_the_running_attempts_count(self):

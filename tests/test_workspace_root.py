@@ -44,7 +44,7 @@ class TestThePythonOrchestratorKnob(unittest.TestCase):
              mock.patch.object(runs.common, "sh", return_value=(
                 "77 tee -a /x/ws-test.nosync/opus_high_beta_apidocs_T1_r99/run_cell.log\n"
                 "78 tee -a /x/workspaces.nosync/opus_high_beta_apidocs_T1_r1/run_cell.log\n")):
-            pids = runs.state.loop_pids()
+            pids = runs.host.loop_pids()
         # this invocation's root is seen; the OTHER root's loop is not claimed
         self.assertEqual(pids, {77: "opus_high_beta_apidocs_T1_r99"})
 

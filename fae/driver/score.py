@@ -19,7 +19,7 @@ import ujson as json
 from fae.cell.cell import Busy
 from fae.driver import common
 from fae.driver import render
-from fae.driver import state
+from fae.driver.conduct import Conduct
 from fae.driver import validate as taint
 
 
@@ -49,10 +49,10 @@ def validate(args, quiet=False):
     # One docker-ps snapshot for the whole sweep: a per-cell call made this
     # loop O(cells) docker round-trips, and a DONE cell's container state
     # cannot change mid-sweep.
-    boxes = state.containers()
+    boxes = Conduct.containers()
     for cid in common.select_cells(getattr(args, "selector", None) or "all"):
         ws = common.WS / cid
-        st = state.cell_state(ws, {}, boxes)
+        st = Conduct.cell_state(ws, {}, boxes)
         if not st or st["state"] != "DONE" or st["why"] == "cancelled":
             continue
         try:
@@ -109,7 +109,7 @@ def score(args):
     sys.stdout.flush()
 
     cids = [getattr(args, "cell")] if getattr(args, "cell", None) else common.select_cells("all")
-    boxes = state.containers()
+    boxes = Conduct.containers()
     # This phase used to print NOTHING: 50+ subprocesses ran silently under a
     # bare header, so the only evidence they had worked was the aggregate table
     # appearing afterwards. A cell whose scoring failed left a traceback loose
@@ -122,7 +122,7 @@ def score(args):
     # scoreboard from stale score.json files.
     todo = []
     for cid in cids:
-        st = state.cell_state(common.WS / cid, {}, boxes)
+        st = Conduct.cell_state(common.WS / cid, {}, boxes)
         if st and st["state"] == "DONE" and st["why"] != "cancelled":
             todo.append(cid)
 

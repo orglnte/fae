@@ -50,6 +50,10 @@ class Phase(str, Enum):
     VERIFY = "verify"
 
 
+# The phases a loop declares while parked on something it will leave by
+# itself (the verify lock, a provider wall), as opposed to working.
+WAIT_PHASES = frozenset({Phase.VERIFY_LOCK.value, Phase.LIMIT.value})
+
 PHASE_TO_LOOP = {
     Phase.SETUP: Loop.AGENT,         # admitted: holds its slots while its infra comes up
     Phase.AGENT: Loop.AGENT,

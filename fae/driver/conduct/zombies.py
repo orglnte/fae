@@ -23,8 +23,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fae.driver import common, state
-from fae.driver.common import parse_cell_id, awake_age, mutex
+from fae.cell.cell import Cell
+from fae.driver import common
+from fae.driver.common import parse_cell_id, awake_age
+
+from . import host
 
 ZOMBIE_GRACE_S = int(os.environ.get("ZOMBIE_GRACE_S", 600))      # owned, recent
 
@@ -200,17 +203,14 @@ def _leaked_lock_holders():
     reads a live `experiment verb` verify as a leak and reaps it mid-run.
     """
     out = []
-    entitled = {
-        "rig-lock": lambda: bool(state.loop_parents()) or _verify_holders_alive(),
-        "verify-lock": lambda: bool(state.loop_parents()) or _verify_holders_alive(),
-    }
-    for name, is_entitled_alive in entitled.items():
-        p = common.LOCKS / name
-        if not p.exists() or not mutex.probe_held(p) or is_entitled_alive():
+    for name in ("rig", "verify"):
+        if not Cell.shared_lock_held(common.LOCKS, name) \
+                or host.loop_parents() or _verify_holders_alive():
             continue
+        p = Cell.shared_lock(common.LOCKS, name)
         for pid in _fd_holders(p):
             if _pid_alive(pid) and not _is_driver_pid(pid):
-                out.append((name, pid))
+                out.append((p.name, pid))
     return out
 
 
@@ -227,13 +227,14 @@ def _is_driver_pid(pid):
 def find_zombies():
     """[(kind, ident, owner, note)] — resources with no live owner, past
     grace. Read-only; reap_zombies() acts."""
-    live = state.loop_parents()
+    live = host.loop_parents()
     zs = []
     for lock, pid in _leaked_lock_holders():
-        zs.append(("lockholder", f"{pid}:{lock}", mutex.holder_name(common.LOCKS / lock) or "?",
+        who = Cell.shared_lock_holder(common.LOCKS, lock[:-len("-lock")])
+        zs.append(("lockholder", f"{pid}:{lock}", who or "?",
                    f"holds {lock} with no process entitled to it"))
     prefixes = _prefixes()
-    for name in state.containers():
+    for name in host.containers():
         for pfx in [p for k, p in prefixes if k == "container"]:
             if not name.startswith(pfx):
                 continue
@@ -284,7 +285,7 @@ def find_zombies():
             continue              # young or unknown: a verify may be between
                                   # creating it and starting its store
         zs.append(("network", net, cid, "no live loop"))
-    for pid, cid in state.loop_pids().items():
+    for pid, cid in host.loop_pids().items():
         try:
             ppid = int(common.sh(["ps", "-o", "ppid=", "-p", str(pid)]).strip() or 0)
         except ValueError:
@@ -294,8 +295,8 @@ def find_zombies():
     for ws in _workspace_entries():
         if not ws.is_dir():
             continue
-        c = state._cell(ws)
-        if c.heartbeat() is not None and state.heartbeat(ws, c) is None:
+        c = common.cell(ws.name, workspaces=ws.parent)
+        if c.heartbeat() is not None and host.heartbeat(ws, c) is None:
             zs.append(("heartbeat", str(ws), ws.name, "corpse file"))
     # No stale-lock class: a lock is held by fd, so the kernel frees it when
     # its holder dies. What can outlive a holder is INFRA, and an arm
@@ -352,7 +353,7 @@ def reap_zombies(zs):
                 # Re-confirm the corpse: a new loop may have written a fresh
                 # .loop in the interval, and deleting a LIVE heartbeat costs
                 # the phase/WAITING display for the rest of the attempt.
-                if state.heartbeat(Path(ident)) is not None:
+                if host.heartbeat(Path(ident)) is not None:
                     done.append(f"skipped heartbeat {ident} — beating again")
                     continue
                 ws = Path(ident)
@@ -363,7 +364,7 @@ def reap_zombies(zs):
                 # Re-confirm at reap time: gathering and acting are minutes
                 # apart, and a pid can be recycled or the cell resumed since.
                 pid_s, _, cid = ident.partition(":")
-                if (kind, ident, cid) not in _strays(state.loop_parents()):
+                if (kind, ident, cid) not in _strays(host.loop_parents()):
                     done.append(f"skipped process {ident} — live again or "
                                 f"pid recycled")
                     continue

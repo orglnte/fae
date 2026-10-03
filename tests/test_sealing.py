@@ -198,7 +198,7 @@ class TestTheSealCommand(SealedFleetTestCase):
     def test_a_cell_with_a_live_loop_seals_itself_instead(self):
         d = self.cell("sonnet_high_beta_apidocs_T1_r5", self.GREEN)
         (d / ".loop").write_text("pid=1 cid=x phase=verify attempt=1 ts=1\n")
-        with mock.patch.object(runs.state, "loop_parents",
+        with mock.patch.object(runs.host, "loop_parents",
                                return_value={d.name: 4242}):
             runs.cli.seal(self.args(apply=True))
         self.assertFalse((d / ".sealed").exists())

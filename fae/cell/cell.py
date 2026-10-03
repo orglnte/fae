@@ -44,7 +44,7 @@ from . import rig as _rig
 from . import variants as _variants
 from .checkpoints import Checkpoints
 from .surface import Surface, authorable
-from .fsm import (ENABLED, LOOP_CLEARED_BY, LOOP_UNCHANGED_BY, PHASE_TO_LOOP,
+from .fsm import (ENABLED, LOOP_CLEARED_BY, LOOP_UNCHANGED_BY, PHASE_TO_LOOP, WAIT_PHASES,
                   IllegalTransition, Loop, Phase, Sealed, State, T, step)
 from .verify import (RUN_OUT, Ctx, Verdict, _mutex_module as _load_mutex, run_verifier,
                      take_events)
@@ -519,10 +519,16 @@ class Cell:
         """Quarantined for a human (flag)."""
         return (self.ws / "reconcile.flagged").exists()
 
+    @property
+    def pause_reason(self):
+        """The reason of the stop request standing on the cell, or None."""
+        r = self.pause_request()
+        return r.reason if r else None
+
     def heartbeat(self):
         """The loop's declared heartbeat (.loop) as KEY -> value, with its
         file's `mtime`; None when there is none. Whether its pid is a live
-        loop is the reader's question."""
+        loop is the reader's question (live_heartbeat)."""
         f = self.ws / ".loop"
         try:
             kv = dict(l.split("=", 1) for l in f.read_text().split() if "=" in l)
@@ -530,6 +536,191 @@ class Cell:
         except OSError:
             return None
         return kv
+
+    # --- the cell's status, as status shows it -----------------------------
+    # Three axes: the OUTCOME (the ledger's verdict), the INTENT (what an
+    # operator or the run declared: the markers), the LIVENESS (what the loop
+    # declares and the host shows). Facts about the host — which pids are
+    # cell loops, whether a loop is seen, whether the cell's spec waits in its
+    # lane — are its caller's (the Conduct's host view) to pass in.
+
+    WAIT_REASON_MAX = 300
+
+    def live_heartbeat(self, loop_pids, age=None):
+        """The loop's DECLARED liveness — dict(pid, phase, attempt, age,
+        phase_age) — when the pid it declares is a live cell loop (in
+        `loop_pids`) and the file names this cell; else None: a file whose pid
+        is no longer a loop is a corpse's. `age(t)` turns a wall stamp into
+        seconds (the host's, which excludes its sleep)."""
+        age = age or (lambda t: time.time() - t)
+        kv = self.heartbeat()
+        try:
+            pid = int(kv["pid"])
+        except (TypeError, ValueError, KeyError):
+            return None
+        if pid not in loop_pids:
+            return None
+        if kv.get("cid") not in (None, self.cid):
+            return None   # a recycled pid validated another cell's corpse file
+        kv["pid"], kv["age"] = pid, age(kv.pop("mtime"))
+        # How long this phase has been current: the ticker rewrites .loop to keep
+        # its mtime young, so only `since` (carried while the phase holds) says it.
+        try:
+            kv["phase_age"] = age(float(kv["since"]))
+        except (KeyError, TypeError, ValueError):
+            kv["phase_age"] = None
+        return kv
+
+    def wait_reason(self):
+        """Why the loop waits on a provider: the newest wait snapshot's fault
+        line (by mtime — attempt numbers sort lexically and the HHMMSS suffix
+        wraps at midnight), "" when there is none."""
+        snaps = sorted(self.ws.glob("agent.attempt-*.wait-*.log"),
+                       key=lambda p: p.stat().st_mtime)
+        if not snaps:
+            return ""
+        return faults.reason(snaps[-1].read_text(errors="replace"))[:self.WAIT_REASON_MAX]
+
+    def declared_intent(self):
+        """(intent, why): cancel | pause | run, from the markers somebody wrote
+        on purpose, so a deliberate stop is never mistaken for a crash."""
+        if self.cancelled:
+            return "cancel", "cancelled"
+        r = self.pause_request()
+        if r and r.reason:
+            return "pause", r.reason
+        return "run", ""
+
+    def liveness(self, hb, looping, queued):
+        """(state, why, detail) from mechanism alone — no verdict, no marker:
+        the live heartbeat `hb` when there is one; else a loop the host sees
+        (`looping()`) is working between exec boundaries, and no loop is a
+        crash, which admission resumes when `queued()` says its spec waits."""
+        if hb:
+            phase = hb.get("phase", "?")
+            if phase in WAIT_PHASES:
+                return "WAITING", phase, self.wait_reason() if phase == "limit" else ""
+            return "RUNNING", phase, ""
+        if looping():
+            return "RUNNING", "idle", ""
+        if queued():
+            return "CRASHED", "loop", "no loop — queued, admission resumes it"
+        return "CRASHED", "loop", "no loop — resume: cli.py cell resume <cid>"
+
+    @staticmethod
+    def never_started(st):
+        """A prepared workspace that was never launched (status `st`): not part
+        of the run yet, so nothing respawns it. Never launched means the ledger
+        holds nothing but its birth event (v1: no event; v2: PREPARED only); a
+        cell whose attempt began has more. Not `att`, which status sets to the
+        in-flight attempt number for an open cell."""
+        if st["state"] != "CRASHED":
+            return False
+        if st["events"] == 0:
+            return True
+        return bool(st.get("prepared")) and st["events"] == 1
+
+    def status(self, parsed, gate_n, hb, looping, queued):
+        """The cell as status shows it: a dict (state, why, detail, gate,
+        history, ...). `parsed` is its id's (agent, variant, task, rep), `hb`
+        its live heartbeat, `looping()` and `queued()` the host's facts
+        (liveness). Precedence between the axes is decided here only:
+        cancel > outcome > pause > liveness."""
+        agent, variant, task, rep = parsed
+        L = self.read_ledger(gate_n=gate_n)
+        env = self.env
+        budget = env.get("ATTEMPT_BUDGET") if env.get("ATTEMPT_BUDGET", "").isdigit() else "?"
+        st = dict(cid=self.cid, agent=agent, variant=variant, task=task, rep=int(rep),
+                  att=L["att"], budget=budget, hist=self.history(L), events=L["events"],
+                  agent_model=env.get("AGENT_MODEL") or "-", prepared=L["prepared"],
+                  noedit=L["noedit"], noedit_last=L["noedit_last"],
+                  alerts=L["alerts"], alerts_open=L.get("alerts_open", 0),
+                  alert_last=L["alert_last"], detail="", green_at=None, why="", live="-",
+                  shape=(f"{L['rev_pass']}/{L['gate_n']}" if L["reverify_active"]
+                         else f"{L['gate']}/{L['gate_n']}" if L["gate"] is not None
+                         else "-"))
+        verifying = bool(hb) and hb.get("phase") == "verify"
+        met = self.read_metrics() if verifying else {}
+        # GATE mid-verify: the arrangements passed so far in the attempt running
+        # now, starred (a count in progress); X when its e2e stage failed.
+        if verifying and not L["reverify_active"]:
+            st["shape"] = f"{L['live_shape_pass']}/{L['gate_n']}*" + ("X" if self.e2e_failed() else "")
+        try:
+            st["taint"] = json.loads(self.read_derived("validation.json") or "{}").get(
+                "verdict") == "TAINTED"
+        except json.JSONDecodeError:
+            st["taint"] = False
+        intent, why = self.declared_intent()
+        if intent == "cancel":
+            st["state"], st["why"] = "DONE", "cancelled"
+            return self._noedit_detail(st)
+        if L["verdict"] == "green":
+            st["state"], st["why"], st["green_at"] = "DONE", "green", L["green_at"]
+            return self._noedit_detail(st)
+        if L["verdict"] == "revoked":
+            st["state"], st["why"] = "DONE", "revoked"
+            st["detail"] = "green revoked by the 6-shape gate"
+            return self._noedit_detail(st)
+        if L["verdict"] == "failed":
+            st["state"], st["why"] = "DONE", "failed"
+            try:
+                fails = [l for l in (self.ws / "verify.log").read_text().splitlines()
+                         if "FAIL[" in l]
+                st["detail"] = fails[-1].split("FAIL", 1)[-1][:70] if fails else ""
+            except OSError:
+                pass
+            return self._noedit_detail(st)
+        st["att"] = max(L["att"] + (0 if L["last_ev"] == "ITER" else 1), 1)
+        live = self.liveness(hb, looping, queued)
+        # LIVE: e2e OK/NOK and the in-flight gate's progress, only while a verify
+        # runs — metrics.json is rewritten per arrangement, stale outside it.
+        if verifying and met.get("e2e_total"):
+            st["live"] = (f"e2e:{'OK' if met.get('e2e_pass') == met['e2e_total'] else 'NOK'} "
+                          f"{L['live_shape_pass']}/{L['gate_n']}")
+        if intent == "pause" and live[0] == "CRASHED":
+            st["state"], st["why"] = "PAUSED", why        # asked to stop, and stopped
+            return self._noedit_detail(st)
+        if L["last_ev"] == "HALT" and live[0] == "CRASHED":
+            # the rig broke under it — no attempt burned; the cause routes it
+            st["state"] = "CRASHED"
+            st["why"] = "infra" if "infra" in L["halt_cause"] else "agent"
+            st["detail"] = L["halt_cause"]
+            return self._noedit_detail(st)
+        st["state"], st["why"], st["detail"] = live
+        if intent == "pause":
+            st["detail"] = (st["detail"] + "  (pause pending)").strip()
+        return self._noedit_detail(st)
+
+    def e2e_failed(self):
+        """The arrangement in flight failed its e2e stage: metrics.json is
+        rewritten per arrangement, so this reads the current one only while a
+        verify runs."""
+        met = self.read_metrics()
+        return bool(met.get("e2e_total")) and met.get("e2e_pass") != met.get("e2e_total")
+
+    @staticmethod
+    def _noedit_detail(st):
+        """NOEDIT fills the detail column when nothing more urgent claimed it."""
+        if not st["detail"] and st["noedit"]:
+            st["detail"] = f"NOEDIT ×{st['noedit']} — investigate"
+        return st
+
+    @staticmethod
+    def shared_lock(locks, name):
+        """The fleet-wide lock `name` (rig, verify) under `locks`."""
+        return Path(locks) / f"{name}-lock"
+
+    @classmethod
+    def shared_lock_held(cls, locks, name):
+        """Is the fleet-wide lock `name` held now? The kernel says."""
+        p = cls.shared_lock(locks, name)
+        return p.exists() and _mutex.probe_held(p)
+
+    @classmethod
+    def shared_lock_holder(cls, locks, name):
+        """The cell its holder note names, or "": who took it last — a note
+        outlives its holder's release, so ask shared_lock_held whether."""
+        return _mutex.holder_name(cls.shared_lock(locks, name)) or ""
 
     def intent(self):
         """run | paused | killed: the last of EPOCH, Pause, Resume, Retire and
@@ -1140,8 +1331,8 @@ class Cell:
         process's fd around the verifier subprocess, which inherits no fd.
         Returns the open file (closing it is the release), or None past the
         wait deadline or on an operator pause."""
-        d = Path(self.conf.get("RIG_LOCK_DIR") or self.locks / "rig-lock") if name == "rig" \
-            else self.locks / f"{name}-lock"
+        d = Path(self.conf.get("RIG_LOCK_DIR") or self.shared_lock(self.locks, "rig")) \
+            if name == "rig" else self.shared_lock(self.locks, name)
         d.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.time() + int(self.conf.get("RIG_LOCK_WAIT_S") or 3600)
         fh = _mutex.open_lock(d)
@@ -1593,8 +1784,7 @@ class Cell:
         checked both while queued and right after winning, so the lock is
         never held by a cell that intends to exit.
         """
-        d = Path(self.conf.get("VERIFY_LOCK_DIR")
-                 or self.locks / "verify-lock")
+        d = Path(self.conf.get("VERIFY_LOCK_DIR") or self.shared_lock(self.locks, "verify"))
         d.parent.mkdir(parents=True, exist_ok=True)
         fh = _mutex.open_lock(d)
         while not _mutex.try_fd(fh):

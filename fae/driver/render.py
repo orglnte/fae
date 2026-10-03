@@ -4,7 +4,8 @@ backlog summary they all fold in.
 render() is the one table-builder every view (status, watch, monitor) prints
 through — a single source keeps the flat and grouped layouts consistent.
 queued_summary/_pending_kind read the backlog (fae/queues.py) and resolve
-each pending spec's state (fae/driver/state.py) into the QUEUED section's tags.
+each pending spec's cell (its status, through the Conduct's view) into the
+QUEUED section's tags.
 """
 from __future__ import annotations
 
@@ -14,13 +15,30 @@ import time
 import ujson as json
 from datetime import datetime, timezone
 
+from fae.cell.cell import Cell
+from fae.cell.fsm import WAIT_PHASES
 from fae.driver import common
-from fae.driver import state
-from fae.driver import zombies
 from fae.driver.common import faults
+from fae.driver.conduct import Conduct
 
 
 # --- tables -------------------------------------------------------------------
+
+def _dur(secs):
+    """Compact elapsed time for a table cell: 45s, 12m, 3h20m, 2d4h."""
+    if secs is None:
+        return "-"
+    s = int(max(0, secs))
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m"
+    if s < 86400:
+        h, m = divmod(s // 60, 60)
+        return f"{h}h{m:02d}m" if m else f"{h}h"
+    d, h = divmod(s // 3600, 24)
+    return f"{d}d{h:02d}h" if h else f"{d}d"
+
 
 def fmt_table(rows, hdr):
     rows = [hdr] + rows
@@ -52,16 +70,17 @@ def _pending_kind(cid, live_loops):
     ws = common.WS / cid
     if not ws.is_dir():
         return "fresh"
-    if state.flagged(cid):
+    c = common.cell(cid)
+    if c.flagged:
         return "flagged"
-    if state.pause_lock(cid):
+    if c.pause_reason:
         return "paused"
     if cid in live_loops:
         return "running"
-    st = state.cell_state(ws, {}, set())
+    st = Conduct.cell_state(ws)
     if st and st["state"] == "DONE":
         return "done"
-    if st and state.never_started(st):
+    if st and Cell.never_started(st):
         return "prepared"
     return "interrupted"
 
@@ -77,7 +96,7 @@ def queued_summary():
     qs = common.queues()
     rows, total = [], 0
     kinds = collections.Counter()
-    live_loops = set(state.loop_parents())
+    live_loops = set(Conduct.loop_parents())
     # A parked lane is the operator's pause (`experiment pause M`): its specs are
     # untouched, so they are still backlog — shown here tagged rather than
     # vanishing from the fleet picture.
@@ -128,7 +147,7 @@ def queued_summary():
 def requeued(s):
     """A crashed cell whose spec waits in its lane: admission restarts it,
     nobody needs to act."""
-    return s["state"] == "CRASHED" and state._queued(s["cid"])
+    return s["state"] == "CRASHED" and Conduct.queued(s["cid"])
 
 
 def display_state(s):
@@ -139,8 +158,8 @@ def display_state(s):
 
 
 def render(flat=False, running_only=False):
-    states, loops, boxes = state.all_states(running_only)
-    n_loops = len(state.loop_parents())   # real loops — tees outlive theirs
+    states, loops, boxes = Conduct.all_states(running_only)
+    n_loops = len(Conduct.loop_parents())   # real loops — tees outlive theirs
     out = []
     if flat:
         rows = [(s["cid"],
@@ -176,12 +195,12 @@ def render(flat=False, running_only=False):
             # environment. loop_parents' own docstring says that text carries
             # agent credentials and must not be printed, and run_cell_pids
             # deliberately avoids -E for exactly that reason.)
-            hb = state.heartbeat(common.WS / s["cid"])
+            hb = Conduct.heartbeat(common.WS / s["cid"])
             phase = hb.get("phase") if hb else ""
             if s["state"] == "RUNNING" or (s["state"] == "WAITING" and phase not in ("", None)):
                 running_raw.append((s["cid"], vshort(s["agent"], s["agent_model"]),
                                     phase or s["why"],
-                                    state._dur(hb.get("phase_age") if hb else None),
+                                    _dur(hb.get("phase_age") if hb else None),
                                     f"{s['att']}/{s['budget']}", s["shape"],
                                     _tail_hist(s["hist"], 40), s["detail"]))
             else:
@@ -217,7 +236,7 @@ def render(flat=False, running_only=False):
             phase, hist = r[2], r[6]
             # BLOCK is the phase's kind: YES while the cell waits.
             running.append((str(i+1), r[0], r[1], r[2], r[3], r[4], r[5],
-                            hist[:40], "YES" if phase in state.WAIT_PHASES else "NO"))
+                            hist[:40], "YES" if phase in WAIT_PHASES else "NO"))
         greens = [r for r in other if r[4].startswith("DONE·green")]
         other = [r for r in other if not r[4].startswith("DONE·green")]
         other.sort(key=lambda r: (r[0], r[1], r[2]))
@@ -236,7 +255,7 @@ def render(flat=False, running_only=False):
                    if running else "  (none)")
         triage = [f"  ! {cid_to_id.get(cid, cid)}: {why}" for cid, why in attention]
         triage += [f"  z {kind:<10} {ident}  owner={owner}  {note}"
-                   for kind, ident, owner, note in zombies.find_zombies()]
+                   for kind, ident, owner, note in Conduct.find_zombies()]
         if triage:
             out.append("\n— TRIAGE (attention + zombies) " + "—" * 34)
             out.extend(triage)
@@ -248,7 +267,6 @@ def render(flat=False, running_only=False):
         if qsec:
             out.extend(qsec)
         live = sum(1 for n in boxes if n.startswith(common.AGENT_CONTAINER_PREFIX))
-        from fae.driver.conduct import Conduct
         conduct_s = Conduct().run_line()
         out.append(f"\n{live} containers, {n_loops} loops, {conduct_s}, {datetime.now(timezone.utc):%H:%M:%S}Z")
         _mp = common.mem_pressure()
@@ -274,7 +292,7 @@ def watch(args):
     is the operator's deliberate path."""
     try:
         while True:
-            zs = zombies.find_zombies()
+            zs = Conduct.find_zombies()
             os.system("clear")
             print(render(args.flat, getattr(args, "running_only", False)))
             if zs:
@@ -308,7 +326,7 @@ def monitor(args):
     common.CONDUCT.mkdir(parents=True, exist_ok=True)
     while True:
         try:
-            states, _, _ = state.all_states()
+            states, _, _ = Conduct.all_states()
             walls = []
             for s in states:
                 if not (s["state"] == "WAITING" and s["why"] == "limit"):
@@ -321,7 +339,7 @@ def monitor(args):
                 walls.append((kind, s["cid"], s["detail"], when))
             os.system("clear")
             print("MONITOR (passive — reports walls; Ctrl-C to detach, runs continue)")
-            for l in zombies.janitor_lines():
+            for l in Conduct.janitor_lines():
                 print(l)
             for kind, cid, detail, when in walls:
                 if kind == "AUTH":

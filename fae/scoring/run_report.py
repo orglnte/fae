@@ -12,7 +12,8 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from fae.driver import common, state
+from fae.driver import common
+from fae.driver.conduct import Conduct
 
 
 def run_start() -> float | None:
@@ -54,10 +55,10 @@ def collect(since: float | None) -> tuple[dict, list]:
         if not p:
             continue
         agent, variant, _task, rep = p
-        c = state._cell(d)
+        c = common.cell(d.name, workspaces=d.parent)
         if c.heartbeat() is not None and not c.sealed:
             L = c.read_ledger(gate_n=gate_n)
-            hb = state.heartbeat(d, c)
+            hb = Conduct.heartbeat(d, c)
             live.append((agent, variant, int(rep), L["att"],
                          (hb.get("phase") if hb else "") or "?"))
             continue

@@ -32,18 +32,18 @@ class TestNeverStarted(unittest.TestCase):
     is audit finding 13."""
 
     def test_zero_events_and_crashed_is_never_started(self):
-        self.assertTrue(runs.state.never_started({"events": 0, "state": "CRASHED"}))
+        self.assertTrue(runs.Cell.never_started({"events": 0, "state": "CRASHED"}))
 
     def test_events_present_means_it_started(self):
         """A cell whose attempt 1 logged START but never finished also has an
         empty ITER history — counting history instead of events stranded six
         paused-then-crashed cells as 'never started' (2026-07-25)."""
-        self.assertFalse(runs.state.never_started({"events": 3, "state": "CRASHED"}))
+        self.assertFalse(runs.Cell.never_started({"events": 3, "state": "CRASHED"}))
 
     def test_non_crashed_states_are_never_never_started(self):
         for state in ("RUNNING", "DONE", "PAUSED"):
             with self.subTest(state=state):
-                self.assertFalse(runs.state.never_started({"events": 0, "state": state}))
+                self.assertFalse(runs.Cell.never_started({"events": 0, "state": state}))
 
 
 class TestParseReset(unittest.TestCase):

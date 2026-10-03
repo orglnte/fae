@@ -75,7 +75,7 @@ class TestTheToolContainer(unittest.TestCase):
         self.assertNotEqual(a[a.index("--name") + 1], b[b.index("--name") + 1])
 
     def test_the_reaper_knows_the_prefix(self):
-        from fae.driver import zombies
+        from fae.driver.conduct import zombies
         with mock.patch.object(zombies, "common") as c:
             c.AGENT_CONTAINER_PREFIX = "fae-agent-"
             c.definition.return_value.verifier_class.return_value.PREFIXES = {}

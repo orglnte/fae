@@ -15,7 +15,7 @@ from fae.cell.cell import Cell
 
 from _ctx import runs, OrchTmpCase, ROOT, patch_plane
 
-_PAUSE_LOCK = runs.state.pause_lock
+_PAUSE_REASON = runs.Cell.pause_reason
 
 
 class ConductCase(OrchTmpCase):
@@ -27,10 +27,11 @@ class ConductCase(OrchTmpCase):
             # per-pid conduct logs land in the tmp tree, not the repo
             mock.patch.dict(runs.os.environ,
                             {"CONDUCT_LOG_DIR": self._tmp.name}),
-            mock.patch.object(runs.state, "loop_parents", side_effect=lambda: dict(self.live)),
-            mock.patch.object(runs.state, "containers", return_value=set()),
+            mock.patch.object(runs.host, "loop_parents", side_effect=lambda: dict(self.live)),
+            mock.patch.object(runs.host, "containers", return_value=set()),
             mock.patch.object(Cell, "prestart_clean"),
-            mock.patch.object(runs.state, "pause_lock", side_effect=lambda cid: None),
+            mock.patch.object(runs.Cell, "pause_reason", new_callable=mock.PropertyMock,
+                              return_value=None),
             mock.patch.object(runs.conduct.Conduct, "_spawn", side_effect=self._spawn),
             mock.patch.object(runs.time, "sleep", self._tick),
         ]
@@ -172,7 +173,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         runs.queues.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         self._done_cell(cid)
-        with mock.patch.object(runs.state, "containers", return_value=set()):
+        with mock.patch.object(runs.host, "containers", return_value=set()):
             runs.supervise._retire_finished_specs()
         self.assertEqual(runs.queues.lane_specs(m), [])
         self.assertTrue((runs.common.QUEUES / "done" / m / f"{cid}.json").exists())
@@ -187,7 +188,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         (d / "iterations.log").write_text(
             "2026-08-15T09:00:00Z\tITER\tfail\tattempt=1 stage=scaling\n")
         (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
-        with mock.patch.object(runs.state, "containers", return_value=set()):
+        with mock.patch.object(runs.host, "containers", return_value=set()):
             runs.supervise._retire_finished_specs()
         self.assertEqual(len(runs.queues.lane_specs(m)), 1)
 
@@ -201,8 +202,8 @@ class TestFinishedSpecsAreRetired(ConductCase):
         self._done_cell(cid)
         out = io.StringIO()
         with contextlib.redirect_stdout(out), \
-                mock.patch.object(runs.state, "loop_parents", return_value={}), \
-                mock.patch.object(runs.state, "containers", return_value=set()):
+                mock.patch.object(runs.host, "loop_parents", return_value={}), \
+                mock.patch.object(runs.host, "containers", return_value=set()):
             runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
         self.assertIn("spec retired", out.getvalue())
         self.assertEqual(runs.queues.lane_specs(m), [])
@@ -221,8 +222,8 @@ class TestFinishedSpecsAreRetired(ConductCase):
             "2026-08-15T09:00:00Z\tITER\tfail\tattempt=1 stage=scaling\n")
         (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
         with contextlib.redirect_stdout(io.StringIO()), \
-                mock.patch.object(runs.state, "loop_parents", return_value={}), \
-                mock.patch.object(runs.state, "containers", return_value=set()), \
+                mock.patch.object(runs.host, "loop_parents", return_value={}), \
+                mock.patch.object(runs.host, "containers", return_value=set()), \
                 mock.patch.object(Cell, "refresh_creds"), \
                 mock.patch.object(runs.conduct.Conduct, "_spawn", return_value=None):
             runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
@@ -240,8 +241,8 @@ class TestFinishedSpecsAreRetired(ConductCase):
             "2026-08-15T09:00:00Z\tITER\tfail\tattempt=1 stage=scaling\n")
         (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
         with contextlib.redirect_stdout(io.StringIO()), \
-                mock.patch.object(runs.state, "loop_parents", return_value={}), \
-                mock.patch.object(runs.state, "containers", return_value=set()), \
+                mock.patch.object(runs.host, "loop_parents", return_value={}), \
+                mock.patch.object(runs.host, "containers", return_value=set()), \
                 mock.patch.object(Cell, "refresh_creds"), \
                 mock.patch.object(runs.conduct.Conduct, "_spawn", return_value=3):
             runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
@@ -254,7 +255,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         runs.queues.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         self._done_cell(cid)
-        with mock.patch.object(runs.state, "containers", return_value=set()):
+        with mock.patch.object(runs.host, "containers", return_value=set()):
             runs.supervise._retire_finished_specs(dry=True)
         self.assertEqual(len(runs.queues.lane_specs(m)), 1)
 
@@ -381,10 +382,13 @@ class TestClaims(ConductCase):
         cid = "aaa_high_beta_apidocs_T1_r1"
         ws = self.ws / cid
         ws.mkdir(parents=True)
-        with mock.patch.object(runs.state, "live_loops", return_value=set()):
-            self.assertIn("cell resume", runs.state.cell_liveness(ws, set())[2])
+        def liveness():
+            return runs.common.cell(cid).liveness(None, lambda: False,
+                                                  lambda: runs.host.queued(cid))
+        with mock.patch.object(runs.host, "live_loops", return_value=set()):
+            self.assertIn("cell resume", liveness()[2])
             self.q("aaa", [self.spec()])
-            self.assertEqual(runs.state.cell_liveness(ws, set()),
+            self.assertEqual(liveness(),
                              ("CRASHED", "loop", "no loop — queued, admission resumes it"))
 
     def test_a_crashed_cell_with_no_spec_anywhere_is_told_to_resume(self):
@@ -411,7 +415,7 @@ class TestClaims(ConductCase):
         self.live[cid] = 4242
         self.per_agent = 1
         self.q("aaa", [self.spec()])
-        with mock.patch.object(runs.state, "cell_state",
+        with mock.patch.object(runs.host, "cell_state",
                                return_value={"cid": cid, "state": "RUNNING",
                                              "why": "agent", "agent": "aaa",
                                              "variant": "beta_apidocs", "task": "T1",
@@ -428,7 +432,7 @@ class TestClaims(ConductCase):
         self.run_conduct()
         self.live.clear()
         self.max_rounds, self.rounds = 2, 0
-        with mock.patch.object(runs.state, "cell_state",
+        with mock.patch.object(runs.host, "cell_state",
                                return_value={"cid": cid, "state": "DONE",
                                              "why": "green"}):
             self.run_conduct()
@@ -479,7 +483,7 @@ class TestGates(ConductCase):
     def test_done_cell_spec_is_skipped(self):
         cid = runs.cell_id("aaa", "beta_apidocs", 1, "T1")
         (self.ws / cid).mkdir(parents=True)
-        with mock.patch.object(runs.state, "cell_state",
+        with mock.patch.object(runs.host, "cell_state",
                                return_value={"cid": cid, "state": "DONE", "why": "green"}):
             self.q("aaa", [self.spec()])
             self.run_conduct()
@@ -488,8 +492,8 @@ class TestGates(ConductCase):
     def test_paused_specs_are_left_in_place(self):
         """A paused cell's spec is skipped where it lies — nothing is
         rotated, so lane order still means what it says."""
-        with mock.patch.object(runs.state, "pause_lock",
-                               side_effect=lambda cid: "manual"):
+        with mock.patch.object(runs.Cell, "pause_reason", new_callable=mock.PropertyMock,
+                               return_value="manual"):
             self.q("aaa", [self.spec(rep=1), self.spec(rep=2)])
             self.run_conduct()
         rows = self.pending("aaa")
@@ -628,7 +632,7 @@ class TestLimitCooldown(ConductCase):
             out = self.run_conduct()
         self.assertIn("cooldown expired", out)
         self.assertFalse(runs.queues.cooldown_file("aaa").exists())
-        self.assertIsNone(runs.state.pause_lock(cid))
+        self.assertIsNone(runs.common.cell(cid).pause_reason)
         self.assertEqual(self.spawned, [cid])
 
 
@@ -644,7 +648,7 @@ class TestNarration(ConductCase):
         self.live[cid] = 1
         seq = [([dict(cid=cid, state="RUNNING", why="agent")], 0, 0),
                ([dict(cid=cid, state="DONE", why="green")], 0, 0)]
-        with mock.patch.object(runs.state, "all_states",
+        with mock.patch.object(runs.host, "all_states",
                                side_effect=lambda *a, **k:
                                seq.pop(0) if seq else ([], 0, 0)), \
              mock.patch.object(runs.ledger, "parse",
@@ -745,7 +749,8 @@ class TestConvergeBranches(ConductCase):
         (self.ws / cid).mkdir(parents=True)
         self.q("aaa", [self.spec()])
         runs.queues.claim("aaa", runs.queues.lane_specs("aaa")[0])
-        with mock.patch.object(runs.state, "pause_lock", side_effect=lambda c: "manual"):
+        with mock.patch.object(runs.Cell, "pause_reason", new_callable=mock.PropertyMock,
+                               return_value="manual"):
             self._converge()
         self.assertEqual(self.claimed("aaa"), [], "paused claim was kept")
         self.assertEqual(len(self.pending("aaa")), 1)
@@ -891,7 +896,7 @@ class TestSpawnAndAdoptEdges(ConductCase):
         """A live loop whose workspace says nothing must not get a fabricated
         claim — the claim would describe a cell that does not exist."""
         self.live["aaa_high_beta_apidocs_T1_r5"] = 4242
-        with mock.patch.object(runs.state, "cell_state", return_value=None):
+        with mock.patch.object(runs.host, "cell_state", return_value=None):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 runs.conduct.Conduct()._adopt_live_cells()
@@ -943,7 +948,7 @@ class TestConductLiftsItsOwnStandDowns(ConductCase):
         # only once its stand-down is lifted
         with mock.patch.object(runs.common, "TRANSITIONS_LOG",
                                self.plane / "transitions.log"), \
-             mock.patch.object(runs.state, "pause_lock", _PAUSE_LOCK):
+             mock.patch.object(runs.Cell, "pause_reason", _PAUSE_REASON):
             return self.run_conduct(conductor=conductor)
 
     def test_a_cooled_stand_down_is_lifted_and_costs_a_repair(self):
@@ -1010,20 +1015,21 @@ class TestConductLiftsItsOwnStandDowns(ConductCase):
         (self.ws / self.CID).mkdir(parents=True)
         (self.ws / self.CID / ".paused").write_text(
             "arm-stuck by=conduct at=2026-08-25T20:02:17Z\n")
-        reason, who, at = runs.state.pause_meta(self.CID)
-        self.assertEqual((reason, who), ("arm-stuck", "conduct"))
-        self.assertEqual(int(at), 1787688137)
+        r = runs.common.cell(self.CID).pause_request()
+        self.assertEqual((r.reason, r.who), ("arm-stuck", "conduct"))
+        self.assertEqual(int(r.at), 1787688137)
         (self.ws / self.CID / ".paused").write_text("manual\n")
-        self.assertEqual(runs.state.pause_meta(self.CID), ("manual", None, None))
-        self.assertIsNone(runs.state.pause_meta("nope"))
+        r = runs.common.cell(self.CID).pause_request()
+        self.assertEqual((r.reason, r.who, r.at), ("manual", None, None))
+        self.assertIsNone(runs.common.cell("nope").pause_request())
 
     def test_a_walled_cell_is_exempt_from_arm_stuck(self):
         """The wall branch owns a cell in the limit phase; ARM-STUCK must
         not stand it down first (it would lose the lane cooldown)."""
-        src = (Path(ROOT) / "fae" / "driver" / "supervise.py").read_text()
+        src = (Path(ROOT) / "fae" / "driver" / "conduct" / "supervise.py").read_text()
         head = src[:src.index("ARM-STUCK held")]
-        self.assertIn('if _phase == "agent" or _phase in state.WAIT_PHASES:', head[-2500:])
-        self.assertEqual(runs.state.WAIT_PHASES,
+        self.assertIn('if _phase == "agent" or _phase in WAIT_PHASES:', head[-2500:])
+        self.assertEqual(runs.supervise.WAIT_PHASES,
                          {"verify-lock", "limit"})
 
 
@@ -1189,9 +1195,9 @@ class TestMemoryPressureMonitor(unittest.TestCase):
              mock.patch.object(runs.common, "WS", Path(d)), \
              mock.patch.object(runs.common, "mem_pressure", return_value=crit), \
              mock.patch.object(runs.common, "host_sleep_observe", lambda *a, **k: None), \
-             mock.patch.object(runs.state, "loop_pids", return_value={}), \
-             mock.patch.object(runs.state, "containers", return_value=set()), \
-             mock.patch.object(runs.state, "loop_parents", return_value={}), \
+             mock.patch.object(runs.host, "loop_pids", return_value={}), \
+             mock.patch.object(runs.host, "containers", return_value=set()), \
+             mock.patch.object(runs.host, "loop_parents", return_value={}), \
              mock.patch.object(runs.common, "_last_transitions", return_value={}), \
              mock.patch.object(runs.supervise, "_agent_io", return_value={}), \
              mock.patch.object(runs.supervise, "_agent_io_book", return_value={}), \
@@ -1209,12 +1215,12 @@ class TestMemoryPressureMonitor(unittest.TestCase):
                 "used_gb": 9.6, "total_gb": 16.0,
                 "swap_used_mb": 9000.0, "swap_total_mb": 10000.0}
         with mock.patch.object(runs.common, "mem_pressure", return_value=fake), \
-             mock.patch.object(runs.state, "all_states", return_value=([], {}, set())), \
+             mock.patch.object(runs.host, "all_states", return_value=([], {}, set())), \
              mock.patch.object(runs.render, "queued_summary", return_value=[]), \
              mock.patch.object(runs.queues_module.Queues, "weekly_line", return_value=""), \
-             mock.patch.object(runs.state, "containers", return_value=set()), \
-             mock.patch.object(runs.state, "loop_pids", return_value={}), \
-             mock.patch.object(runs.state, "loop_parents", return_value={}), \
+             mock.patch.object(runs.host, "containers", return_value=set()), \
+             mock.patch.object(runs.host, "loop_pids", return_value={}), \
+             mock.patch.object(runs.host, "loop_parents", return_value={}), \
              mock.patch.object(runs.zombies, "find_zombies", return_value=[]):
             out = runs.render.render()
         self.assertIn("pressure=WARN", out)

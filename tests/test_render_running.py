@@ -27,11 +27,11 @@ class TestTheRunningTable(unittest.TestCase):
     def _render(self, rows):
         states = [s for s, _ in rows]
         hbs = {s["cid"]: hb for s, hb in rows}
-        with mock.patch.object(runs.render.state, "all_states", return_value=(states, {}, [])), \
-             mock.patch.object(runs.render.state, "loop_parents", return_value={}), \
-             mock.patch.object(runs.render.state, "heartbeat",
-                               side_effect=lambda ws: hbs[Path(ws).name]), \
-             mock.patch.object(runs.render.zombies, "find_zombies", return_value=[]), \
+        with mock.patch.object(runs.host, "all_states", return_value=(states, {}, [])), \
+             mock.patch.object(runs.host, "loop_parents", return_value={}), \
+             mock.patch.object(runs.host, "heartbeat",
+                               side_effect=lambda ws, cell=None: hbs[Path(ws).name]), \
+             mock.patch.object(runs.zombies, "find_zombies", return_value=[]), \
              mock.patch.object(runs.render, "queued_summary", return_value=[]), \
              mock.patch.object(runs.queues_module.Queues, "weekly_line", return_value=""), \
              mock.patch.object(runs.render.common, "definition") as d:
@@ -59,11 +59,11 @@ class TestTheInFlightE2E(unittest.TestCase):
     def test_a_failed_e2e_reads_as_an_x(self):
         with tempfile.TemporaryDirectory() as d:
             ws = Path(d)
-            self.assertFalse(runs.state._e2e_failed(runs.state._cell(ws)))
+            self.assertFalse(runs.common.cell(ws.name, workspaces=ws.parent).e2e_failed())
             (ws / "metrics.json").write_text(json.dumps({"e2e_pass": 7, "e2e_total": 7}))
-            self.assertFalse(runs.state._e2e_failed(runs.state._cell(ws)))
+            self.assertFalse(runs.common.cell(ws.name, workspaces=ws.parent).e2e_failed())
             (ws / "metrics.json").write_text(json.dumps({"e2e_pass": 5, "e2e_total": 7}))
-            self.assertTrue(runs.state._e2e_failed(runs.state._cell(ws)))
+            self.assertTrue(runs.common.cell(ws.name, workspaces=ws.parent).e2e_failed())
 
 
 if __name__ == "__main__":

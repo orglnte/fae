@@ -308,14 +308,6 @@ def _last_transitions():
     return last
 
 
-# Alert-dedup state shared by fae/driver/supervise.py's sweep and
-# fae/driver/conduct.py's _lift_conduct_standdowns: which cids already got an arm-stuck /
-# phase-stalled alert this episode, so a repeated sweep doesn't re-alert on
-# the same stall.
-_ARM_ALERTED = set()
-_PHASE_ALERTED = set()   # (cid, phase, attempt) already reported
-
-
 # --- host-sleep tracking: ages exclude time the host was suspended ----
 # The monotonic clock does not advance while the host sleeps, so wall minus
 # monotonic across one tick is the sleep; gaps are kept on disk so ages

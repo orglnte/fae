@@ -20,10 +20,10 @@ def _state(cid, variant):
 
 class TestTheVariantLabels(unittest.TestCase):
     def _render(self, states, variants):
-        with mock.patch.object(runs.render.state, "all_states", return_value=(states, {}, [])), \
-             mock.patch.object(runs.render.state, "loop_parents", return_value={}), \
-             mock.patch.object(runs.render.state, "heartbeat", return_value=None), \
-             mock.patch.object(runs.render.zombies, "find_zombies", return_value=[]), \
+        with mock.patch.object(runs.host, "all_states", return_value=(states, {}, [])), \
+             mock.patch.object(runs.host, "loop_parents", return_value={}), \
+             mock.patch.object(runs.host, "heartbeat", return_value=None), \
+             mock.patch.object(runs.zombies, "find_zombies", return_value=[]), \
              mock.patch.object(runs.render, "queued_summary", return_value=[]), \
              mock.patch.object(runs.queues_module.Queues, "weekly_line", return_value=""), \
              mock.patch.object(runs.render.common, "definition") as d:

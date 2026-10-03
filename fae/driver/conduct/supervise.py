@@ -15,11 +15,12 @@ import time
 import ujson as json
 from datetime import datetime, timezone
 
-from fae.cell.cell import Busy
+from fae.cell.cell import Busy, Cell
+from fae.cell.fsm import WAIT_PHASES
 from fae.driver import common
-from fae.driver import state
 from fae.driver import validate as taint
-from fae.driver import zombies
+
+from . import host, zombies
 
 # A lane that hits a provider quota/rate wall cools for the provider's
 # parsed reset hint, else this long, rather than retrying a multi-hour cap
@@ -52,7 +53,22 @@ def _parse_reset_hint(text):
 
 def _set_cooldown(agent, detail):
     until = time.time() + (_parse_reset_hint(detail) or COOLDOWN_DEFAULT_S)
-    return common.queues().set_cooldown(agent, until, detail[:state.WAIT_REASON_MAX])
+    return common.queues().set_cooldown(agent, until, detail[:Cell.WAIT_REASON_MAX])
+
+def _arm_slot_of(arm, cid):
+    """Seconds this cid has held a slot of `arm`, or None if it holds none.
+    The note's timestamp is when the slot was taken; the kernel says whether
+    it is still held — the note alone would age a slot released long ago."""
+    if not arm:
+        return None
+    q = common.queues()
+    for slot in q.slot_files(arm):
+        note = q.slot_note(slot)
+        if not note or note[0] != cid or not q.slot_held(slot):
+            continue
+        return common.awake_age(note[2]) if note[2] is not None else None
+    return None
+
 
 def _retire_finished_specs(dry=False):
     """Move a queued spec whose cell is already terminal to done/.
@@ -64,14 +80,14 @@ def _retire_finished_specs(dry=False):
     while the spec it came from is still in the lane, unclaimed.
     """
     qs = common.queues()
-    boxes = state.containers()
+    boxes = host.containers()
     for d in qs.lane_dirs():
         agent = qs.lane_agent(d)
         for p in qs.specs_in(d):
             cid = qs.spec_cid(p)
             if not (common.WS / cid).is_dir():
                 continue
-            st = state.cell_state(common.WS / cid, {}, boxes)
+            st = host.cell_state(common.WS / cid, {}, boxes)
             if not st or st["state"] != "DONE":
                 continue
             common._rec_log(f"{cid} spec retired — cell is DONE·{st['why'] or '?'}"
@@ -210,7 +226,7 @@ def _verify_progress(ws, since_ts):
     """(stamp, age) of the newest VERIFY_READY/SHAPE mark the current verify
     has written, or (None, None) when it has written none yet."""
     newest = None
-    for line in state._cell(ws).ledger_text().splitlines():
+    for line in common.cell(ws.name, workspaces=ws.parent).ledger_text().splitlines():
         m = _VERIFY_MARK_RE.match(line)
         if m and (since_ts is None or m.group(1) >= since_ts):
             newest = m.group(1)
@@ -325,8 +341,8 @@ def supervise_pass(alerts, dry=False, only=""):
     elif _mp["level"] < 2 and alerts.memory["level"] >= 2:
         common._rec_log("memory pressure back to normal")
     alerts.memory["level"] = _mp["level"]
-    loops, boxes = state.loop_pids(), state.containers()
-    parents = state.loop_parents()
+    loops, boxes = host.loop_pids(), host.containers()
+    parents = host.loop_parents()
     last_tr = common._last_transitions()
     io_now = _agent_io(boxes)
     io_book = _agent_io_book()
@@ -334,7 +350,7 @@ def supervise_pass(alerts, dry=False, only=""):
     for ws in sorted(common.WS.iterdir()):
             if not ws.is_dir():
                 continue
-            st = state.cell_state(ws, loops, boxes)
+            st = host.cell_state(ws, loops, boxes)
             if not st:
                 continue
             cid = st["cid"]
@@ -347,10 +363,10 @@ def supervise_pass(alerts, dry=False, only=""):
                                  common.agent_container(cid) in boxes,
                                  _attempt_out(ws)[1], last_tr.get(cid), dry,
                                  terminal=st["state"] == "DONE")
-            c = state._cell(ws)
+            c = common.cell(ws.name, workspaces=ws.parent)
             if c.flagged:
                 continue                      # human-flagged: hands off
-            if state.cell_intent(ws, c)[0] != "run":
+            if c.declared_intent()[0] != "run":
                 continue      # operator declared cancel/pause/drain — hands off
             terminal = st["state"] == "DONE"
             if terminal and st["why"] != "cancelled" \
@@ -419,7 +435,7 @@ def supervise_pass(alerts, dry=False, only=""):
             # progress signal: the heartbeat says the ticker lives, not that
             # the cell is getting anywhere.
             if not terminal and st["state"] in ("RUNNING", "WAITING"):
-                _hbp = state.heartbeat(ws)
+                _hbp = host.heartbeat(ws)
                 _ph = (_hbp or {}).get("phase")
                 _pa = (_hbp or {}).get("phase_age")
                 _lim = PHASE_LIMITS.get(_ph)
@@ -428,7 +444,7 @@ def supervise_pass(alerts, dry=False, only=""):
                     _key = (cid, _ph, str(_hbp.get("attempt", "")))
                     if _pa > _alert_s and _key not in alerts.phase:
                         # a wait phase is someone else's time: long, not stalled
-                        _kind = "WAIT-LONG" if _ph in state.WAIT_PHASES else "PHASE-STALLED"
+                        _kind = "WAIT-LONG" if _ph in WAIT_PHASES else "PHASE-STALLED"
                         common._rec_log(f"{cid} ALERT — {_kind} '{_ph}' unchanged "
                                  f"{int(_pa)}s > {_alert_s}s"
                                  + (" [dry-run]" if dry else ""))
@@ -450,7 +466,7 @@ def supervise_pass(alerts, dry=False, only=""):
             # goes through the same teardown path as any other induced death.
             if not terminal and st["state"] in ("RUNNING", "WAITING"):
                 _arm = common.definition().lock_of(st["variant"])
-                _slot = state._arm_slot_of(_arm, cid) if _arm else None
+                _slot = _arm_slot_of(_arm, cid) if _arm else None
                 if _slot is not None and cid not in alerts.arm:
                     # Stalled means NOT PROGRESSING, which is phase_age. The
                     # heartbeat's own age only says the ticker is alive: the
@@ -464,12 +480,12 @@ def supervise_pass(alerts, dry=False, only=""):
                     # a provider wall is waiting on someone else, not wedged —
                     # the lock holder is VERIFY-WEDGED's, the wall the wall
                     # branch's.
-                    _hb = state.heartbeat(ws)
+                    _hb = host.heartbeat(ws)
                     _phase = (_hb or {}).get("phase")
                     _silent = (_hb.get("phase_age") if _hb else None)
                     if _silent is None:
                         _silent = ARM_STALL_S + 1
-                    if _phase == "agent" or _phase in state.WAIT_PHASES:
+                    if _phase == "agent" or _phase in WAIT_PHASES:
                         _silent = 0
                     if _slot > ARM_HELD_ALERT_S and _silent > ARM_STALL_S:
                         common._rec_log(f"{cid} ALERT — arm '{_arm}' slot held "
@@ -621,7 +637,7 @@ def supervise_pass(alerts, dry=False, only=""):
             elif st["state"] == "CRASHED" and st["why"] == "agent":
                 common._rec_log(f"{cid} CRASHED/agent ({st['detail'][:40]}) — needs a "
                          f"human (creds/agent fault), not a respawn")
-            elif st["state"] == "CRASHED" and state.never_started(st):
+            elif st["state"] == "CRASHED" and Cell.never_started(st):
                 continue      # prepared, never launched — nothing to resume
             elif st["state"] == "CRASHED" and not loop_pid and not in_box:
                 # loop died mid-cell (crash/limit-kill); container gone too.

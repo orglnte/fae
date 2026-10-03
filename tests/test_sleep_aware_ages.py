@@ -99,9 +99,9 @@ class TestTheAgesTheSupervisorReads(SleepCase):
         (ws / ".loop").write_text(
             f"pid={os.getpid()} cid={ws.name} phase=verify-lock attempt=3 "
             f"ts={int(self.now)} since={int(self.now - 7200)}\n")
-        with mock.patch.object(runs.state, "run_cell_pids",
+        with mock.patch.object(runs.host, "run_cell_pids",
                                return_value={os.getpid()}):
-            hb = runs.state.heartbeat(ws)
+            hb = runs.host.heartbeat(ws)
         self.assertLess(hb["phase_age"], 400)
         self.assertGreater(hb["phase_age"], 250)
 
@@ -119,7 +119,7 @@ class TestTheAgesTheSupervisorReads(SleepCase):
             f"cid 1234 {int(self.now - 7200)}\n")
         with mock.patch.object(runs.mutex, "holder_name", return_value="cid"), \
              mock.patch.object(runs.queues_module.Queues, "slot_held", return_value=True):
-            held = runs.state._arm_slot_of("keda", "cid")
+            held = runs.supervise._arm_slot_of("keda", "cid")
         self.assertLess(held, 400)
         self.assertGreater(held, 250)
 

@@ -1,4 +1,4 @@
-"""fae/driver/zombies.py: the small process/docker-probe helpers, and the two
+"""fae/driver/conduct/zombies.py: the small process/docker-probe helpers, and the two
 functions that matter most and had the least coverage — find_zombies()
 (what's orphaned) and reap_zombies() (what to do about it). test_cluster_
 name.py owns _cksum/_cluster_for; test_reconcile_safety.py owns
@@ -19,7 +19,7 @@ from _ctx import runs, patch_plane
 
 zombies = runs.zombies
 common = runs.common
-state = runs.state
+state = runs.host
 mutex = runs.mutex
 
 
@@ -370,7 +370,8 @@ class TestTheRepairReaps(unittest.TestCase):
     run lists them; the sweep itself is a singleton with a cooldown."""
 
     def test_repair_reaps_and_a_dry_run_only_lists(self):
-        from fae.driver import conduct, supervise, zombies
+        from fae.driver import conduct
+        from fae.driver.conduct import supervise, zombies
         with mock.patch.object(supervise, "supervise_pass"), \
                 mock.patch.object(zombies, "reap_sweep", return_value=["reaped x"]) as sweep, \
                 mock.patch.object(zombies, "find_zombies",
@@ -382,7 +383,8 @@ class TestTheRepairReaps(unittest.TestCase):
             sweep.assert_not_called()
 
     def test_a_sweep_within_the_cooldown_does_nothing(self):
-        from fae.driver import common, zombies
+        from fae.driver import common
+        from fae.driver.conduct import zombies
         with tempfile.TemporaryDirectory() as d, \
                 mock.patch.multiple(common, QUEUES=Path(d), CONDUCT=Path(d), LOCKS=Path(d)), \
                 mock.patch.object(zombies, "find_zombies", return_value=[("c", "x", "o", "n")]), \

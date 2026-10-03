@@ -320,7 +320,7 @@ class TestTheChildIsItsOwnSession(unittest.TestCase):
         self.assertNotIn("close_fds=False", body)
 
     def test_the_child_argv_reads_as_a_driver_to_the_reaper(self):
-        from fae.driver import zombies
+        from fae.driver.conduct import zombies
         self.assertIn("fae.cell", " ".join(verify.CHILD_ARGV))
         with mock.patch.object(zombies.common, "sh", return_value=" ".join(verify.CHILD_ARGV)):
             self.assertTrue(zombies._is_driver_pid(1))
