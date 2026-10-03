@@ -77,9 +77,9 @@ class PauseMatrixCase(unittest.TestCase):
 class TestRow11PauseInTheWorkSlotQueue(PauseMatrixCase):
 
     def test_the_cell_stands_down_from_the_slot_queue(self):
-        orch = self.root / "workspaces.nosync" / ".orch"
+        queues = self.root / "workspaces.nosync" / ".queues"
         for i in range(1, 8):                      # conf default WORK_SLOTS=7
-            self.hold(orch / "work-slots" / f"slot-{i}")
+            self.hold(queues / "work-slots" / f"slot-{i}")
         c = self.cell()
         (c.ws / ".paused").write_text("row 11\n")
         self.assertIsNone(c.run(stub_overlay="unused"))
@@ -93,9 +93,9 @@ class TestRow12PauseInTheArmLockQueue(PauseMatrixCase):
     CID = "opus_high_alpha_apidocs_T1_r1"
 
     def test_the_cell_stands_down_from_the_arm_queue_by_name(self):
-        orch = self.root / "workspaces.nosync" / ".orch"
+        queues = self.root / "workspaces.nosync" / ".queues"
         # work slots free; the ONE keda arm slot held by the test
-        self.hold(orch / "arm-alpha.slots" / "slot-1")
+        self.hold(queues / "arm-alpha.slots" / "slot-1")
         c = self.cell(variant="alpha_apidocs")
         (c.ws / ".paused").write_text("row 12\n")
         # stage_agent needs creds; the arm queue is reached before any agent,

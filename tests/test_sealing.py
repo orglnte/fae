@@ -97,7 +97,7 @@ class TestReverifyAddsEvidenceInsteadOfReplacingIt(unittest.TestCase):
 
 
 class SealedFleetTestCase(OrchTmpCase):
-    """WS / ORCH / TRANSITIONS_LOG patched to a temp tree (via OrchTmpCase).
+    """WS and the scheduling plane patched to a temp tree (via OrchTmpCase).
     Nothing here starts a process: every refusal must happen before one is
     launched."""
 

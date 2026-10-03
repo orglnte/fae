@@ -1,7 +1,7 @@
 """Operator control must actually control: selectors, the exactly-1 cell
 verbs (pause/resume/stop), and the conduct bulk verbs (pause/resume/stop).
 
-Every test patches runs.common.WS / runs.common.ORCH to a TemporaryDirectory. Nothing here
+Every test patches runs.common.WS and the scheduling plane to a TemporaryDirectory. Nothing here
 reads or writes the live workspace tree, and nothing starts a process.
 """
 import contextlib
@@ -36,7 +36,7 @@ class OperatorTestCase(OrchTmpCase):
     """
 
     def setUp(self):
-        super().setUp()   # temp tree + WS/ORCH/TRANSITIONS_LOG/RECONCILE_LOG patched
+        super().setUp()   # temp tree + WS and the scheduling plane patched
         for c in CIDS:
             (self.ws / c).mkdir()
         self.spawned = []
@@ -238,7 +238,7 @@ class TestConductStop(OperatorTestCase):
         self._stop(["all"])
         self.assertEqual(sorted(s["rep"] for s in self.pending("sonnet")), [2, 3],
                          "a stop emptied the queue")
-        self.assertEqual(list((self.orch / "backups").glob("stopped-*.json")), [],
+        self.assertEqual(list((self.queues / "backups").glob("stopped-*.json")), [],
                          "specs were shelved; a stop should not move them")
 
     def test_a_parked_lane_keeps_its_backlog(self):
@@ -290,7 +290,7 @@ class TestConductStop(OperatorTestCase):
         self.assertIn("haiku_high_beta_howto_T1_r3", out)
 
     def test_scoped_stop_leaves_conduct_running(self):
-        (self.orch / "conduct.pid").write_text("4242 cap=7")
+        (self.conduct / "conduct.pid").write_text("4242 cap=7")
         self.queue("haiku", [])
         sent = []
         with mock.patch.object(runs.os, "kill",
@@ -298,7 +298,7 @@ class TestConductStop(OperatorTestCase):
             self._stop(["haiku"])
         self.assertNotIn((4242, runs.signal.SIGTERM), sent,
                          "a scoped stop must not TERM the scheduler")
-        self.assertTrue((self.orch / "conduct.pid").exists())
+        self.assertTrue((self.conduct / "conduct.pid").exists())
 
 
 
@@ -308,7 +308,7 @@ class TestStopConductor(OperatorTestCase):
     hit an unrelated process."""
 
     def test_stale_pidfile_is_cleared_without_signalling(self):
-        (self.orch / "conduct.pid").write_text("999999 cap=7")
+        (self.conduct / "conduct.pid").write_text("999999 cap=7")
 
         real_kill = runs.os.kill
 
@@ -319,21 +319,21 @@ class TestStopConductor(OperatorTestCase):
 
         with mock.patch.object(runs.os, "kill", probe_dead):
             self.assertFalse(runs.conduct._stop_conductor())
-        self.assertFalse((self.orch / "conduct.pid").exists())
+        self.assertFalse((self.conduct / "conduct.pid").exists())
 
     def test_live_conduct_is_termed_and_pidfile_cleared(self):
-        (self.orch / "conduct.pid").write_text("4242 cap=7")
+        (self.conduct / "conduct.pid").write_text("4242 cap=7")
         sent = []
         with mock.patch.object(runs.os, "kill",
                                lambda pid, sig: sent.append((pid, sig))):
             self.assertTrue(runs.conduct._stop_conductor())
         self.assertIn((4242, runs.signal.SIGTERM), sent)
-        self.assertFalse((self.orch / "conduct.pid").exists())
+        self.assertFalse((self.conduct / "conduct.pid").exists())
 
     def test_garbage_pidfile_is_cleared(self):
-        (self.orch / "conduct.pid").write_text("not-a-pid")
+        (self.conduct / "conduct.pid").write_text("not-a-pid")
         self.assertFalse(runs.conduct._stop_conductor())
-        self.assertFalse((self.orch / "conduct.pid").exists())
+        self.assertFalse((self.conduct / "conduct.pid").exists())
 
 
 class TestQueueParkUnpark(OperatorTestCase):
@@ -447,7 +447,7 @@ class TestStopCells(OperatorTestCase):
         self._stop(cid)
         self.assertEqual(self.pending("sonnet"), [],
                          "the stopped cell's spec survived in queue")
-        self.assertEqual(len(list((self.orch / "backups").glob("stopped-*.json"))), 1)
+        self.assertEqual(len(list((self.queues / "backups").glob("stopped-*.json"))), 1)
 
     def test_stop_kills_the_loops_whole_session_and_tears_the_bring_up_down(self):
         """The verify container dies with the kill, but what the arrangement
@@ -487,7 +487,7 @@ class TestStopCells(OperatorTestCase):
         violation. Kill is reserved for --cancel."""
         cid = CIDS[0]
         self._stop(cid, live={cid: 4242})
-        log = (self.orch / "transitions.log").read_text()
+        log = (self.plane / "transitions.log").read_text()
         self.assertIn("Crash", log)
         self.assertNotIn("Kill", log)
 
@@ -521,7 +521,7 @@ class TestConductResume(OperatorTestCase):
              mock.patch.object(runs.state, "containers", return_value=[]), \
              mock.patch.object(runs.state, "cell_state", side_effect=_cs), \
              mock.patch.object(runs.ops, "RESPAWN_BOOK",
-                               self.orch / "reconcile.respawns.json"):
+                               self.conduct / "reconcile.respawns.json"):
             runs.conduct.conduct_resume(mock.Mock(scope=scope))
 
     def test_no_loop_is_ever_spawned(self):
@@ -606,7 +606,7 @@ class TestArmWaitHolderIsNotBlocked(OperatorTestCase):
     def _hold(self, arm, slot, cid, really=True):
         """Take the slot for real. The sidecar alone proves nothing now — a
         held lock is a kernel fact, and only then is the name worth reading."""
-        d = self.orch / f"arm-{arm}.slots"
+        d = self.queues / f"arm-{arm}.slots"
         d.mkdir(parents=True, exist_ok=True)
         path = d / f"slot-{slot}"
         if really:
@@ -727,7 +727,7 @@ class TestLimitWall(OperatorTestCase):
              mock.patch.object(runs.state, "loop_parents", return_value={cid: 4242}), \
              mock.patch.object(runs.state, "cell_state", side_effect=_cs), \
              mock.patch.object(runs.ops, "RESPAWN_BOOK",
-                               self.orch / "reconcile.respawns.json"):
+                               self.conduct / "reconcile.respawns.json"):
             runs.supervise._supervise_pass(dry=dry)
 
     def test_walled_cell_is_stood_down_and_lane_cooled(self):
@@ -795,7 +795,7 @@ class TestLimitWall(OperatorTestCase):
                                return_value={"age": 1e9}), \
              mock.patch.object(runs.subprocess, "run"), \
              mock.patch.object(runs.ops, "RESPAWN_BOOK",
-                               self.orch / "reconcile.respawns.json"):
+                               self.conduct / "reconcile.respawns.json"):
             runs.supervise._supervise_pass(dry=False)
         until = runs.weekly._cooldown_until("sonnet")
         self.assertGreater(until, _t.time() + 2 * 86400, "no day-scale cooldown")
@@ -878,7 +878,7 @@ class TestStopRemovesTheClaim(OperatorTestCase):
                                       dry_run=False))
         self.assertEqual(runs.queue.running_specs("sonnet"), [],
                          "the claim survived a stop")
-        self.assertEqual(len(list((self.orch / "backups").glob("stopped-*.json"))), 1)
+        self.assertEqual(len(list((self.queues / "backups").glob("stopped-*.json"))), 1)
 
 
 class TestConductPause(OperatorTestCase):
@@ -1057,7 +1057,7 @@ class TestConductPauseDryRun(OperatorTestCase):
         self.assertNotIn("would park", out)
 
     def test_full_preview_names_conduct_and_the_backlog(self):
-        (self.orch / "conduct.pid").write_text("4242 cap=7")
+        (self.conduct / "conduct.pid").write_text("4242 cap=7")
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         out, rp, sc = self._dry(["all"], live={CIDS[0]: 4242})
         self.assertIn("would stop conduct", out)
@@ -1206,7 +1206,7 @@ class TestVerbEdges(OperatorTestCase):
             runs.conduct.conduct_resume(mock.Mock(scope=["nosuchmodel"]))
 
     def test_conduct_stop_terms_conduct_and_the_scope_loops(self):
-        (self.orch / "conduct.pid").write_text("4242 cap=7")
+        (self.conduct / "conduct.pid").write_text("4242 cap=7")
         killed = []
         with mock.patch.object(runs.state, "loop_parents",
                                return_value={CIDS[0]: 111, CIDS[3]: 222}), \
@@ -1251,9 +1251,9 @@ class TestVerbEdges(OperatorTestCase):
         cid = CIDS[0]
         (self.ws / cid / "reconcile.flagged").touch()
         (self.ws / cid / ".paused").write_text("drain by=conduct\n")
-        (self.orch / "reconcile.respawns.json").write_text("{not json")
+        (self.conduct / "reconcile.respawns.json").write_text("{not json")
         with mock.patch.object(runs.ops, "RESPAWN_BOOK",
-                               self.orch / "reconcile.respawns.json"), \
+                               self.conduct / "reconcile.respawns.json"), \
              mock.patch.object(runs.state, "loop_parents", return_value={}), \
              mock.patch.object(runs.state, "loop_pids", return_value={}), \
              mock.patch.object(runs.state, "containers", return_value=set()), \
@@ -1309,12 +1309,12 @@ class TestResumeAnswersTheLedgerNotTheFile(OperatorTestCase):
     file makes the replay lie."""
 
     def _log(self, *lines):
-        (self.orch / "transitions.log").write_text(
+        (self.plane / "transitions.log").write_text(
             "".join(f"2026-08-22T10:00:0{i}Z\t{a}\t{c}\t{x}\n"
                     for i, (a, c, x) in enumerate(lines)))
 
     def _resumes(self):
-        f = self.orch / "transitions.log"
+        f = self.plane / "transitions.log"
         return [l for l in f.read_text().splitlines()
                 if l.split("\t")[1] == "Resume"] if f.exists() else []
 
@@ -1347,16 +1347,16 @@ class TestResumeAnswersTheLedgerNotTheFile(OperatorTestCase):
 
 
 class TestConductRefusesAnAlternativeRoot(OperatorTestCase):
-    """The backlog lives in the global .orch, so a conduct pointed at another
+    """The backlog lives in the global .queues, so a conduct pointed at another
     workspace root would drain the SCORED queue into it. The test root is
     spawn-by-hand only; the scheduler refuses it outright."""
 
     def test_refuses_before_touching_anything(self):
         with mock.patch.dict(os.environ, {"WORKSPACES_DIR": "/x/ws-test.nosync"}), \
-             mock.patch.object(runs.common, "ORCH", self.orch / "never"):
+             mock.patch.object(runs.common, "CONDUCT", self.conduct / "never"):
             rc = runs.conduct.conduct(SimpleNamespace(limit=1))
         self.assertEqual(rc, 2)
-        self.assertFalse((self.orch / "never").exists())
+        self.assertFalse((self.conduct / "never").exists())
 
     def test_the_scored_root_is_the_default(self):
         with mock.patch.dict(os.environ, {"WORKSPACES_DIR": str(runs.conduct._default_ws())}):
@@ -1412,7 +1412,7 @@ class TestTheWeeklyWallCoolsTheLane(OperatorTestCase):
                                side_effect=lambda w, l, b:
                                st if Path(w).name == cid else None), \
              mock.patch.object(runs.ops, "RESPAWN_BOOK",
-                               self.orch / "reconcile.respawns.json"):
+                               self.conduct / "reconcile.respawns.json"):
             runs.supervise._supervise_pass(dry=False)
         self.assertEqual(runs.state.pause_lock(cid), "limit-wall")
         until = runs.weekly._cooldown_until("sonnet")

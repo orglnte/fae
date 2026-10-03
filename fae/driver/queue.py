@@ -24,12 +24,12 @@ SEQ_START = 100000              # appends count up, front-inserts count down
 
 
 def lane_dir(agent, parked=False):
-    return common.ORCH / "queue" / (f"{agent}.parked" if parked else agent)
+    return common.QUEUES / "queue" / (f"{agent}.parked" if parked else agent)
 
 
 def lane_dirs(include_parked=False):
     """Every lane directory; a lane exists once something is enqueued to it."""
-    q = common.ORCH / "queue"
+    q = common.QUEUES / "queue"
     if not q.is_dir():
         return []
     return sorted((d for d in q.iterdir() if d.is_dir()
@@ -41,7 +41,7 @@ def _parked_queues():
     """Operator-paused lanes (`experiment pause M`). conduct never admits from
     them; they still count as backlog, so a fleet with ONLY parked work is
     not 'done' — it is waiting for a experiment resume."""
-    q = common.ORCH / "queue"
+    q = common.QUEUES / "queue"
     if not q.is_dir():
         return []
     return sorted(d for d in q.iterdir()
@@ -155,14 +155,14 @@ def enqueue(agent, spec, front=False):
 
 
 def rundir(agent):
-    return common.ORCH / "running" / agent
+    return common.QUEUES / "running" / agent
 
 
 def running_specs(agent=None):
     """Claimed specs — the fleet's live cells, one per lane at cap 1."""
     if agent is not None:
         return _dir_specs(rundir(agent))
-    base = common.ORCH / "running"
+    base = common.QUEUES / "running"
     if not base.is_dir():
         return []
     return sorted((p for d in base.iterdir() if d.is_dir()
@@ -192,7 +192,7 @@ def release(agent, p, front=True):
 
 def finish(agent, p):
     """RUNNING -> DONE."""
-    d = common.ORCH / "done" / agent
+    d = common.QUEUES / "done" / agent
     d.mkdir(parents=True, exist_ok=True)
     dest = d / p.name
     p.rename(dest)
@@ -202,7 +202,7 @@ def finish(agent, p):
 def shelve(p, why):
     """Any state -> backups/. Specs are never deleted, only taken out of
     play, so a mistaken stop is restorable by moving the file back."""
-    d = common.ORCH / "backups"
+    d = common.QUEUES / "backups"
     d.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     dest = d / f"{why}-{stamp}.{p.name}"
@@ -245,7 +245,7 @@ def pending_specs():
 
 def done_specs(agent=None):
     """Terminal specs."""
-    base = common.ORCH / "done"
+    base = common.QUEUES / "done"
     dirs = [base / agent] if agent else (sorted(d for d in base.iterdir() if d.is_dir())
                                          if base.is_dir() else [])
     return [p for d in dirs for p in _dir_specs(d)]
@@ -255,7 +255,7 @@ def cancel(p, agent, stamp):
     """QUEUED -> out of play, before admission: moved into the lock plane's
     .to_be_deleted/<stamp>/queue/<agent>/, never deleted; moving it back
     restores it."""
-    d = common.ORCH / ".to_be_deleted" / stamp / "queue" / agent
+    d = common.QUEUES / ".to_be_deleted" / stamp / "queue" / agent
     d.mkdir(parents=True, exist_ok=True)
     dest = d / p.name
     p.rename(dest)

@@ -20,7 +20,7 @@ def run_start() -> float | None:
     """Epoch of the current run's start: conduct.pid's mtime. None if no
     conduct has run (then the caller reports over all terminal cells)."""
     try:
-        return (common.ORCH / "conduct.pid").stat().st_mtime
+        return (common.CONDUCT / "conduct.pid").stat().st_mtime
     except OSError:
         return None
 

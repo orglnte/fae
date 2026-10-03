@@ -253,7 +253,7 @@ def render(flat=False, running_only=False):
         if triage:
             out.append("\n— TRIAGE (attention + zombies) " + "—" * 34)
             out.extend(triage)
-        # QUEUED: work that exists only as a spec in .orch/queue/<agent>/.
+        # QUEUED: work that exists only as a spec in .queues/queue/<agent>/.
         # Every other section renders WORKSPACES, so pending cells were
         # invisible to the console entirely — a 100+ cell backlog could sit
         # there with nothing in `status` acknowledging it.
@@ -261,7 +261,7 @@ def render(flat=False, running_only=False):
         if qsec:
             out.extend(qsec)
         live = sum(1 for n in boxes if n.startswith(common.AGENT_CONTAINER_PREFIX))
-        _cp = common.ORCH / "conduct.pid"
+        _cp = common.CONDUCT / "conduct.pid"
         conduct_s = "run: DOWN"
         if _cp.exists():
             try:
@@ -325,7 +325,7 @@ def monitor(args):
     limit/5xx fault, burning no budget, so a usage wall self-heals when the
     window rolls. What still needs a human is an AUTH wall, which never lifts
     on its own — that is what this reports."""
-    common.ORCH.mkdir(parents=True, exist_ok=True)
+    common.CONDUCT.mkdir(parents=True, exist_ok=True)
     while True:
         try:
             states, _, _ = state.all_states()

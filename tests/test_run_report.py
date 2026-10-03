@@ -49,8 +49,8 @@ class TestTheRunReport(OrchTmpCase):
         old = "sonnet_high_alpha_apidocs_T1_r1"
         self._cell(old, _ev("ITER", "green", "attempt=1 shapes=all"), _ev("END", old, "green=true"),
                    sealed_at=time.time() - 3600)
-        (self.orch / "conduct.pid").write_text("1")
-        os.utime(self.orch / "conduct.pid", (time.time() - 60, time.time() - 60))
+        (self.conduct / "conduct.pid").write_text("1")
+        os.utime(self.conduct / "conduct.pid", (time.time() - 60, time.time() - 60))
         new = "sonnet_high_alpha_apidocs_T1_r2"
         self._cell(new, _ev("ITER", "green", "attempt=1 shapes=all"), _ev("END", new, "green=true"))
         done, _ = run_report.collect(run_report.run_start())

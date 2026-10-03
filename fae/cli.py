@@ -213,7 +213,7 @@ def queue_cancel(selectors: list[str] = typer.Argument(..., help=SEL + " `all`: 
                  dry_run: bool = typer.Option(False, "--dry-run",
                                               help="list what would be cancelled, move nothing")):
     """Take pending specs out of the queue before admission. They are moved
-    aside (.orch/.to_be_deleted/<ts>/queue/), never deleted; running cells
+    aside (.queues/.to_be_deleted/<ts>/queue/), never deleted; running cells
     are not touched (that is `cell stop`)."""
     ops.queue_cancel(_ns(selectors=list(selectors), dry_run=dry_run))
 

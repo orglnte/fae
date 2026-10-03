@@ -65,8 +65,8 @@ locks and requeues interrupted cells at the FRONT, and a running the run
 admits them under its caps.
 
 **The backlog is a directory tree, one file per spec** — pending in
-`.orch/queue/<agent>/`, claimed by the lane's cell in `.orch/running/<agent>/`,
-terminal in `.orch/done/`, and shelved (never deleted) in `.orch/backups/`.
+`.queues/queue/<agent>/`, claimed by the lane's cell in `.queues/running/<agent>/`,
+terminal in `.queues/done/`, and shelved (never deleted) in `.queues/backups/`.
 Each transition is a single atomic rename, so an interrupted scheduler can
 neither lose nor duplicate work. **One live cell per non-empty lane** is the
 invariant: `--per-agent` (1) enforces it, `-n` is the global ceiling and
@@ -175,5 +175,6 @@ tests/               the engine's unittest suite (locks, queues, scoring), on
 .tla/                TLA+ model of the run lifecycle (tla_verify replays
                      ledgers/transitions against it; see AGENTS.md)
 (an experiment's root holds its own fae.toml, experiment/ and
-workspaces.nosync/ — per-cell workspaces + the .orch/ control plane)
+workspaces.nosync/ — per-cell workspaces + the scheduling plane: .queues/,
+.conduct/, .locks/, transitions.log)
 ```

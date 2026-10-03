@@ -207,7 +207,7 @@ def _leaked_lock_holders():
         "verify-lock": lambda: bool(state.loop_parents()) or _verify_holders_alive(),
     }
     for name, is_entitled_alive in entitled.items():
-        p = common.ORCH / name
+        p = common.LOCKS / name
         if not p.exists() or not mutex.probe_held(p) or is_entitled_alive():
             continue
         for pid in _fd_holders(p):
@@ -232,7 +232,7 @@ def find_zombies():
     live = state.loop_parents()
     zs = []
     for lock, pid in _leaked_lock_holders():
-        zs.append(("lockholder", f"{pid}:{lock}", mutex.holder_name(common.ORCH / lock) or "?",
+        zs.append(("lockholder", f"{pid}:{lock}", mutex.holder_name(common.LOCKS / lock) or "?",
                    f"holds {lock} with no process entitled to it"))
     prefixes = _prefixes()
     for name in state.containers():
@@ -300,7 +300,7 @@ def find_zombies():
     # its holder dies. What can outlive a holder is INFRA, and an arm
     # slot's last-holder sidecar is the cheapest place to notice it.
     present = None                      # infra that exists, read once
-    for d in sorted(common.ORCH.glob("arm-*.slots/slot-*")):
+    for d in sorted(common.QUEUES.glob("arm-*.slots/slot-*")):
         if d.name.endswith(".holder"):
             continue
         owner = mutex.holder_name(d)
@@ -386,14 +386,14 @@ def reap_sweep():
     concurrent docker and kind sweeps racing on the same targets are host
     contention of their own."""
     cooldown = int(os.environ.get("ZOMBIE_REAP_COOLDOWN_S", 120))
-    stamp = common.ORCH / ".zombie-reap.done"
-    lock = common.ORCH / ".zombie-reap.lock"
+    stamp = common.CONDUCT / ".zombie-reap.done"
+    lock = common.CONDUCT / ".zombie-reap.lock"
     try:
         if time.time() - stamp.stat().st_mtime < cooldown:
             return []
     except OSError:
         pass
-    common.ORCH.mkdir(parents=True, exist_ok=True)
+    common.CONDUCT.mkdir(parents=True, exist_ok=True)
     try:
         lock.mkdir()
     except FileExistsError:

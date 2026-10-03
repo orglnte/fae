@@ -141,7 +141,7 @@ def _agent_io(boxes=()):
 
 
 def _agent_io_book(write=None):
-    p = common.ORCH / "agent-io.json"
+    p = common.QUEUES / "agent-io.json"
     if write is not None:
         p.write_text(json.dumps(write))
         return write
@@ -643,7 +643,7 @@ def conduct_diagnose(_args):
     for kind, ident, owner, note in zs:
         print(f"  {kind:<10} {ident}  owner={owner}  {note}")
     live = state.loop_parents()
-    up = (common.ORCH / "conduct.pid").exists()
+    up = (common.CONDUCT / "conduct.pid").exists()
     print(f"\n— ADMISSION PREVIEW — {len(live)} live loop(s), per-agent cap "
           f"{common.PER_AGENT_CAP}, run {'UP' if up else 'DOWN'}"
           + ("" if up else " (nothing admits until `experiment run`)"))

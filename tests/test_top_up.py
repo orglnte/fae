@@ -1,6 +1,6 @@
 """top-up: fill missing reps to a target, rep-outer, without double-queueing.
 
-Every test patches runs.common.WS / runs.common.ORCH to a TemporaryDirectory. Nothing here
+Every test patches runs.common.WS and the scheduling plane to a TemporaryDirectory. Nothing here
 starts a process: top_up only writes queue specs and never calls
 conduct.
 """
@@ -22,7 +22,7 @@ def ns(**kw):
 
 
 class TopUpTestCase(OrchTmpCase):
-    # WS/ORCH temp-tree patching is inherited from OrchTmpCase.
+    # WS and plane temp-tree patching is inherited from OrchTmpCase.
     def specs(self, agent="sonnet"):
         return [runs.queue.read_spec(p) for p in runs.queue.lane_specs(agent)]
 

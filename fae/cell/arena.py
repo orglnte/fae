@@ -26,8 +26,8 @@ MAX_SLOTS, MAX_ARM_SLOTS = 16, 8
 
 class Arena:
 
-    def __init__(self, orch, work_slots=7, arm=None, arm_slots=1):
-        self.orch = Path(orch)
+    def __init__(self, queues, work_slots=7, arm=None, arm_slots=1):
+        self.queues = Path(queues)
         self.work_slots = int(work_slots)
         self.arm = arm
         self.arm_slots = int(arm_slots)
@@ -56,14 +56,14 @@ class Arena:
         if self.work_slots > MAX_SLOTS:
             raise RuntimeError(f"WORK_SLOTS={self.work_slots} exceeds the "
                                f"reserved fd block ({MAX_SLOTS})")
-        d = self.orch / "work-slots"
+        d = self.queues / "work-slots"
         for i in range(1, self.work_slots + 1):
             self._adopt(d / f"slot-{i}", FD_SLOT_BASE + i)
         if self.arm:
             if self.arm_slots > MAX_ARM_SLOTS:
                 raise RuntimeError(f"arm '{self.arm}' wants {self.arm_slots} "
                                    f"slots, over the reserved block")
-            d = self.orch / f"arm-{self.arm}.slots"
+            d = self.queues / f"arm-{self.arm}.slots"
             for i in range(1, self.arm_slots + 1):
                 self._adopt(d / f"slot-{i}", FD_ARM_BASE + i)
         return self
