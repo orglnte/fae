@@ -34,17 +34,12 @@ LOC_MEAN_W = 4
 
 CSV_COLUMNS = [
     "cell_id", "model", "task", "variant", "factors", "impl", "repeat",
-    "consistency_defect_count", "first_pass_correct", "correctness_tier",
+    "first_pass_correct", "correctness_tier",
     "deploy_ok", "e2e_pass", "e2e_total", "e2e_green",
     "load_errors", "load_total", "k6_available", "verify_stage_failed",
     "iterations_to_green", "green", "revoked", "budget_exhausted",
     "agent_s_total", "agent_s_per_attempt",
     "files", "language_count", "lines", "sloc", "total_lines", "grader", "grading_missing",
-    # WHICH model graded this row. consistency_defect_count is the primary
-    # metric and an LLM judge produces it, so the judge's identity belongs in
-    # the released data next to the number it produced: a corpus graded by two
-    # different models would otherwise be indistinguishable from one.
-    "grader_model",
 ]
 
 
@@ -88,16 +83,13 @@ def rate(values: list) -> float | None:
     return round(sum(bools) / len(bools), 4) if bools else None
 
 
-# score.json is written by score_cell.py from these four sources. aggregate is
+# score.json is written by score_cell.py from these three sources. aggregate is
 # decoupled from score_cell — it only globs the records — so it will happily
 # print a scoreboard built from records that predate a scoring-rule change,
-# and that table looks identical to a correct one. Both of 2026-07-29's
-# scoring fixes (the content-based surface filter, and
-# consistency_defect_count being structurally 0) produced exactly that: the
-# numbers only moved once full `score` re-ran, because `aggregate` alone had
-# re-read unchanged records. mtime is a coarse signal but a free one, and it
-# catches the case that actually happens — a source rewritten after its record.
-_SCORE_SOURCES = ("metrics.json", "iterations.log", "defects.json", "cell.env")
+# and that table looks identical to a correct one. mtime is a coarse signal
+# but a free one, and it catches the case that actually happens — a source
+# rewritten after its record.
+_SCORE_SOURCES = ("metrics.json", "iterations.log", "cell.env")
 
 
 def stale_records() -> list[tuple[str, str]]:
@@ -194,7 +186,6 @@ def flat_row(c: dict) -> dict:
         "factors": factors_text(c.get("factors")),
         "impl": c.get("impl"),
         "repeat": c.get("repeat"),
-        "consistency_defect_count": c.get("consistency_defect_count"),
         "first_pass_correct": c.get("first_pass_correct"),
         "correctness_tier": c.get("correctness_tier"),
         "deploy_ok": c.get("deploy_ok"),
@@ -217,7 +208,6 @@ def flat_row(c: dict) -> dict:
         "total_lines": surface.get("total_lines"),
         "grader": c.get("grader"),
         "grading_missing": c.get("grading_missing"),
-        "grader_model": c.get("grader_model"),
     }
 
 
@@ -259,24 +249,6 @@ def cell_metrics(cells: list[dict]) -> dict:
         # reconstructing it from a rounded rate is a needless way to get
         # a wrong count back.
         "n_green": sum(1 for c in cells if c.get("green")),
-        # GREEN CELLS ONLY. Averaging defects over cells that never greened
-        # compares a delivered implementation against one that does not work:
-        #   * a non-green cell's files are whatever its last failed attempt
-        #     left behind, possibly mid-edit, which is not an artifact anyone
-        #     claims to have delivered;
-        #   * it couples H1a to the success metric — if one arm greens more
-        #     often, defects and green_rate stop being independent, which is
-        #     precisely what the hypothesis needs them to be.
-        # NOT because a non-green cell authored less: every non-green cell in
-        # the corpus is budget_exhausted, i.e. it spent all 10 attempts. An
-        # earlier version of this comment argued the metric would "reward
-        # failing early" — nothing fails early here.
-        # Same rule _load_error_rate already applies ("load is only measured on
-        # green builds"); this metric simply never got it.
-        "mean_consistency_defects": mean([c.get("consistency_defect_count")
-                                          for c in cells if c.get("green")]),
-        "n_green_graded": sum(1 for c in cells
-                              if c.get("green") and c.get("consistency_defect_count") is not None),
         "first_pass_correct_rate": rate([c.get("first_pass_correct") for c in cells]),
         # AUTO (verify.sh): live functional + load outcomes
         "e2e_green_rate": rate([c.get("e2e_green") for c in cells]),
@@ -298,12 +270,10 @@ def cell_metrics(cells: list[dict]) -> dict:
         "max_agent_s_to_green": max_val([c.get("agent_s_total") for c in cells if c.get("green")]),
         "mean_agent_s_per_attempt": mean([c.get("agent_s_per_attempt") for c in cells]),
         # metric 4 (agent-authored surface)
-        # GREEN CELLS ONLY, for the reason spelled out above mean_consistency_
-        # defects: a non-green cell's files are whatever its last failed attempt
-        # left, possibly mid-edit, so counting them measured how far an arm got
-        # before giving up rather than how much code the task takes. It also put
-        # the size metrics on a different population from ITG and DEFECTS, which
-        # made rows internally inconsistent.
+        # GREEN CELLS ONLY: a non-green cell's files are whatever its last failed
+        # attempt left, possibly mid-edit, so counting them would measure how far
+        # an arm got before giving up rather than how much code the task takes,
+        # on a different population from ITG.
         "n_green_surface": sum(1 for c in cells
                                if c.get("green")
                                and (c.get("author_surface") or {}).get("lines") is not None),
@@ -358,14 +328,6 @@ def format_loc(mean_lines, min_lines, max_lines) -> str:
     lo = mean_lines - (min_lines if min_lines is not None else mean_lines)
     hi = (max_lines if max_lines is not None else mean_lines) - mean_lines
     return f"{mean_lines:>{LOC_MEAN_W}.0f}   -{lo:.0f}/+{hi:.0f}"
-
-
-def failure_class_counts(cells: list[dict]) -> dict:
-    counts: dict[str, int] = defaultdict(int)
-    for c in cells:
-        for d in c.get("defects", []) or []:
-            counts[str(d.get("failure_class", "unspecified"))] += 1
-    return dict(counts)
 
 
 def delta(a: float | None, b: float | None) -> float | None:
@@ -609,9 +571,7 @@ def group_and_rank(cells: list[dict]) -> dict:
 
     scored = {}
     for key, cs in groups.items():
-        m = cell_metrics(cs)
-        m["failure_class_counts"] = failure_class_counts(cs)
-        scored[key] = m
+        scored[key] = cell_metrics(cs)
 
     def rank(kv):
         (mod, var), m = kv
@@ -703,50 +663,27 @@ def main() -> int:
 
     by_mv = group_and_rank(cells)
 
-    metrics = ["mean_consistency_defects", "first_pass_correct_rate",
+    metrics = ["first_pass_correct_rate",
                "e2e_green_rate", "green_rate", "revoked_rate",
                "mean_e2e_pass_rate", "load_error_rate_on_green",
                "mean_iterations_to_green", "budget_censored_rate",
                "mean_agent_s_to_green", "mean_agent_s_per_attempt",
                "mean_files", "mean_languages", "mean_lines"]
 
-    # Grading provenance travels WITH the aggregate, not just per cell. The
-    # primary metric (mean_consistency_defects) is produced by an LLM judge, so
-    # a summary that does not name the judge is uninterpretable — and a corpus
-    # graded partly by one model and partly by another would look identical to
-    # a uniformly graded one. Counting per model makes a split visible.
-    graders: dict[str, int] = {}
-    for c in cells:
-        gm = c.get("grader_model")
-        if gm:
-            graders[gm] = graders.get(gm, 0) + 1
-    ungraded = sum(1 for c in cells if not c.get("grader_model"))
-
     summary = {
         "total_cells": len(cells),
-        "grading_provenance": {
-            "grader_models": graders,          # model -> cells graded by it
-            "cells_graded": sum(graders.values()),
-            "cells_ungraded": ungraded,
-            "single_grader": len(graders) <= 1,
-        },
         "cells_missing_grading": sum(1 for c in cells if c.get("grading_missing")),
         "by_model_variant": by_mv,
         "baseline": ({"impl": other, "delta_by_model_variant": compare}
                      if compare is not None else None),
         # the gaps between variants and the reading notes are the experiment's
         **experiment_summary(cells, metrics),
-        "cells_missing_defects": sum(1 for c in cells if c.get("consistency_defect_count") is None)
     }
 
     OUT_JSON.write_text(json.dumps({"cells": rows, "summary": summary}, indent=2) + "\n")
     
     print(f"\n[OK] Wrote {len(rows)} cell records to: {OUT_CSV}")
     print(f"[OK] Wrote aggregate summary to: {OUT_JSON}")
-    
-    missing_defects = summary["cells_missing_defects"]
-    if missing_defects:
-        print(f"[WARN] {missing_defects} cell(s) missing defects.json. LLM-graded metrics are excluded from averages; auto-metrics (Green, ITG, LoC) are included.")
     
     cols = table_columns(other if compare is not None else None)
     width = sum(w for _, w in cols) + 3 * (len(cols) - 1)
@@ -802,20 +739,6 @@ def main() -> int:
         print("   counts, cut against baseline: the p-value (* p<.05, ** p<.01), then the")
         print("   same result spelled out (not sig / significant / strong). '-' when")
         print("   either side has 0 cells.")
-    # consistency_defect_count (DEFECTS) is judge-produced and not printed in
-    # this table, but it feeds results.csv/json: name the judge next to it
-    # there too, and make a mixed-grader corpus impossible to miss.
-    prov = (summary or {}).get("grading_provenance", {})
-    gms = prov.get("grader_models") or {}
-    if not gms:
-        print(" * consistency_defect_count: no cell graded yet — run "
-              "`cli.py results grade --judge-model <model>` (required).")
-    else:
-        detail = ", ".join(f"{m} ({n} cell{'s' if n != 1 else ''})" for m, n in sorted(gms.items()))
-        print(f" * consistency_defect_count graded by: {detail}; "
-              f"{prov.get('cells_ungraded', 0)} cell(s) ungraded.")
-        if not prov.get("single_grader", True):
-            print("   WARNING: cells in this table were graded by DIFFERENT models — not comparable.")
     print()
     
     return 0

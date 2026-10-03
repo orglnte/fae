@@ -71,7 +71,7 @@ loads `<EXPERIMENT_DIR>/__init__.py` BY PATH as the package `experiment`
 variants (read on first use from `<EXPERIMENT_DIR>/variants/*.toml` by
 `fae/cell/variants/files.py`, each file's `[infra] class` imported from the
 package then), `GATE`, `CONFIG`, `fingerprint_trees`, `verifier_class()`,
-`verbs()`, `taint_rules`, `reference_workspace`, `POOLED_MODELS`,
+`verbs()`, `taint_rules`, `POOLED_MODELS`,
 `report_summary`. A variant file's unknown key is refused, and so is an
 input the template also provides. `tests/test_experiment_definition.py`
 pins that no module under `cli.py` or `fae/` names the package. The engine
@@ -630,19 +630,6 @@ every prior agent's memory — cross-run leakage invisible in the results.
   and it is content-based, not name-based: a name list cannot catch a vendor
   tree an agent downloads at runtime, and binary bytes counted as lines swamp
   a group's mean.
-- **The judge model is an explicit parameter.** `cli.py results grade`
-  requires `--judge-model` (or `$JUDGE_MODEL`), with no default, so a corpus
-  is never graded half by one model and half by another; it is recorded per
-  cell (`defects.json`'s `grader_model`) and exported as a column.
-- **Every cell is graded TWICE, and only when terminal.** One `results
-  grade` makes two independent judge passes per cell, and
-  `fae/scoring/grader_agreement.py` reports Cohen's κ with raw agreement: a
-  judge-produced metric without a reliability figure is an opinion.
-  Resumability is per pass. Grading an in-flight cell is wrong — its
-  artifacts change under the judge; doneness comes from `fae/ledger.py`.
-- **"Grading", not "coding".** Assigning taxonomy codes to observed defects
-  is *grading*; "coding" is what the agent under study does. `code` as a
-  FIELD (a taxonomy identifier) keeps its name.
 
 ## 8. Data-destruction rules
 

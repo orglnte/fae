@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Score ONE experiment cell into workspaces.nosync/<cell_id>/score.json.
 
-Auto-computes author-surface + iterations-to-green from the cell;
-merges the human-graded fields from the cell's grading.json (fill it from
-fae/scoring/grading-template.json). Stdlib only — no install needed.
+Computes the authored surface, iterations-to-green, the verify's results
+and the agent's time from the cell's own files. Stdlib only.
 
 Usage:
     python3 fae/scoring/score_cell.py <cell_id>
@@ -214,9 +213,8 @@ def author_surface(artifacts_dir: Path, cache: dict | None = None) -> dict:
                 fresh[rel] = ent
             else:
                 p = Path(full)
-                # ONE definition of authored surface, shared with
-                # count_defects.py (fae/scoring/surface_filter.py); content-based,
-                # so a vendor tree the agent downloads is still caught.
+                # ONE definition of authored surface (fae/scoring/surface_filter.py);
+                # content-based, so a vendor tree the agent downloads is still caught.
                 if not surface_filter.countable(p, artifacts_dir, rel):
                     fresh[rel] = {"sig": sig, "skip": True}
                     continue
@@ -356,38 +354,6 @@ def score_one(cell_id: str, cell=None) -> int:
     agent_time = cached_input(cache, "agent_time", ws / "iterations.log",
                               parse_agent_time)
 
-    # LLM Judge (defects.json)
-    defects_path = ws / "defects.json"
-    defects_missing = not defects_path.is_file()
-    defects_data: dict = {}
-    if not defects_missing:
-        def _parse_defects(p):
-            try:
-                return json.loads(p.read_text())
-            except json.JSONDecodeError:
-                return None
-        defects_data = cached_input(cache, "defects", defects_path, _parse_defects)
-        if defects_data is None:
-            print(f"ERROR: {defects_path} is not valid JSON", file=sys.stderr)
-            return 1
-
-    if defects_missing:
-        consistency_defect_count = None
-        codes = []
-    else:
-        codes = defects_data.get("codes", []) or []
-        # THE primary metric. Each entry is an OBJECT — {"attempt":…,
-        # "code":"CAD5", "artifacts":[…], "description":…} from the LLM judge,
-        # and the same shape in grading-template.json's defects[] for a human
-        # grader. This used to be `str(code).startswith("CAD")`, which
-        # stringifies the whole dict to "{'attempt': None, 'code': 'CAD5'…}" —
-        # always starting with "{", so the count was structurally pinned to 0.
-        # It went unseen because no defects.json existed until 2026-07-29.
-        # Tolerate a bare string entry too, in case a hand-written file uses one.
-        consistency_defect_count = sum(
-            1 for c in codes
-            if str(c.get("code", "") if isinstance(c, dict) else c).startswith("CAD"))
-
     itg = iters["iterations_to_green"]
     
     record = {
@@ -401,10 +367,6 @@ def score_one(cell_id: str, cell=None) -> int:
         "impl": env.get("IMPL") or "bash",
         "repeat": int(env.get("REPEAT", "1")) if env.get("REPEAT", "1").isdigit() else env.get("REPEAT"),
         "attempt_budget": int(env["ATTEMPT_BUDGET"]) if env.get("ATTEMPT_BUDGET", "").isdigit() else None,
-        
-        # metric 1: LLM Judge (defects.json)
-        "consistency_defect_count": consistency_defect_count,
-        "codes": codes,
         
         # metric 2b (AUTO — verify.sh live functional + load result)
         "deploy_ok": metrics.get("deploy_ok"),
@@ -430,9 +392,6 @@ def score_one(cell_id: str, cell=None) -> int:
         
         # metric 4
         "author_surface": surface,
-        
-        # provenance
-        "grader_model": defects_data.get("grader_model"),
     }
 
     with cell.changing():
