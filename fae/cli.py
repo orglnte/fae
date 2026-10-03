@@ -110,9 +110,11 @@ def cell_spawn(
 def cell_pause(selectors: list[str] = typer.Argument(..., help=SEL + " Must match ONE cell."),
                reason: str = typer.Option("manual", "--reason",
                                           help="recorded in .paused; roster/manual survive `experiment resume all`")):
-    """Ask ONE cell to stop at its next safe point. Cooperative, not a signal.
-    Bulk pause is `experiment pause`."""
-    ops.pause(_ns(selectors=list(selectors), reason=reason))
+    """Ask ONE cell to stop at its next safe point: the run signals its loop,
+    which records the pause and stands down there. Bulk pause is
+    `experiment pause`."""
+    if ops.pause(_ns(selectors=list(selectors), reason=reason)):
+        conduct.Conduct().act_on_requests()
 
 
 @cell_app.command("resume")
@@ -136,10 +138,12 @@ def cell_stop(selectors: list[str] = typer.Argument(..., help=SEL + " Must match
                                           help="TERMINAL: write .cancelled — DONE·cancelled, never comes back"),
               dry_run: bool = typer.Option(False, "--dry-run",
                                            help="list what would be stopped and dropped, do nothing")):
-    """Halt ONE cell NOW: loop killed, infra torn down, queued specs
-    removed (backed up). Resumable — PAUSED·stopped — unless --cancel.
-    Files are never touched. Bulk stop is `experiment stop`."""
-    ops.stop_cells(_ns(selectors=list(selectors), cancel=cancel, dry_run=dry_run))
+    """Halt ONE cell NOW: the run SIGTERMs its loop (SIGKILL past a grace),
+    tears its infra down and removes its queued specs (backed up).
+    Resumable — PAUSED·stopped — unless --cancel. Files are never touched.
+    Bulk stop is `experiment stop`."""
+    if ops.stop_cells(_ns(selectors=list(selectors), cancel=cancel, dry_run=dry_run)):
+        conduct.Conduct().act_on_requests()
 
 
 @cell_app.command("tail")

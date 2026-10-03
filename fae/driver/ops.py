@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import collections
 import os
-import signal
 import subprocess
 import sys
 import threading
@@ -243,13 +242,12 @@ def queued_cids_many(selectors):
 
 
 def request_pause(cids, reason, who="operator"):
-    """Write the per-cell stop request. COOPERATIVE: loops poll it at their own
-    safe points (attempt boundary, verify-lock queue, retry sleep) and exit
-    through their teardown trap.
+    """Pause each cell (Cell.pause). COOPERATIVE: a running loop is signalled,
+    records the pause itself and stands down at its next safe point (attempt
+    boundary, verify-lock queue, retry sleep) through its teardown.
 
-    Nothing is signalled. The old pause SIGSTOPped loops, which is not a pause
-    at all — a frozen loop still holds the per-arm lock, so pausing one agent
-    would deadlock that arm for every other agent until a human noticed."""
+    Never SIGSTOP: a frozen loop still holds the per-arm lock, and its agent
+    and verify containers keep running."""
     written = []
     for cid in cids:
         if state.pause_lock(cid):
@@ -269,7 +267,7 @@ def request_pause(cids, reason, who="operator"):
         _st = state.cell_state(common.WS / cid, {}, set())
         if _st and _st["state"] == "DONE":
             continue
-        common.cell(cid).request_pause(reason, who)
+        common.cell(cid).pause(reason, who)
         written.append(cid)
     return written
 
@@ -294,6 +292,8 @@ def is_blanket(sels):
 
 
 def pause(args):
+    """Queue a pause of ONE cell for the run to act on (pause_cell). Returns
+    the cid queued, or None."""
     sels = _selector_list(args)
     cids = select_cells_many(sels)
     if not cids:
@@ -302,11 +302,18 @@ def pause(args):
         sys.exit(f"`pause` acts on exactly ONE cell; {' '.join(sels)!r} "
                  f"matches {len(cids)} — bulk pause goes through: "
                  f"experiment pause AGENT...|all")
-    request_pause(cids, args.reason)
-    print(f"pause requested [{args.reason}] for {len(cids)} cell(s) — each loop "
-          f"stops at its next safe point; workspaces are preserved")
-    for cid in cids:
-        print(f"  {cid}")
+    common.queues().request(cids[0], "pause", reason=args.reason, who="operator")
+    print(f"pause requested [{args.reason}] for {cids[0]}")
+    return cids[0]
+
+
+def pause_cell(cid, reason, who="operator"):
+    """The run's half of `cell pause`."""
+    if request_pause([cid], reason, who):
+        print(f"  {cid}: paused [{reason}] — its loop stops at its next safe point; "
+              f"workspace preserved")
+    else:
+        print(f"  {cid}: not paused (already paused, or done)")
 
 
 SEALABLE = {"green": "green", "failed": "budget", "revoked": "revoked"}
@@ -587,44 +594,12 @@ def _await_exit(pid, grace, poll=2):
     return not zombies._pid_alive(pid)
 
 
-def _kill_group(pid, sig):
-    """The driver starts its own session, and the clients it runs (the verify
-    container's, the agent's) live in it: a signal to the pid alone leaves
-    them running."""
-    try:
-        os.killpg(os.getpgid(pid), sig)
-    except (OSError, ProcessLookupError):
-        try:
-            os.kill(pid, sig)
-        except (OSError, ProcessLookupError):
-            pass
-
-
-def _bringup_teardown(cid):
-    """The variant's teardown for the cell's last arrangement: its runner
-    stopped, then its infra's verify_teardown (the
-    per-verify cluster, the daemon's leases, the sidecar's inner world) —
-    what the verify's own `finally` would have run had it been allowed to
-    finish. The verify container died with the kill; this runs in a fresh
-    one of the same image (fae/cell/verify.py: run_teardown). Best effort."""
-    from fae.cell import verify as _verify
-    from fae.cell.variants import _ShimCell
+def _named_cell(cid, variant=None):
+    """The cell `cid`, its identity read from its id where its workspace does
+    not record it."""
     p = common.parse_cell_id(cid)
-    if not p:
-        return
-    cls = common.definition().variant(p[1])
-    ws = common.WS / cid
-    if cls is None or not (ws / "artifacts").is_dir():
-        return
-    cell = _ShimCell(cid, ws, common.ROOT)
-    cell.variant = p[1]
-    infra = cls.INFRA(cls, cell)
-    run_out = ws / _verify.RUN_OUT
-    run_out.mkdir(exist_ok=True)
-    ctx = _verify.Ctx(root=str(common.ROOT), experiment_dir=str(cell.conf.get("EXPERIMENT_DIR")),
-                      workspace=str(ws), artifacts=str(ws / "artifacts"), out=str(run_out),
-                      cid=cid, task=p[2], variant=p[1])
-    _verify.run_teardown(ctx, infra, timeout_s=TEARDOWN_TIMEOUT_S, log_dir=ws)
+    return common.cell(cid, p[2] if p else "T1", variant or (p[1] if p else ""),
+                       p[3] if p else 1)
 
 
 def _variant_teardown(variant, cid, timeout=None):
@@ -641,8 +616,7 @@ def _variant_teardown(variant, cid, timeout=None):
         return
 
     def run():
-        p = common.parse_cell_id(cid)
-        c = common.cell(cid, p[2] if p else "T1", variant, p[3] if p else 1)
+        c = _named_cell(cid, variant)
         try:
             c.teardown()
         except Exception as e:           # Cell.teardown already ALERTs; a
@@ -679,8 +653,8 @@ def teardown_cell(cid, variant=None, *, reason, grace=STOP_GRACE_S,
 
     outcome = "absent"
     if pid:
-        # .paused is the loop's own stand-down signal; it exits through
-        # _cell_exit, the only path that tears down in the right order.
+        # The pause is the loop's own stand-down; it exits through its
+        # teardown, the only path that tears down in the right order.
         request_pause([cid], reason, who="conduct")
         # A loop parked inside the agent command notices nothing until that
         # command returns. Removing the AGENT box (only that box — the sidecar
@@ -691,16 +665,9 @@ def teardown_cell(cid, variant=None, *, reason, grace=STOP_GRACE_S,
         if _await_exit(pid, grace):
             outcome = "cooperative"
         else:
-            try:
-                os.kill(pid, signal.SIGTERM)   # bash runs the EXIT trap on this
-            except (OSError, ProcessLookupError):
-                pass
-            if _await_exit(pid, TERM_GRACE_S):
-                outcome = "termed"
-            else:
-                _kill_group(pid, signal.SIGKILL)   # skips the trap: from here
-                _bringup_teardown(cid)             # the infra is ours
-                outcome = "killed"
+            outcome = _named_cell(cid).kill(TERM_GRACE_S, TEARDOWN_TIMEOUT_S)
+            if outcome == "absent":        # it ended between the wait and the kill
+                outcome = "cooperative"
 
     # Always, and always AFTER the loop is dead: running it under a live loop
     # tears down infra the loop is still using. Idempotent, so the
@@ -712,25 +679,17 @@ def teardown_cell(cid, variant=None, *, reason, grace=STOP_GRACE_S,
 
 
 def stop_cells(args):
-    """Halt ONE cell NOW: TERM its loop, tear down its infra, take its
-    queued specs out of the backlog (backed up). Default is RESUMABLE —
-    the cell reads PAUSED·stopped and `cell resume CID` continues it.
-    `--cancel` is the terminal verdict: writes `.cancelled`, the cell renders
-    DONE·cancelled and never comes back (KilledStaysDead).
+    """Queue a stop of ONE cell for the run to act on (stop_cell): its loop
+    killed, its infra torn down, its queued specs out of the backlog (backed
+    up). Default is RESUMABLE — the cell reads PAUSED·stopped and `cell
+    resume CID` continues it. `--cancel` is the terminal verdict: writes
+    `.cancelled`, the cell renders DONE·cancelled and never comes back
+    (KilledStaysDead). Returns the cids queued.
 
     Exactly ONE cell by the operator's 2026-08-12 rule: anything matching
     more goes through experiment stop, so there is a single bulk path and a
-    single cap owner.
-
-    Order matters and is the lesson of 2026-07-24: the stop request goes in
-    FIRST so reconcile cannot respawn into the gap, then the loop dies, then
-    the INFRA is torn down explicitly — a SIGKILLed loop never runs its
-    EXIT trap, so nothing would release the arm lock or delete the per-cell
-    kind cluster / dind sidecar, and five orphan clusters once accumulated
-    exactly that way.
-
-    Files are NEVER touched: a stop halts the run, it does not judge the
-    data. Workspace disposal is a separate, explicit human act."""
+    single cap owner. Files are NEVER touched: a stop halts the run, it does
+    not judge the data."""
     sels = _selector_list(args)
     cids = select_cells_many(sels)
     # Specs with no workspace are invisible to the selector, so a stop that
@@ -764,69 +723,45 @@ def stop_cells(args):
     if not cids and not q_only:
         print("nothing to stop (all matches are DONE)"); return
     cancel = getattr(args, "cancel", False)
-    # reason "killed" keeps the TLA mapping (request_pause emits Kill for it,
+    # Specs that never had a workspace are the queue's alone.
+    _shelve_specs(q_only, "cancelled" if cancel else "stopped")
+    for cid in cids:
+        common.queues().request(cid, "stop", cancel=cancel)
+        print(f"{'cancel' if cancel else 'stop'} requested for {cid}")
+    return cids
+
+
+def stop_cell(cid, cancel=False):
+    """The run's half of `cell stop`: halt the cell now (Cell.kill), its
+    infra torn down, its queued specs out of the backlog."""
+    # reason "killed" keeps the TLA mapping (Cell.pause emits Kill for it,
     # Pause otherwise) and resume's named-cid-only guard for cancelled cells;
     # "stopped" renders PAUSED·stopped and resumes like any pause.
-    request_pause(cids, "killed" if cancel else "stopped")
-    # DURABLE INTENT FIRST, before any slow or failure-prone work. This used to
-    # be written per-cid at the END of the teardown loop below, after SIGKILL,
-    # `docker rm -f` and the variant teardown — so a Ctrl-C, an exception or a
-    # hung docker call between here and there left the cell holding
-    # `.paused reason=killed` with NO `.cancelled`. That cell renders
-    # PAUSED·killed instead of DONE·cancelled, which means the kill did not
-    # stick: cell_state falls through to the pause axis and the cell is
-    # respawnable again.
-    #
-    # A cancel that is written last can be lost to any interruption between
-    # the kill and the write, and a killed cell that reads as merely paused
-    # is respawned (.tla/Runs.tla, KilledStaysDead).
+    request_pause([cid], "killed" if cancel else "stopped")
+    cell = _named_cell(cid)
+    # DURABLE INTENT FIRST, before any slow or failure-prone work: a cancel
+    # written last can be lost to any interruption between the kill and the
+    # write, and a killed cell that reads as merely paused is respawned
+    # (.tla/Runs.tla, KilledStaysDead).
     if cancel:
-        for cid in cids:
-            common.cell(cid).cancel()
-    # Scrub the queue for BOTH: cells we just cancelled, and specs that never
-    # had a workspace to cancel. `queues` was pruned by the selector: a full
-    # cid or agent name touches only its own lane's file.
-    _shelve_specs(set(cids) | set(q_only),
-                  "cancelled" if cancel else "stopped")
-    parents = state.loop_parents()
-    for cid in cids:
-        pid = parents.get(cid)
-        if pid:
-            try:
-                _kill_group(pid, signal.SIGKILL)
-                print(f"  {cid}: loop {pid} killed")
-                # trace conformance: a plain stop emitted Pause (intent only —
-                # the agent's loop is still live); the SIGKILL is exactly
-                # Crash(c) ("SIGKILL / OOM / laptop sleep"). Without it the
-                # replay's loop never reaches "none" and the eventual resume
-                # Spawn reads as a violation. --cancel already emitted Kill,
-                # which takes loop to "none" itself — Crash would be disabled.
-                if not cancel:
-                    common._emit_transition("Crash", cid, "stopped-by-operator")
-            except ProcessLookupError:
-                pass
-        _bringup_teardown(cid)
-        parsed = common.parse_cell_id(cid)
-        subprocess.run(["docker", "rm", "-f", "-v", common.agent_container(cid),
-                        *common.infra_containers(parsed[1] if parsed else "", cid)],
-                       capture_output=True)
-        st = state.cell_state(common.WS / cid, {}, set())
-        if st:
-            _variant_teardown(st["variant"], cid)
-    # With --cancel, .cancelled is what makes it STICK — the cell renders
-    # DONE·cancelled, reconcile treats it as terminal, resume skips DONE, and
-    # conduct's doneness check sees a finished cell. It is written above,
-    # before teardown, so an interrupted cancel still sticks. (The cancel axis
-    # was dead code once, and `resume all` resurrected killed cells — audit
-    # finding 5.)
+        cell.cancel()
+    _shelve_specs({cid}, "cancelled" if cancel else "stopped")
+    outcome = cell.kill(TERM_GRACE_S, TEARDOWN_TIMEOUT_S)
+    if outcome != "killed":
+        cell.clean_up(TEARDOWN_TIMEOUT_S)
+    if outcome != "absent":
+        print(f"  {cid}: loop {outcome}")
+        # trace conformance: a plain stop emitted Pause (intent only); the
+        # loop ending without its own transition is Crash(c). --cancel
+        # emitted Kill, which takes the loop to "none" itself.
+        if not cancel:
+            common._emit_transition("Crash", cid, "stopped-by-operator")
     if cancel:
-        print(f"cancelled {len(cids)} cell(s); infra torn down, workspaces "
-              f"untouched (un-cancel: rm workspaces.nosync/<cid>/.cancelled + "
-              f"cli.py cell resume <cid>)")
+        print(f"  {cid}: cancelled; infra torn down, workspace untouched (un-cancel: "
+              f"rm workspaces.nosync/{cid}/.cancelled + cli.py cell resume {cid})")
     else:
-        print(f"stopped {len(cids)} cell(s) — PAUSED·stopped, resumable "
-              f"(cli.py cell resume <cid>); infra torn down, queued specs "
-              f"backed up, workspaces untouched")
+        print(f"  {cid}: stopped — PAUSED·stopped, resumable (cli.py cell resume "
+              f"{cid}); infra torn down, queued specs backed up, workspace untouched")
 
 
 def spawn_matrix(args):

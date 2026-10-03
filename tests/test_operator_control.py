@@ -15,6 +15,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from fae.cell.cell import Cell
+
 from _ctx import runs, OrchTmpCase
 
 CIDS = [
@@ -438,7 +440,10 @@ class TestStopCells(OperatorTestCase):
     --cancel, which is the terminal verdict."""
 
     def _stop(self, cid, cancel=False, live=None):
-        with mock.patch.object(runs.state, "loop_parents", return_value=live or {}), \
+        live = live or {}
+        with mock.patch.object(runs.state, "loop_parents", return_value=live), \
+             mock.patch.object(Cell, "loop_pid", lambda c: live.get(c.cid)), \
+             mock.patch.object(Cell, "_gone", staticmethod(lambda pid, grace: True)), \
              mock.patch.object(runs.state, "loop_pids", return_value={}), \
              mock.patch.object(runs.state, "containers", return_value=[]), \
              mock.patch.object(runs.state, "cell_state",
@@ -449,6 +454,7 @@ class TestStopCells(OperatorTestCase):
              mock.patch.object(runs.os, "kill"):
             runs.ops.stop_cells(mock.Mock(selectors=[cid], cancel=cancel,
                                       dry_run=False))
+            runs.conduct.Conduct().act_on_requests()
 
     def test_default_stop_is_resumable(self):
         cid = CIDS[0]
@@ -485,6 +491,8 @@ class TestStopCells(OperatorTestCase):
         (self.ws / cid / "artifacts").mkdir(parents=True, exist_ok=True)
         groups, torn = [], []
         with mock.patch.object(runs.state, "loop_parents", return_value={cid: 4242}), \
+             mock.patch.object(Cell, "loop_pid", lambda c: 4242), \
+             mock.patch.object(Cell, "_gone", staticmethod(lambda pid, grace: False)), \
              mock.patch.object(runs.state, "loop_pids", return_value={}), \
              mock.patch.object(runs.state, "containers", return_value=[]), \
              mock.patch.object(runs.state, "cell_state",
@@ -498,6 +506,7 @@ class TestStopCells(OperatorTestCase):
                                side_effect=lambda pg, sig: groups.append((pg, sig))), \
              mock.patch.object(runs.os, "kill"):
             runs.ops.stop_cells(mock.Mock(selectors=[cid], cancel=False, dry_run=False))
+            runs.conduct.Conduct().act_on_requests()
         self.assertEqual(groups, [(7777, runs.signal.SIGKILL)])
         self.assertEqual(len(torn), 1)
         ctx, infra = torn[0]
@@ -847,6 +856,30 @@ class TestLaneWrites(OperatorTestCase):
         self.assertEqual(runs.queues.unpark_lane("sonnet"), "not-paused")
 
 
+class TestOneCellGoesThroughTheRun(OperatorTestCase):
+    """`cell pause` and `cell stop` queue a request; the run acts on it, or
+    the CLI does when no run is up."""
+
+    def test_a_pause_is_queued_then_acted_on(self):
+        cid = CIDS[0]
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(runs.ops.pause(mock.Mock(selectors=[cid], reason="roster")), cid)
+            self.assertFalse((self.ws / cid / ".paused").exists())
+            self.assertEqual([r["verb"] for _, r in runs.queues.requests()], ["pause"])
+            runs.conduct.Conduct().act_on_requests()
+        self.assertTrue((self.ws / cid / ".paused").read_text().startswith("roster by=operator"))
+        self.assertEqual(runs.queues.requests(), [])
+
+    def test_while_the_run_is_up_the_request_waits_for_it(self):
+        cid = CIDS[0]
+        with contextlib.redirect_stdout(io.StringIO()):
+            runs.ops.pause(mock.Mock(selectors=[cid], reason="manual"))
+            with mock.patch.object(runs.conduct.Conduct, "pid", return_value=os.getpid() + 1):
+                runs.conduct.Conduct().act_on_requests()
+        self.assertFalse((self.ws / cid / ".paused").exists())
+        self.assertEqual(len(runs.queues.requests()), 1)
+
+
 class TestStopRemovesTheClaim(OperatorTestCase):
     """A stopped cell whose CLAIM survived would be restarted by the next
     converge — the same resurrection the queued-spec scrub prevents."""
@@ -867,6 +900,7 @@ class TestStopRemovesTheClaim(OperatorTestCase):
              mock.patch.object(runs.os, "kill"):
             runs.ops.stop_cells(mock.Mock(selectors=[cid], cancel=False,
                                       dry_run=False))
+            runs.conduct.Conduct().act_on_requests()
         self.assertEqual(runs.queues.running_specs("sonnet"), [],
                          "the claim survived a stop")
         self.assertEqual(len(list((self.queues / "backups").glob("stopped-*.json"))), 1)
@@ -1289,6 +1323,7 @@ class TestStandingStateSurvivesBulkVerbs(OperatorTestCase):
              mock.patch.object(runs.os, "kill", side_effect=ProcessLookupError):
             runs.ops.stop_cells(mock.Mock(selectors=[cid], cancel=False,
                                       dry_run=False))
+            runs.conduct.Conduct().act_on_requests()
         self.assertTrue((self.ws / cid / ".paused").exists())
 
 
