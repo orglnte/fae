@@ -33,7 +33,7 @@ class TestTheLogReadersSeeANewCell(OrchTmpCase):
     def test_a_retired_cells_pause_does_not_carry_over(self):
         self.write([("2026-09-21T10:00:00Z", "Pause", ""),
                     ("2026-09-21T10:01:00Z", "Retire", "moved=/x")])
-        self.assertEqual(runs.common._ledger_intent(CID), "run")
+        self.assertEqual(runs.common.cell(CID).intent(), "run")
 
     def test_a_retired_cell_has_no_loop(self):
         self.write(_run(0)[:2] + [("2026-09-21T10:03:00Z", "Retire", "moved=/x")])

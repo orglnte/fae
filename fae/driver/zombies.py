@@ -354,7 +354,10 @@ def reap_zombies(zs):
                 if state.heartbeat(Path(ident).parent) is not None:
                     done.append(f"skipped heartbeat {ident} — beating again")
                     continue
-                os.unlink(ident)
+                ws = Path(ident).parent
+                if not common.cell(ws.name, workspaces=ws.parent).clear_heartbeat():
+                    done.append(f"skipped heartbeat {ident} — its cell is held")
+                    continue
             elif kind == "process":
                 # Re-confirm at reap time: gathering and acting are minutes
                 # apart, and a pid can be recycled or the cell resumed since.

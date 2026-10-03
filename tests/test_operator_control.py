@@ -1313,27 +1313,27 @@ class TestResumeAnswersTheLedgerNotTheFile(OperatorTestCase):
         cid = CIDS[0]
         self._log(("Pause", cid, "reason=manual"))
         # no .paused file — the operator removed it by hand
-        runs.state.unpause(cid)
+        runs.common.cell(cid).unpause()
         self.assertEqual(len(self._resumes()), 1)
 
     def test_no_resume_when_the_ledger_never_paused(self):
         cid = CIDS[0]
         self._log(("Admit", cid, ""))
         (self.ws / cid / ".paused").write_text("raw file, never honored\n")
-        runs.state.unpause(cid)
+        runs.common.cell(cid).unpause()
         self.assertEqual(self._resumes(), [])
         self.assertFalse((self.ws / cid / ".paused").exists())
 
     def test_an_epoch_seeded_pause_counts(self):
         cid = CIDS[0]
         self._log(("EPOCH", cid, "outcome=none intent=paused loop=none"))
-        runs.state.unpause(cid)
+        runs.common.cell(cid).unpause()
         self.assertEqual(len(self._resumes()), 1)
 
     def test_a_ledger_resume_clears_the_pause(self):
         cid = CIDS[0]
         self._log(("Pause", cid, ""), ("Resume", cid, ""))
-        runs.state.unpause(cid)
+        runs.common.cell(cid).unpause()
         self.assertEqual(len(self._resumes()), 1)   # only the pre-existing one
 
 

@@ -60,7 +60,8 @@ class TestTheReadersUseIt(unittest.TestCase):
 
         definition = mock.Mock(taint_rules=rules)
         with mock.patch.object(runs.common, "definition", return_value=definition), \
-             mock.patch.object(runs.common, "WS", ws.parent):
+             mock.patch.object(runs.common, "WS", ws.parent), \
+             mock.patch.object(runs.common, "LOCKS", ws.parent / ".locks"):
             runs.taint._validate_cell(ws)
         self.assertEqual((seen["load_total"], seen["load_errors"]), (28114, 3))
 

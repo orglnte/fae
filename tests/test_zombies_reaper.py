@@ -294,7 +294,8 @@ class TestReapZombies(unittest.TestCase):
             p = Path(d) / "cid1" / ".loop"
             p.parent.mkdir()
             p.write_text("x")
-            with mock.patch.object(state, "heartbeat", return_value=None):
+            with mock.patch.object(state, "heartbeat", return_value=None), \
+                    mock.patch.object(zombies.common, "LOCKS", Path(d) / ".locks"):
                 done = zombies.reap_zombies([("heartbeat", str(p), "cid1", "note")])
             self.assertFalse(p.exists())
             self.assertIn(f"reaped heartbeat {p} (cid1)", done)

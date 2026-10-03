@@ -43,7 +43,7 @@ class TestTheSeal(unittest.TestCase):
 
     def cell(self):
         from fae.cell import Cell
-        return Cell(self.CID, workspaces=self.root, root=ROOT)
+        return Cell(self.CID, workspaces=self.root, root=ROOT, locks=self.root / ".locks")
 
     def test_an_unsealed_workspace_reads_as_unsealed(self):
         self.assertFalse(self.cell().sealed)

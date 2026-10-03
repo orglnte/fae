@@ -18,7 +18,7 @@ from fae import archive as _archive
 from fae import metrics as _metrics
 from fae.driver import common
 from fae.driver.common import (
-    parse_cell_id, ledger, faults, SEAL_MARKER, VALIDATION,
+    parse_cell_id, ledger, faults, VALIDATION,
 )
 
 # The rules this validator keeps are the engine's own: a provider wall
@@ -30,8 +30,9 @@ from fae.driver.common import (
 
 def _validate_cell(ws):
     """All checks for one DONE cell. Returns the validation dict (also
-    written to $ws/validation.json). Re-runnable: rules can improve and be
-    re-applied retroactively — the file records the rule set's verdict."""
+    written to $ws/validation.json, and its taints onto the seal).
+    Re-runnable: rules can improve and be re-applied retroactively — the file
+    records the rule set's verdict. Raises Busy while the cell is held."""
     taints, warns = [], []
     rc_text = common.definition().report_text(ws)
     v_log = ws / "verify.log"
@@ -102,8 +103,10 @@ def _validate_cell(ws):
            # rig-output rule (a verify that left a required output unwritten).
            "rule_set": 9,
            "at": f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}"}
-    (ws / VALIDATION).write_text(json.dumps(doc, indent=1))
-    record_taints_on_seal(ws, taints)
+    cell = common.cell(Path(ws).name, workspaces=Path(ws).parent)
+    with cell.changing():
+        cell.write_derived(VALIDATION, json.dumps(doc, indent=1))
+        cell.seal_taints(taints)
     return doc
 
 
@@ -165,24 +168,3 @@ def archive_warns(ws, it_text):
             warns.append(f"archive/ledger mismatch at attempt {n}: "
                          f"ledger {led or 'no verdict'}, archive {arc or 'no judged run'}")
     return warns
-
-
-def record_taints_on_seal(ws, taints):
-    """The seal carries the validator's taints as `taint=` lines, so a
-    reader of the cell sees why it is excluded without opening
-    validation.json. Rewritten on every validate; unchanged content is
-    left alone (the marker is read-only)."""
-    p = Path(ws) / SEAL_MARKER
-    try:
-        old = p.read_text()
-    except OSError:
-        return
-    keep = [l for l in old.splitlines() if not l.startswith("taint=")]
-    new = "\n".join(keep + [f"taint={t}" for t in taints]) + "\n"
-    if new == old:
-        return
-    try:
-        p.chmod(0o644)
-        p.write_text(new)
-    finally:
-        p.chmod(0o444)

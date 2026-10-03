@@ -276,11 +276,11 @@ class TestOneImplementation(unittest.TestCase):
         body = src[src.index("    def prepare(self"):]
         self.assertIn("_prepare.prepare(", body[:body.index("\n    def ")])
 
-    def test_rig_py_calls_the_module(self):
+    def test_experiment_prepare_asks_each_cell_to_prepare_itself(self):
         src = (ROOT / "fae" / "driver" / "rig.py").read_text()
-        body = src[src.index("def prepare(args):"):]  # last def in the file
-        self.assertIn("_prepare.prepare(", body)
-        self.assertIn("impl=_Cell.IMPL", body)
+        body = src[src.index("def prepare(args):"):src.index("def verb_cmd(")]
+        self.assertIn(".prepare(fresh=fresh)", body)
+        self.assertNotIn("_prepare.prepare(", body)
         self.assertNotIn("subprocess", body)
 
     def test_it_is_in_the_guarded_surface(self):

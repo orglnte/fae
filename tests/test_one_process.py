@@ -322,7 +322,7 @@ class TestTheRunLoopTakesItsLocksAndProvisionsItsArm(unittest.TestCase):
         self.assertIn("start_ticker", self.block())
 
     def test_reverify_provisions_the_arm_too(self):
-        b = self.BODY[self.BODY.index("    def reverify(self"):]
+        b = self.BODY[self.BODY.index("    def _reverify(self"):]
         b = b[:b.index("\n    def ", 10)]
         self.assertIn("self.setup()", b)
         self.assertIn("self.teardown()", b)

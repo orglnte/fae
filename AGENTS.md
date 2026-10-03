@@ -230,12 +230,21 @@ the probe proves exclusion across a real second process. Probe by hand:
 
 | Lock | Scope | Held for | Protects |
 |---|---|---|---|
-| loop lock | per cell | cell lifetime | two loops on one workspace corrupt its logs |
+| cell lock (`.locks/loop-locks/<cid>`) | per cell | the run's lifetime, or one change to the cell's folder | two writers on one workspace corrupt it: every change goes through a `Cell` method that takes this lock; reading a cell takes nothing |
 | **verify lock** | **global, per machine** | one verify | the shared measurement surface: one load test at a time, fleet-wide |
 | **variant lock** (`arm-<lock>` in the lock plane) | the `[infra] lock` a variant file names, N-ary; declared by variants whose agents hold a live infra | **cell lifetime, setup→teardown** | host contention: another live infra distorts load-test timing |
 | work slot | global semaphore, `WORK_SLOTS` | cell lifetime | total concurrent cells |
 | exclusive lock | global, the name a verifier declares in `EXCLUSIVE` (none: no lock) | one arrangement, on the cell's own fd around the verifier | whatever singleton infra a verifier declares |
 | queues-lock (`.locks/queues-lock`) | global | one change to `.queues/` (`fae/queues.py`), never while a cell waits for or holds a slot | two processes interleaving a multi-rename change: a lane renumber, a park, the weekly hold |
+
+**A cell's folder is changed only through its `Cell`** (`fae/cell/cell.py`):
+seal and its taint lines, `validation.json`, `score.json`, prepare, a
+re-verify, a ledger repair. Each takes the cell lock and raises `Busy` while
+another process holds it. Two kinds of write reach a running cell without it:
+the intent markers (`.paused`, `.cancelled`, `reconcile.flagged`), which the
+loop reads at its checkpoints, and supervision's `ALERT` lines, one append
+each. The driver builds its cells with `common.cell(cid)`, so they share its
+plane.
 
 **Lock ordering is work slot ≺ variant lock**, globally consistent, so
 deadlock-free; it also keeps the scarce lock held only while the cell works. Release is the

@@ -237,9 +237,8 @@ def _queue_refusal(cid):
     return f"SEALED — {seal_reason(cid)}" if is_sealed(cid) else None
 
 
-# TLA+ live-trace conformance: the same global transitions log the driver writes
-# through Cell.apply(), mirrored here for the actions this side owns
-# (Pause/Resume/Kill/Crash).
+# TLA+ live-trace conformance: the one transitions log every cell writes; the
+# driver records here the Crash of a loop that could not record its own.
 TRANSITIONS_LOG = _plane.transitions_log(ROOT)
 
 
@@ -249,29 +248,17 @@ def _emit_transition(action, cid, extra=""):
         f.write(f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}\t{action}\t{cid}\t{extra}\n")
 
 
-def _ledger_intent(cid):
-    """The AGENT's intent for this cell, replayed from the current ledger: the
-    last of EPOCH/Pause/Resume/Kill wins. Resume must answer a ledger Pause, or
-    it is an illegal transition the model never admits."""
-    intent = "run"
-    try:
-        for line in TRANSITIONS_LOG.read_text().splitlines():
-            p = line.split("\t")
-            if len(p) < 3 or p[2] != cid:
-                continue
-            if p[1] == "EPOCH":
-                m = re.search(r"intent=(\w+)", p[3] if len(p) > 3 else "")
-                intent = {"paused": "paused", "killed": "killed"}.get(
-                    m.group(1) if m else "", "run")
-            elif p[1] == "Pause":
-                intent = "paused"
-            elif p[1] in ("Resume", "Retire"):
-                intent = "run"
-            elif p[1] == "Kill":
-                intent = "killed"
-    except OSError:
-        pass
-    return intent
+def cell(cid, task=None, variant=None, rep=1, agent=None, reference=False,
+         workspaces=None):
+    """The cell `cid` as the driver sees the plane (ROOT, the queues, LOCKS,
+    TRANSITIONS_LOG), in WS unless `workspaces` names another root. Named by
+    what it runs (`variant`), it may not exist yet: what a start prepares."""
+    from fae.cell.cell import Cell
+    plane = dict(workspaces=workspaces or WS, root=ROOT, queues=queues(), locks=LOCKS,
+                 transitions=TRANSITIONS_LOG)
+    if variant is None:
+        return Cell(cid, **plane)
+    return Cell.new(cid, task or "T1", variant, rep, agent=agent, reference=reference, **plane)
 
 
 RECONCILE_LOG = CONDUCT / "reconcile.log"

@@ -396,7 +396,7 @@ class Conduct:
                         lifted = 0
                         for c2 in ops.select_cells(m):
                             if state.pause_lock(c2) == "limit-wall":
-                                state.unpause(c2); lifted += 1
+                                common.cell(c2).unpause(); lifted += 1
                         print(f"  [{common.hhmm()}] lane {m}: limit cooldown expired — "
                               f"{lifted} lock(s) lifted, retrying", flush=True)
                 self._lift_standdowns(agents, now_t)
@@ -669,8 +669,8 @@ class Conduct:
                 continue      # standing operator decisions survive a blanket resume
             acted = []
             if reason:
-                state.unpause(cid); acted.append("pause lifted"); lifted += 1
-            if ops.unflag(cid):
+                common.cell(cid).unpause(); acted.append("pause lifted"); lifted += 1
+            if common.cell(cid).unflag():
                 acted.append("flag cleared")
             # the flag means 'a human must look'; a bulk resume IS that human —
             # budget resets are collected here and written under ONE lock below
@@ -873,9 +873,7 @@ class Conduct:
 
     @staticmethod
     def _cell(cid, spec, agent):
-        from fae.cell import Cell
-        return Cell.new(cid, spec.get("task", "T1"), spec["variant"], spec["rep"], agent=agent,
-                        workspaces=common.WS, root=common.ROOT, queues=common.queues())
+        return common.cell(cid, spec.get("task", "T1"), spec["variant"], spec["rep"], agent=agent)
 
     def _next_admissible(self, agent, boxes):
         """The lane's first spec that may start now, with the ones it skipped
@@ -936,12 +934,12 @@ class Conduct:
                     continue
                 n = ops.respawn_count(cid)
                 if n >= ops.MAX_RESPAWNS:
-                    ops.flag(cid)
+                    common.cell(cid).flag()
                     print(f"  [{common.hhmm()}] FLAGGED  {cid}: {n} stand-downs "
                           f"({reason}) — human needed, spec held in the queue "
                           f"until you resume it", flush=True)
                     continue
-                state.unpause(cid)
+                common.cell(cid).unpause()
                 ops.respawn_count(cid, bump=True)
                 self.alerts.forget(cid)
                 print(f"  [{common.hhmm()}] lifted {cid}: {reason} stand-down "
@@ -975,7 +973,7 @@ class Conduct:
                                               # only walls again
             n = ops.respawn_count(cid)
             if n >= ops.MAX_RESPAWNS:
-                ops.flag(cid)        # a cell with no workspace keeps no flag: the
+                common.cell(cid).flag()   # a cell with no workspace keeps no flag: the
                                      # spec going back to the queue is the record
                 qs.release(agent, p)
                 print(f"  [{common.hhmm()}] FLAGGED  {cid}: {n} repairs — human needed, "

@@ -23,6 +23,7 @@ came to be logged for cancelled cells that were never resumed.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -74,6 +75,11 @@ class Halt(RuntimeError):
     def __init__(self, msg, code=42):
         super().__init__(msg)
         self.code = code
+
+
+class Busy(RuntimeError):
+    """Another process holds the cell: its loop runs, or another writer is
+    changing it."""
 
 
 ATTEMPT_BUDGET = 10
@@ -156,7 +162,10 @@ class Cell:
     on the 470 sealed cells the bash implementation produced — their state is
     fully readable, and the only thing that may be added is a re-verify."""
 
-    def __init__(self, cid, workspaces=None, root=None):
+    def __init__(self, cid, workspaces=None, root=None, *, queues=None, locks=None,
+                 transitions=None):
+        """`queues`, `locks` and `transitions` place the scheduling plane when it
+        is not the root's (fae/plane.py)."""
         self.cid = cid
         self.root = Path(root or _paths.root())
         self.workspaces = Path(workspaces or os.environ.get("WORKSPACES_DIR")
@@ -164,7 +173,11 @@ class Cell:
         self.ws = self.workspaces / cid
         self.artifacts = self.ws / "artifacts"
         self.state = State()
-        self.conf = _config.load(self.root)
+        self._conf, self._agent_tag = None, None
+        self._queues = queues
+        self.locks = Path(locks) if locks else _plane.locks(self.root)
+        self._transitions = Path(transitions) if transitions else None
+        self._held = None
         self._fp = None
         self._phase, self._attempt = Phase.SETUP, 0
         self.ckpt = Checkpoints(self.ws)
@@ -174,21 +187,30 @@ class Cell:
 
     @classmethod
     def new(cls, cid, task, variant, rep, agent=None, reference=False,
-            workspaces=None, root=None, queues=None):
+            workspaces=None, root=None, **plane):
         """A cell named by what it runs, before (or without) its workspace:
         what admission prepares and starts. `agent` is the tag its agent runs
-        as, when that is not this process's AGENT; `queues` the queues its
-        slots are taken from, when not the root's."""
-        c = cls(cid, workspaces=workspaces, root=root)
-        c._queues = queues
-        if agent:
-            c.conf = _config.load(c.root, env=dict(os.environ, AGENT=agent))
+        as, when that is not this process's AGENT."""
+        c = cls(cid, workspaces=workspaces, root=root, **plane)
+        c._agent_tag = agent
         c._env.setdefault("TASK", task)
         c._env.setdefault("VARIANT", variant)
         c._env.setdefault("REPEAT", str(rep))
         if reference:
             c._env.setdefault("REFERENCE", "1")
         return c
+
+    @property
+    def conf(self):
+        """The cell's configuration, loaded on first use: reading a cell needs none."""
+        if self._conf is None:
+            env = dict(os.environ, AGENT=self._agent_tag) if self._agent_tag else None
+            self._conf = _config.load(self.root, env=env)
+        return self._conf
+
+    @conf.setter
+    def conf(self, value):
+        self._conf = value
 
     # --- identity ---------------------------------------------------------
 
@@ -305,13 +327,163 @@ class Cell:
         Returns True if this call is what sealed it.
         """
         p = self.ws / self.SEAL_MARKER
-        if p.exists():
+        with self.changing():
+            if p.exists():
+                return False
+            p.write_text(f"sealed={_now()}\tverdict={verdict}\t"
+                         f"attempts={self.attempts if attempts is None else attempts}\t"
+                         f"by={by}\n")
+            p.chmod(0o444)
+            return True
+
+    def seal_taints(self, taints):
+        """Carry the validator's taints on the seal as `taint=` lines, so a
+        reader sees why the cell is excluded without opening validation.json.
+        Rewritten on every validation; an unsealed cell carries none."""
+        p = self.ws / self.SEAL_MARKER
+        with self.changing():
+            try:
+                old = p.read_text()
+            except OSError:
+                return
+            keep = [l for l in old.splitlines() if not l.startswith("taint=")]
+            new = "\n".join(keep + [f"taint={t}" for t in taints]) + "\n"
+            if new == old:
+                return
+            try:
+                p.chmod(0o644)
+                p.write_text(new)
+            finally:
+                p.chmod(0o444)
+
+    # --- changing the cell ------------------------------------------------
+    # Reading a cell takes nothing. Changing its folder takes its lock, the
+    # one its loop holds for the whole run: one writer at a time. Intent
+    # markers are the exception, written whether or not the lock is free: a
+    # running cell reads them at its checkpoints.
+
+    # Files computed from the recorded result: rewritten as their rules
+    # improve, sealed or not.
+    DERIVED = ("validation.json", "score.json", "score-cache.json")
+
+    @contextlib.contextmanager
+    def changing(self):
+        """Hold the cell's lock while changing it; reentrant for its holder.
+        Raises Busy when another process holds it."""
+        if self._held is not None:
+            yield self
+            return
+        fh = self.loop_lock()
+        if fh is None:
+            raise Busy(f"{self.cid} is held by another process")
+        self._held = fh
+        try:
+            yield self
+        finally:
+            self._held = None
+            _mutex.clear_holder(self._lock_path())
+            fh.close()
+
+    def _marker(self, name, text=None):
+        """Write an intent marker, or remove it when `text` is None."""
+        p = self.ws / name
+
+        def act():
+            if text is None:
+                p.unlink(missing_ok=True)
+            else:
+                p.write_text(text)
+        try:
+            with self.changing():
+                act()
+        except Busy:
+            act()
+
+    def intent(self):
+        """run | paused | killed: the last of EPOCH, Pause, Resume, Retire and
+        Kill the transitions log holds for this cell."""
+        intent = "run"
+        try:
+            for line in self._transitions_log().read_text().splitlines():
+                p = line.split("\t")
+                if len(p) < 3 or p[2] != self.cid:
+                    continue
+                if p[1] == "EPOCH":
+                    m = re.search(r"intent=(\w+)", p[3] if len(p) > 3 else "")
+                    intent = {"paused": "paused", "killed": "killed"}.get(
+                        m.group(1) if m else "", "run")
+                elif p[1] == "Pause":
+                    intent = "paused"
+                elif p[1] in ("Resume", "Retire"):
+                    intent = "run"
+                elif p[1] == "Kill":
+                    intent = "killed"
+        except OSError:
+            pass
+        return intent
+
+    def request_pause(self, reason, who="operator"):
+        """Ask the cell to stop at its next checkpoint. The reason 'killed' is
+        a Kill: the intent that keeps the cell from running again."""
+        self._marker(".paused", f"{reason} by={who} at={_now()}\n")
+        self._emit("Kill" if reason == "killed" else "Pause", f"reason={reason} by={who}")
+
+    def unpause(self):
+        """Lift a pause. Resume is recorded only when the transitions log holds
+        the pause it answers; a cancelled cell stays cancelled. False when
+        nothing was lifted for that reason."""
+        if (self.ws / ".cancelled").exists():
             return False
-        p.write_text(f"sealed={_now()}\tverdict={verdict}\t"
-                     f"attempts={self.attempts if attempts is None else attempts}\t"
-                     f"by={by}\n")
-        p.chmod(0o444)
+        self._marker(".paused")
+        if self.intent() == "paused":
+            self._emit("Resume")
         return True
+
+    def cancel(self, who="operator"):
+        """The terminal intent: the cell never runs again."""
+        self._marker(".cancelled", f"killed by={who} at={_now()}\n")
+
+    def flag(self):
+        """Quarantine the cell for a human. A cell with no workspace has
+        nowhere to carry the flag."""
+        if self.ws.is_dir():
+            self._marker("reconcile.flagged", "")
+
+    def unflag(self):
+        """Lift the quarantine; True if there was one."""
+        if not (self.ws / "reconcile.flagged").exists():
+            return False
+        self._marker("reconcile.flagged")
+        return True
+
+    def write_derived(self, name, text):
+        """Write one of the files derived from the result (DERIVED)."""
+        if name not in self.DERIVED:
+            raise ValueError(f"{name} is not derived from {self.cid}'s result")
+        with self.changing():
+            (self.ws / name).write_text(text)
+
+    def alert(self, detail):
+        """Supervision's line about this cell, written without its lock: the
+        cell may be running, and one write on an append-opened file is atomic
+        on a local disk."""
+        return ledger.alert(self.ws, self.cid, detail)
+
+    def repair_stranded_reverify(self):
+        """Close a re-verify whose process is gone: the verdict stands, the
+        gate is to be re-run."""
+        with self.changing():
+            self._append("REVERIFY", "ERROR[rig]: stranded mid-gate (no reverify process) "
+                         "— repaired by reconcile; green intact, re-run the gate")
+
+    def clear_heartbeat(self):
+        """Remove a dead loop's heartbeat. False while a loop holds the cell."""
+        try:
+            with self.changing():
+                (self.ws / ".loop").unlink(missing_ok=True)
+                return True
+        except Busy:
+            return False
 
     # --- transitions ------------------------------------------------------
 
@@ -332,33 +504,19 @@ class Cell:
             f.write(f"{_now()}\t{action}\t{self.cid}\t{extra}\n")
 
     def _transitions_log(self):
-        return Path(os.environ.get(
+        return self._transitions or Path(os.environ.get(
             "TRANSITIONS_LOG",
             _plane.transitions_log(self.root)))
 
     def note_pause(self):
         """Mark this cell paused before a StandDown — without doubling the
-        operator's event. The COMMAND owns Pause (fae/driver/ops.py's
-        request_pause emits it with the .paused file); the driver emits one
+        operator's event. The COMMAND owns Pause (request_pause emits it
+        with the .paused file); the driver emits one
         only when the ledger lacks it (a raw file write), so the replay sees
         exactly one Pause however the pause arrived. The local intent flips
         either way, which is
         what makes the StandDown legal to apply."""
-        intent = "run"
-        try:
-            for line in self._transitions_log().read_text().splitlines():
-                p = line.split("\t")
-                if len(p) < 3 or p[2] != self.cid:
-                    continue
-                if p[1] == "EPOCH":
-                    m = re.search(r"intent=(\w+)", p[3] if len(p) > 3 else "")
-                    intent = m.group(1) if m else "run"
-                elif p[1] in ("Pause", "Resume", "Kill"):
-                    intent = {"Pause": "paused", "Resume": "run",
-                              "Kill": "killed"}[p[1]]
-        except OSError:
-            pass
-        if intent == "run":
+        if self.intent() == "run":
             self.apply(T.PAUSE)
         else:
             self.state.intent = "paused"
@@ -568,9 +726,8 @@ class Cell:
         process's fd around the verifier subprocess, which inherits no fd.
         Returns the open file (closing it is the release), or None past the
         wait deadline or on an operator pause."""
-        locks = _plane.locks(self.root)
-        d = Path(self.conf.get("RIG_LOCK_DIR") or locks / "rig-lock") if name == "rig" \
-            else locks / f"{name}-lock"
+        d = Path(self.conf.get("RIG_LOCK_DIR") or self.locks / "rig-lock") if name == "rig" \
+            else self.locks / f"{name}-lock"
         d.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.time() + int(self.conf.get("RIG_LOCK_WAIT_S") or 3600)
         fh = _mutex.open_lock(d)
@@ -908,8 +1065,13 @@ class Cell:
         to, and metrics.json, trace.csv and verify.log keep the numbers the
         cell was judged on. This is the tool for iterating on the verify
         itself — change it, re-verify a sample, diff, repeat — which is
-        impossible while the only way to re-run is to overwrite.
+        impossible while the only way to re-run is to overwrite. Holds the
+        cell's lock throughout: a cell re-verified is not run meanwhile.
         """
+        with self.changing():
+            return self._reverify(stamp)
+
+    def _reverify(self, stamp):
         out = self.ws / "reverify" / (stamp or f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}")
         out.mkdir(parents=True, exist_ok=True)
         # The arm's infra is provisioned the same way a run provisions it:
@@ -957,14 +1119,14 @@ class Cell:
     def prepare(self, fresh=False):
         """Seed the workspace through the one module that knows how, recording
         IMPL (this engine's) so the result is attributable without later
-        archaeology.
-        `cli.py experiment prepare` calls the same function over the matrix."""
+        archaeology. Under the cell's lock: a running cell is never re-seeded."""
         from . import prepare as _prepare
-        _prepare.prepare(self.cid, self.task, self.variant,
-                         self.rep, workspaces=self.workspaces, root=self.root,
-                         fresh=fresh, reference=self.reference, impl=self.IMPL,
-                         agent_model=self.conf.values.get("AGENT_MODEL")
-                         or os.environ.get("AGENT", "?"), cfg=self.conf)
+        with self.changing():
+            _prepare.prepare(self.cid, self.task, self.variant,
+                             self.rep, workspaces=self.workspaces, root=self.root,
+                             fresh=fresh, reference=self.reference, impl=self.IMPL,
+                             agent_model=self.conf.values.get("AGENT_MODEL")
+                             or self._agent_tag or os.environ.get("AGENT", "?"), cfg=self.conf)
         self._env = self._read_env()
         return self.ws
 
@@ -1007,8 +1169,7 @@ class Cell:
     def queues(self):
         """The queues (fae/queues.py): this cell's slots live there. Whoever
         admits the cell may hand it the queues it admits from."""
-        return getattr(self, "_queues", None) or Queues(_plane.queues(self.root),
-                                                        locks=_plane.locks(self.root))
+        return self._queues or Queues(_plane.queues(self.root), locks=self.locks)
 
     def verify_lock_acquire(self, poll=5.0):
         """The fleet-wide verify lock: gates are serialized WHOLE, so one
@@ -1019,7 +1180,7 @@ class Cell:
         never held by a cell that intends to exit.
         """
         d = Path(self.conf.get("VERIFY_LOCK_DIR")
-                 or _plane.locks(self.root) / "verify-lock")
+                 or self.locks / "verify-lock")
         d.parent.mkdir(parents=True, exist_ok=True)
         fh = _mutex.open_lock(d)
         while not _mutex.try_fd(fh):
@@ -1036,14 +1197,17 @@ class Cell:
     def loop_lock(self):
         """Exclusive claim on this workspace. Returns the open file, or None if
         another loop already owns the cell."""
-        d = _plane.locks(self.root) / "loop-locks"
-        d.mkdir(parents=True, exist_ok=True)
-        fh = _mutex.open_lock(d / self.cid)
+        path = self._lock_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fh = _mutex.open_lock(path)
         if not _mutex.try_fd(fh):
             fh.close()
             return None
-        _mutex.note_holder(d / self.cid, self.cid, os.getpid())
+        _mutex.note_holder(path, self.cid, os.getpid())
         return fh
+
+    def _lock_path(self):
+        return self.locks / "loop-locks" / self.cid
 
     def start_ticker(self, interval=None):
         """Rewrite .loop on a timer so liveness stays visible while a phase
@@ -1578,6 +1742,7 @@ class Cell:
             if slots is not None:
                 slots.close()
             raise Halt(f"refusing: another loop owns {self.cid}", self.LOCK_EXIT)
+        self._held = loop_lock
         awake = hold_awake(os.getpid())
 
         # Default SIGTERM skips `finally`, so an operator stop would leave the
@@ -1791,6 +1956,7 @@ class Cell:
             (self.ws / ".loop").unlink(missing_ok=True)
             if slots is not None:
                 slots.close()
+            self._held = None
             loop_lock.close()
             if awake is not None:
                 awake.terminate()

@@ -1,5 +1,6 @@
 """results validate on a verify that left a required output unwritten
 (ALERT RIG-OUTPUT): a taint unless the attempt was judged again after it."""
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -61,9 +62,10 @@ class TestTheValidatorAppliesIt(unittest.TestCase):
         definition.report_text.return_value = ""
         with mock.patch.object(runs.common, "definition", return_value=definition), \
              mock.patch.object(runs.common, "WS", ws.parent), \
-             mock.patch.object(runs.taint, "record_taints_on_seal"):
+             mock.patch.object(runs.common, "LOCKS", ws.parent / ".locks"):
             doc = runs.taint._validate_cell(ws)
         self.assertEqual((doc["verdict"], doc["rule_set"]), ("TAINTED", 9))
+        self.assertEqual(json.loads((ws / "validation.json").read_text())["verdict"], "TAINTED")
 
 
 if __name__ == "__main__":

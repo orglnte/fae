@@ -24,6 +24,7 @@ from pathlib import Path
 
 import ujson as json
 
+from fae.cell.cell import Busy
 from fae.driver import common
 from fae.driver import ops
 from fae.driver import render
@@ -63,7 +64,11 @@ def validate(args, quiet=False):
         st = state.cell_state(ws, {}, boxes)
         if not st or st["state"] != "DONE" or st["why"] == "cancelled":
             continue
-        doc = taint._validate_cell(ws)
+        try:
+            doc = taint._validate_cell(ws)
+        except Busy:
+            rows.append((cid, f"{st['why']}", "HELD", "held by another process: not validated"))
+            continue
         rows.append((cid, f"{st['why']}", doc["verdict"],
                      "; ".join(doc["taints"] + doc["warns"])[:60] or "-"))
         if doc["verdict"] == "TAINTED":
@@ -159,7 +164,7 @@ def score(args):
         err = io.StringIO()
         try:
             with contextlib.redirect_stderr(err):
-                rc = _sc.score_one(cid)
+                rc = _sc.score_one(cid, cell=common.cell(cid))
         except Exception as e:
             rc, _ = 1, err.write(f"{type(e).__name__}: {e}")
         if rc == 0:
