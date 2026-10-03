@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 from _ctx import OrchTmpCase, runs
 
-queue = runs.queue
+queue = runs.queues
 SEQ = queue.SEQ_START
 AGENT = "aaa"
 
@@ -271,7 +271,7 @@ class TestAParkedLaneIsSkippedButKeepsItsBacklog(QueueCase):
             self.queues / "queue" / f"{AGENT}.parked",
             self.queues / "queue" / "bbb",
         ])
-        self.assertEqual(queue._parked_queues(),
+        self.assertEqual(queue.parked_lanes(),
                          [self.queues / "queue" / f"{AGENT}.parked"])
         self.assertEqual(queue.lane_specs(AGENT), [])
         self.assertTrue(queue.lane_has(AGENT, cid_of()))
@@ -284,7 +284,7 @@ class TestAParkedLaneIsSkippedButKeepsItsBacklog(QueueCase):
         self.assertEqual(queue.lane_dirs(), [])
         self.assertEqual(queue.lane_dirs(include_parked=True),
                          [self.queues / "queue" / f"{AGENT}.parked"])
-        self.assertEqual(queue._parked_queues(),
+        self.assertEqual(queue.parked_lanes(),
                          [self.queues / "queue" / f"{AGENT}.parked"])
 
     def test_enqueue_and_release_land_in_the_parked_dir_and_unpark_restores_order(self):
@@ -353,31 +353,31 @@ class TestCancelAndList(OrchTmpCase):
 
     def spec(self, agent, cid):
         rep = int(cid.rsplit("_r", 1)[1])
-        return runs.queue.enqueue(agent, {"variant": "beta_apidocs", "rep": rep})
+        return runs.queues.enqueue(agent, {"variant": "beta_apidocs", "rep": rep})
 
     def test_cancel_moves_matching_pending_specs_aside(self):
         self.spec("aaa", "aaa_high_beta_apidocs_T1_r1")
         self.spec("aaa", "aaa_high_beta_apidocs_T1_r2")
         runs.ops.queue_cancel(runs.argparse.Namespace(selectors=["r1"], dry_run=False))
-        left = [runs.queue.spec_cid(p) for p in runs.queue.lane_specs("aaa")]
+        left = [runs.queues.spec_cid(p) for p in runs.queues.lane_specs("aaa")]
         self.assertEqual(left, ["aaa_high_beta_apidocs_T1_r2"])
         moved = list((self.queues / ".to_be_deleted").rglob("*.json"))
-        self.assertEqual([runs.queue.spec_cid(p) for p in moved], ["aaa_high_beta_apidocs_T1_r1"])
+        self.assertEqual([runs.queues.spec_cid(p) for p in moved], ["aaa_high_beta_apidocs_T1_r1"])
 
     def test_dry_run_moves_nothing(self):
         self.spec("aaa", "aaa_high_beta_apidocs_T1_r1")
         runs.ops.queue_cancel(runs.argparse.Namespace(selectors=["all"], dry_run=True))
-        self.assertEqual(len(runs.queue.lane_specs("aaa")), 1)
+        self.assertEqual(len(runs.queues.lane_specs("aaa")), 1)
         self.assertFalse((self.queues / ".to_be_deleted").exists())
 
     def test_a_running_spec_is_not_cancelled(self):
         p = self.spec("aaa", "aaa_high_beta_apidocs_T1_r1")
-        runs.queue.claim("aaa", p)
+        runs.queues.claim("aaa", p)
         runs.ops.queue_cancel(runs.argparse.Namespace(selectors=["all"], dry_run=False))
-        self.assertEqual(len(runs.queue.running_specs("aaa")), 1)
+        self.assertEqual(len(runs.queues.running_specs("aaa")), 1)
 
     def test_list_shows_pending_and_running_per_lane(self):
-        runs.queue.claim("aaa", self.spec("aaa", "aaa_high_beta_apidocs_T1_r1"))
+        runs.queues.claim("aaa", self.spec("aaa", "aaa_high_beta_apidocs_T1_r1"))
         self.spec("aaa", "aaa_high_beta_apidocs_T1_r2")
         out = io.StringIO()
         with contextlib.redirect_stdout(out):

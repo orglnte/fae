@@ -150,7 +150,7 @@ def render_default_toml(definition, experiment_dir=None):
         out.append(f"# {key}: declared by the experiment; env {key} overrides")
         out.append(f'{name} = "{default}"')
     out += ["", "[slots]",
-            "# Concurrency caps enforced by the fd arena: total concurrent cells, and",
+            "# Concurrency caps enforced by the queues' slots: total concurrent cells, and",
             "# one cap per exclusive lock the experiment's variants declare.",
             "work = 8"]
     for lock, n in sorted(locks.items()):

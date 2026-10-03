@@ -7,6 +7,7 @@ dry-run that flags a cell silently removes it from supervision.
 `runs.common.WS` and the scheduling plane are patched to a TemporaryDirectory in every test that
 writes. Nothing touches the live workspace tree.
 """
+import fcntl
 import os
 import re
 import shutil
@@ -190,9 +191,13 @@ class TestTheEpochSeedIsComplete(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, \
                 mock.patch.multiple(runs.common, QUEUES=Path(d), CONDUCT=Path(d), LOCKS=Path(d)):
             slots = Path(d) / "work-slots"
-            (slots / "slot-1").mkdir(parents=True)
-            (slots / "slot-1" / "holder").write_text("cell-a\n4242\n123\n")
-            (slots / "slot-2").mkdir()
+            slots.mkdir(parents=True)
+            held = open(slots / "slot-1", "a+")
+            self.addCleanup(held.close)
+            fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            (slots / "slot-1.holder").write_text("cell-a 4242 123\n")
+            (slots / "slot-2").touch()
+            (slots / "slot-2.holder").write_text("cell-c 4243 123\n")
             (Path(d) / "verify-lock").mkdir()
             (Path(d) / "verify-lock" / "holder").write_text("cell-b\n99\n123\n")
             self.assertEqual(runs.rig._slot_holders(), {"cell-a"})
@@ -637,7 +642,7 @@ class TestSweepClassification(SweepCase):
 
     def _crashed_sweeps(self, *, queued, n):
         with mock.patch.object(runs.ops, "_claimed", return_value=False), \
-             mock.patch.object(runs.supervise.queue, "lane_has", return_value=queued):
+             mock.patch.object(runs.queues_module.Queues, "lane_has", return_value=queued):
             for _ in range(n):
                 self.sweep(self.st(state="CRASHED", why="loop", events=5))
         log = self.conduct / "reconcile.log"
@@ -829,7 +834,7 @@ class TestAStaleArmSlotSidecarIsNotAZombieForever(unittest.TestCase):
             mock.patch.object(runs.state, "containers", return_value=[]),
             mock.patch.object(runs.zombies, "_cluster_map", return_value={}),
             mock.patch.object(runs.zombies, "_strays", return_value=[]),
-            mock.patch.object(runs.state, "_lock_is_held", return_value=False),
+            mock.patch.object(runs.queues_module.Queues, "slot_held", return_value=False),
         ]
         for p in self.patches:
             p.start()

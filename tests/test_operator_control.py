@@ -57,14 +57,14 @@ class OperatorTestCase(OrchTmpCase):
 
     def queue(self, agent, specs):
         for spec in specs:
-            runs.queue.enqueue(agent, spec)
+            runs.queues.enqueue(agent, spec)
 
     def pending(self, agent):
-        return [runs.queue.read_spec(p) for p in runs.queue.lane_specs(agent)]
+        return [runs.queues.read_spec(p) for p in runs.queues.lane_specs(agent)]
 
     def parked_pending(self, agent):
-        return [runs.queue.read_spec(p)
-                for p in runs.queue._dir_specs(runs.queue.lane_dir(agent, parked=True))]
+        return [runs.queues.read_spec(p)
+                for p in runs.queues.specs_in(runs.queues.lane_dir(agent, parked=True))]
 
 
 class TestSelectorIsAnchored(OperatorTestCase):
@@ -139,7 +139,7 @@ class TestQueuedCids(OperatorTestCase):
         self.assertEqual(runs.ops.queued_cids("son"), [])      # partial: no match
 
     def test_unreadable_spec_file_is_survived(self):
-        d = runs.queue.lane_dir("sonnet"); d.mkdir(parents=True)
+        d = runs.queues.lane_dir("sonnet"); d.mkdir(parents=True)
         (d / "100000.sonnet_high_beta_apidocs_T1_r9.json").write_text("{not json\n")
         self.assertEqual(runs.ops.queued_cids("all"),
                          ["sonnet_high_beta_apidocs_T1_r9"])
@@ -209,7 +209,7 @@ class TestQueuedSummaryCountsOnlyRealBacklog(OperatorTestCase):
 
     def test_a_parked_lane_is_shown_tagged_paused(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2, budget=10)])
-        runs.queue.park_lane("sonnet")
+        runs.queues.park_lane("sonnet")
         with mock.patch.object(runs.state, "loop_parents", return_value={}):
             lines = runs.render.queued_summary()
         row = next(l for l in lines if "sonnet" in l)
@@ -243,7 +243,7 @@ class TestConductStop(OperatorTestCase):
 
     def test_a_parked_lane_keeps_its_backlog(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2)])
-        runs.queue.park_lane("sonnet")
+        runs.queues.park_lane("sonnet")
         self._stop(["all"])
         self.assertEqual(len(self.parked_pending("sonnet")), 1)
 
@@ -340,22 +340,22 @@ class TestQueueParkUnpark(OperatorTestCase):
 
     def test_park_and_unpark_roundtrip(self):
         self.queue("sonnet", [dict(task="T1", variant="beta_apidocs", rep=1)])
-        self.assertEqual(runs.queue.park_lane("sonnet"), "parked")
-        self.assertFalse(runs.queue.lane_dir("sonnet").exists())
-        self.assertTrue(runs.queue.lane_dir("sonnet", parked=True).is_dir())
-        self.assertEqual(runs.queue.park_lane("sonnet"), "already")
-        self.assertEqual(runs.queue.unpark_lane("sonnet"), "resumed")
-        self.assertTrue(runs.queue.lane_dir("sonnet").is_dir())
+        self.assertEqual(runs.queues.park_lane("sonnet"), "parked")
+        self.assertFalse(runs.queues.lane_dir("sonnet").exists())
+        self.assertTrue(runs.queues.lane_dir("sonnet", parked=True).is_dir())
+        self.assertEqual(runs.queues.park_lane("sonnet"), "already")
+        self.assertEqual(runs.queues.unpark_lane("sonnet"), "resumed")
+        self.assertTrue(runs.queues.lane_dir("sonnet").is_dir())
 
     def test_unpark_refuses_to_clobber_a_conflicting_live_file(self):
         self.queue("sonnet", [dict(task="T1", variant="beta_apidocs", rep=1)])
-        runs.queue.park_lane("sonnet")
-        runs.queue.lane_dir("sonnet").mkdir(parents=True)   # hand-made live lane
-        self.assertEqual(runs.queue.unpark_lane("sonnet"), "conflict")
-        self.assertTrue(runs.queue.lane_dir("sonnet", parked=True).is_dir())
+        runs.queues.park_lane("sonnet")
+        runs.queues.lane_dir("sonnet").mkdir(parents=True)   # hand-made live lane
+        self.assertEqual(runs.queues.unpark_lane("sonnet"), "conflict")
+        self.assertTrue(runs.queues.lane_dir("sonnet", parked=True).is_dir())
 
     def test_park_without_a_queue_reports_empty(self):
-        self.assertEqual(runs.queue.park_lane("nosuch"), "empty")
+        self.assertEqual(runs.queues.park_lane("nosuch"), "empty")
 
 
 
@@ -592,10 +592,10 @@ class TestConductResume(OperatorTestCase):
 
     def test_parked_lanes_are_unparked(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
-        runs.queue.park_lane("sonnet")
+        runs.queues.park_lane("sonnet")
         self._resume(["all"])
-        self.assertTrue(runs.queue.lane_dir("sonnet").is_dir())
-        self.assertFalse(runs.queue.lane_dir("sonnet", parked=True).exists())
+        self.assertTrue(runs.queues.lane_dir("sonnet").is_dir())
+        self.assertFalse(runs.queues.lane_dir("sonnet", parked=True).exists())
 
 
 
@@ -636,32 +636,32 @@ class TestArmWaitHolderIsNotBlocked(OperatorTestCase):
 
 class TestParseResetHint(unittest.TestCase):
     def test_seconds_minutes_hours(self):
-        self.assertEqual(runs.weekly._parse_reset_hint("retry in 65s"), 65)
-        self.assertEqual(runs.weekly._parse_reset_hint("try again in 5 minutes"), 300)
-        self.assertEqual(runs.weekly._parse_reset_hint("resets after 2 hours"), 7200)
+        self.assertEqual(runs.supervise._parse_reset_hint("retry in 65s"), 65)
+        self.assertEqual(runs.supervise._parse_reset_hint("try again in 5 minutes"), 300)
+        self.assertEqual(runs.supervise._parse_reset_hint("resets after 2 hours"), 7200)
 
     def test_no_hint_returns_none(self):
-        self.assertIsNone(runs.weekly._parse_reset_hint(
+        self.assertIsNone(runs.supervise._parse_reset_hint(
             "Error: Individual quota reached. Please upgrade your subscription"))
 
     def test_day_scale_hint(self):
-        self.assertEqual(runs.weekly._parse_reset_hint(
+        self.assertEqual(runs.supervise._parse_reset_hint(
             "Weekly usage limit reached. Resets in 3 days."), 3 * 86400)
 
     def test_clock_time_hint(self):
         """The Claude Code CLI's own wording: no 'in'/'after', a clock time
         instead of a duration, always UTC."""
-        with mock.patch.object(runs.weekly, "datetime") as m:
+        with mock.patch.object(runs.supervise, "datetime") as m:
             m.now.return_value = datetime(2026, 8, 15, 19, 45, tzinfo=timezone.utc)
-            hint = runs.weekly._parse_reset_hint(
+            hint = runs.supervise._parse_reset_hint(
                 "You've hit your session limit · resets 7:40pm (UTC)")
         # 7:40pm has passed for a 19:45 "now" -> rolls to tomorrow, 23h55m out
         self.assertEqual(hint, 23 * 3600 + 55 * 60)
 
     def test_clock_time_hint_still_ahead_today(self):
-        with mock.patch.object(runs.weekly, "datetime") as m:
+        with mock.patch.object(runs.supervise, "datetime") as m:
             m.now.return_value = datetime(2026, 8, 15, 14, 0, tzinfo=timezone.utc)
-            hint = runs.weekly._parse_reset_hint(
+            hint = runs.supervise._parse_reset_hint(
                 "You've hit your session limit · resets 7:40pm (UTC)")
         self.assertEqual(hint, 5 * 3600 + 40 * 60)
 
@@ -706,7 +706,7 @@ class TestLimitWall(OperatorTestCase):
 
     def _claim(self, cid):
         """Put the cell under conduct's management, as admission would."""
-        d = runs.queue.rundir(cid.split("_", 1)[0])
+        d = runs.queues.rundir(cid.split("_", 1)[0])
         d.mkdir(parents=True, exist_ok=True)
         (d / f"{cid}.json").write_text(json.dumps(
             {"task": "T1", "variant": "beta_apidocs",
@@ -735,9 +735,9 @@ class TestLimitWall(OperatorTestCase):
         self._claim(cid)
         self._sweep(cid)
         self.assertEqual(runs.state.pause_lock(cid), "limit-wall")
-        self.assertEqual([runs.queue.spec_cid(p) for p in runs.queue.running_specs("sonnet")],
+        self.assertEqual([runs.queues.spec_cid(p) for p in runs.queues.running_specs("sonnet")],
                          [cid], "the spec stays claimed for the lane's retry")
-        until = runs.weekly._cooldown_until("sonnet")
+        until = runs.queues.cooldown_until("sonnet")
         import time as _t
         self.assertGreater(until, _t.time() + 3600, "default cooldown ~3h")
 
@@ -745,16 +745,16 @@ class TestLimitWall(OperatorTestCase):
         cid = CIDS[0]
         self._sweep(cid, detail="rate limited, retry in 90s")
         import time as _t
-        until = runs.weekly._cooldown_until("sonnet")
+        until = runs.queues.cooldown_until("sonnet")
         self.assertLess(abs(until - _t.time() - 90), 10)
 
     def test_dry_run_writes_nothing(self):
         cid = CIDS[0]
         self._sweep(cid, dry=True)
         self.assertIsNone(runs.state.pause_lock(cid))
-        self.assertEqual(runs.weekly._cooldown_until("sonnet"), 0)
+        self.assertEqual(runs.queues.cooldown_until("sonnet"), 0)
         self.assertEqual(self.pending("sonnet"), [])
-        self.assertEqual(runs.queue.running_specs("sonnet"), [])
+        self.assertEqual(runs.queues.running_specs("sonnet"), [])
 
     def test_transient_connection_fault_is_not_a_wall(self):
         """The `limit` phase also covers retryable API faults; standing a
@@ -764,7 +764,7 @@ class TestLimitWall(OperatorTestCase):
                        "API Error: Connection closed mid-response. The response"):
             self._sweep(cid, detail=detail)
             self.assertIsNone(runs.state.pause_lock(cid), detail)
-            self.assertEqual(runs.weekly._cooldown_until("sonnet"), 0, detail)
+            self.assertEqual(runs.queues.cooldown_until("sonnet"), 0, detail)
 
     def test_wall_inside_a_stuck_agent_cools_the_lane(self):
         """opencode logs its weekly limit and then retries INSIDE the process
@@ -797,29 +797,29 @@ class TestLimitWall(OperatorTestCase):
              mock.patch.object(runs.ops, "RESPAWN_BOOK",
                                self.conduct / "reconcile.respawns.json"):
             runs.supervise._supervise_pass(dry=False)
-        until = runs.weekly._cooldown_until("sonnet")
+        until = runs.queues.cooldown_until("sonnet")
         self.assertGreater(until, _t.time() + 2 * 86400, "no day-scale cooldown")
-        self.assertEqual([runs.queue.spec_cid(p) for p in runs.queue.running_specs("sonnet")],
+        self.assertEqual([runs.queues.spec_cid(p) for p in runs.queues.running_specs("sonnet")],
                          [cid], "the spec stays claimed while the lane cools")
         self.assertFalse((ws / "reconcile.flagged").exists())
 
     def test_quota_wall_detector(self):
-        self.assertTrue(runs.weekly._is_quota_wall("Individual quota reached."))
-        self.assertTrue(runs.weekly._is_quota_wall("429 Too Many Requests"))
-        self.assertTrue(runs.weekly._is_quota_wall("rate limited, retry in 90s"))
-        self.assertFalse(runs.weekly._is_quota_wall("ConnectionRefused"))
-        self.assertFalse(runs.weekly._is_quota_wall("Connection closed mid-response"))
+        self.assertTrue(runs.supervise._is_quota_wall("Individual quota reached."))
+        self.assertTrue(runs.supervise._is_quota_wall("429 Too Many Requests"))
+        self.assertTrue(runs.supervise._is_quota_wall("rate limited, retry in 90s"))
+        self.assertFalse(runs.supervise._is_quota_wall("ConnectionRefused"))
+        self.assertFalse(runs.supervise._is_quota_wall("Connection closed mid-response"))
 
     def test_quota_wall_detector_matches_the_claude_cli_wording(self):
         """Matches none of the other branches: 'hit your ... limit' is not
         'limit reached/exceeded', and 'resets 7:40pm' has no 'in'/'at' for
         the relative-duration branch. A claude-backed lane retried this in
         cell forever, never cooling, until this pattern was added."""
-        self.assertTrue(runs.weekly._is_quota_wall(
+        self.assertTrue(runs.supervise._is_quota_wall(
             "You've hit your session limit · resets 7:40pm (UTC)"))
-        self.assertTrue(runs.weekly._is_quota_wall(
+        self.assertTrue(runs.supervise._is_quota_wall(
             "You've hit your usage limit · resets 2:40pm (UTC)"))
-        self.assertFalse(runs.weekly._is_quota_wall("Connection refused"))
+        self.assertFalse(runs.supervise._is_quota_wall("Connection refused"))
 
 
 class TestLaneWrites(OperatorTestCase):
@@ -833,27 +833,27 @@ class TestLaneWrites(OperatorTestCase):
 
     def test_enqueue_into_a_parked_lane_stays_parked(self):
         self.queue("sonnet", [self.spec(rep=5)])
-        runs.queue.park_lane("sonnet")
-        runs.queue.enqueue("sonnet", self.spec(rep=6))
-        self.assertFalse(runs.queue.lane_dir("sonnet").exists(),
+        runs.queues.park_lane("sonnet")
+        runs.queues.enqueue("sonnet", self.spec(rep=6))
+        self.assertFalse(runs.queues.lane_dir("sonnet").exists(),
                          "a live lane reappeared beside the parked one")
         self.assertEqual(len(self.parked_pending("sonnet")), 2)
-        self.assertEqual(runs.queue.lane_specs("sonnet"), [],
+        self.assertEqual(runs.queues.lane_specs("sonnet"), [],
                          "a parked lane offers nothing to admission")
 
     def test_dedupe_sees_a_claimed_spec(self):
         self.queue("sonnet", [self.spec()])
-        runs.queue.claim("sonnet", runs.queue.lane_specs("sonnet")[0])
-        self.assertIsNone(runs.queue.enqueue("sonnet", self.spec()),
+        runs.queues.claim("sonnet", runs.queues.lane_specs("sonnet")[0])
+        self.assertIsNone(runs.queues.enqueue("sonnet", self.spec()),
                           "a running cell must not be queued underneath itself")
 
     def test_dedupe_sees_a_parked_spec(self):
         self.queue("sonnet", [self.spec()])
-        runs.queue.park_lane("sonnet")
-        self.assertIsNone(runs.queue.enqueue("sonnet", self.spec()))
+        runs.queues.park_lane("sonnet")
+        self.assertIsNone(runs.queues.enqueue("sonnet", self.spec()))
 
     def test_unpark_reports_a_lane_that_was_never_parked(self):
-        self.assertEqual(runs.queue.unpark_lane("sonnet"), "not-paused")
+        self.assertEqual(runs.queues.unpark_lane("sonnet"), "not-paused")
 
 
 class TestStopRemovesTheClaim(OperatorTestCase):
@@ -864,7 +864,7 @@ class TestStopRemovesTheClaim(OperatorTestCase):
         cid = CIDS[0]
         self.queue("sonnet", [dict(task="T1", variant="beta_apidocs", rep=1, budget=10,
                                    fresh=False)])
-        runs.queue.claim("sonnet", runs.queue.lane_specs("sonnet")[0])
+        runs.queues.claim("sonnet", runs.queues.lane_specs("sonnet")[0])
         with mock.patch.object(runs.state, "loop_parents", return_value={}), \
              mock.patch.object(runs.state, "loop_pids", return_value={}), \
              mock.patch.object(runs.state, "containers", return_value=set()), \
@@ -876,7 +876,7 @@ class TestStopRemovesTheClaim(OperatorTestCase):
              mock.patch.object(runs.os, "kill"):
             runs.ops.stop_cells(mock.Mock(selectors=[cid], cancel=False,
                                       dry_run=False))
-        self.assertEqual(runs.queue.running_specs("sonnet"), [],
+        self.assertEqual(runs.queues.running_specs("sonnet"), [],
                          "the claim survived a stop")
         self.assertEqual(len(list((self.queues / "backups").glob("stopped-*.json"))), 1)
 
@@ -888,7 +888,7 @@ class TestConductPause(OperatorTestCase):
         with mock.patch.object(runs.ops, "request_pause") as rp:
             runs.conduct.conduct_pause(mock.Mock(scope=["sonnet"], admission_only=False,
                                          dry_run=False, interval=1))
-        self.assertTrue(runs.queue.lane_dir("sonnet", parked=True).is_dir())
+        self.assertTrue(runs.queues.lane_dir("sonnet", parked=True).is_dir())
         paused = rp.call_args[0][0]
         self.assertTrue(paused and
                         all(c.startswith("sonnet_") for c in paused), paused)
@@ -898,7 +898,7 @@ class TestConductPause(OperatorTestCase):
         with mock.patch.object(runs.ops, "request_pause") as rp:
             runs.conduct.conduct_pause(mock.Mock(scope=["sonnet"], admission_only=True,
                                          dry_run=False, interval=1))
-        self.assertTrue(runs.queue.lane_dir("sonnet", parked=True).is_dir())
+        self.assertTrue(runs.queues.lane_dir("sonnet", parked=True).is_dir())
         rp.assert_not_called()
 
     def test_admission_only_is_rejected_fleet_wide(self):
@@ -1002,19 +1002,19 @@ class TestPendingKind(OperatorTestCase):
 class TestQueuedSummaryDisplay(OperatorTestCase):
     def test_a_cooling_lane_carries_its_limit_tag(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
-        runs.weekly._cooldown_file("sonnet").write_text(
+        runs.queues.cooldown_file("sonnet").write_text(
             f"{int(runs.time.time()) + 9999} quota\n")
         with mock.patch.object(runs.state, "loop_parents", return_value={}):
             row = next(l for l in runs.render.queued_summary() if "sonnet" in l)
         self.assertIn("[LIMIT until", row)
 
     def test_an_empty_lane_directory_is_not_a_row(self):
-        runs.queue.lane_dir("sonnet").mkdir(parents=True)
+        runs.queues.lane_dir("sonnet").mkdir(parents=True)
         with mock.patch.object(runs.state, "loop_parents", return_value={}):
             self.assertEqual(runs.render.queued_summary(), [])
 
     def test_an_unreadable_head_spec_drops_the_row_not_the_count(self):
-        d = runs.queue.lane_dir("sonnet"); d.mkdir(parents=True)
+        d = runs.queues.lane_dir("sonnet"); d.mkdir(parents=True)
         (d / "100000.sonnet_high_beta_apidocs_T1_r9.json").write_text("{bad\n")
         with mock.patch.object(runs.state, "loop_parents", return_value={}):
             self.assertEqual(runs.render.queued_summary(), [])
@@ -1044,7 +1044,7 @@ class TestConductPauseDryRun(OperatorTestCase):
         self.assertIn("would leave conduct running", out)
         rp.assert_not_called()
         sc.assert_not_called()
-        self.assertTrue(runs.queue.lane_dir("sonnet").is_dir(), "the lane was parked")
+        self.assertTrue(runs.queues.lane_dir("sonnet").is_dir(), "the lane was parked")
 
     def test_partial_preview_says_when_cells_are_left_alone(self):
         out, _, _ = self._dry(["sonnet"], admission_only=True)
@@ -1052,7 +1052,7 @@ class TestConductPauseDryRun(OperatorTestCase):
 
     def test_an_already_parked_lane_is_not_offered_again(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
-        runs.queue.park_lane("sonnet")
+        runs.queues.park_lane("sonnet")
         out, _, _ = self._dry(["sonnet"])
         self.assertNotIn("would park", out)
 
@@ -1238,8 +1238,8 @@ class TestVerbEdges(OperatorTestCase):
 
     def test_conduct_resume_refuses_to_merge_a_conflicting_lane(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
-        runs.queue.park_lane("sonnet")
-        runs.queue.lane_dir("sonnet").mkdir(parents=True)
+        runs.queues.park_lane("sonnet")
+        runs.queues.lane_dir("sonnet").mkdir(parents=True)
         with mock.patch.object(runs.state, "loop_parents", return_value={}), \
              mock.patch.object(runs.state, "loop_pids", return_value={}), \
              mock.patch.object(runs.state, "containers", return_value=set()), \
@@ -1372,19 +1372,19 @@ class TestTheWeeklyWallCoolsTheLane(OperatorTestCase):
     at 70 characters; a walled cell retried in-cell holding its arm."""
 
     def test_weekly_wording_is_a_wall(self):
-        self.assertTrue(runs.weekly._is_quota_wall(
+        self.assertTrue(runs.supervise._is_quota_wall(
             "You've hit your weekly limit · resets 12am (UTC)"))
-        self.assertTrue(runs.weekly._is_quota_wall(
+        self.assertTrue(runs.supervise._is_quota_wall(
             "Error: Individual quota reached. Please upgrade your subscription "
             "to increase your limits. Resets in 126h54m56s."))
 
     def test_compound_and_midnight_hints_parse(self):
-        self.assertEqual(runs.weekly._parse_reset_hint("Resets in 126h54m56s."),
+        self.assertEqual(runs.supervise._parse_reset_hint("Resets in 126h54m56s."),
                          126 * 3600 + 54 * 60 + 56)
-        with mock.patch.object(runs.weekly, "datetime") as m:
+        with mock.patch.object(runs.supervise, "datetime") as m:
             m.now.return_value = datetime(2026, 8, 25, 20, 2, 17,
                                           tzinfo=timezone.utc)
-            self.assertEqual(runs.weekly._parse_reset_hint(
+            self.assertEqual(runs.supervise._parse_reset_hint(
                 "You've hit your weekly limit · resets 12am (UTC)"),
                 3 * 3600 + 57 * 60 + 43)
 
@@ -1396,7 +1396,7 @@ class TestTheWeeklyWallCoolsTheLane(OperatorTestCase):
         (ws / "agent.attempt-3.wait-120000.log").write_text(long + "\n")
         got = runs.state.wait_reason(ws)
         self.assertIn("126h54m56s", got)
-        self.assertEqual(runs.weekly._parse_reset_hint(got), 126 * 3600 + 54 * 60 + 56)
+        self.assertEqual(runs.supervise._parse_reset_hint(got), 126 * 3600 + 54 * 60 + 56)
 
     def test_a_weekly_walled_cell_is_stood_down_until_the_reset(self):
         cid = CIDS[0]
@@ -1415,7 +1415,7 @@ class TestTheWeeklyWallCoolsTheLane(OperatorTestCase):
                                self.conduct / "reconcile.respawns.json"):
             runs.supervise._supervise_pass(dry=False)
         self.assertEqual(runs.state.pause_lock(cid), "limit-wall")
-        until = runs.weekly._cooldown_until("sonnet")
+        until = runs.queues.cooldown_until("sonnet")
         import time as _t
         self.assertGreater(until, _t.time())
         self.assertLess(until, _t.time() + 86400 + 60, "next midnight UTC")

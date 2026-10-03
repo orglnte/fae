@@ -15,7 +15,6 @@ from pathlib import Path
 from _ctx import ROOT
 
 from fae import cell
-from fae.cell import arena as arena_mod
 
 T = cell.T
 

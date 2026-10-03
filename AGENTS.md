@@ -163,18 +163,18 @@ a stranded reverify leaves the population.
 ## 3. Locks — what each one actually protects
 
 Every lock is **`flock(2)` on a file**, implemented once in
-**`fae/mutex.py`**; `fae/cell` (Arena, `Cell.acquire_slots`,
-`Cell.verify_lock_acquire`, `Cell.exclusive_acquire`) and
+**`fae/mutex.py`**; `fae/queues.py` (`Queues.acquire_slots`), `fae/cell`
+(`Cell.verify_lock_acquire`, `Cell.exclusive_acquire`) and
 `fae/driver/common.py`'s `fs_lock` are its holders. Do not add a second
 mutex implementation.
 
 **A lock is a FILE, held by an open fd.** The kernel releases it when the
 holding process dies by any means — SIGKILL, OOM, panic, host sleep — so
 nothing on disk is ever judged stale: no steal, no adoption, no settle
-window. **The driver owns the fd and takes the slots itself:** `Arena` opens
-every candidate lock file and `Cell.acquire_slots` flocks the work slot, then
-the variant's lock slot, in the driver's own process, the holder for the cell's whole
-life. Provisioning never touches the arena.
+window. **The cell process owns the fd and takes the slots itself:**
+`Queues.acquire_slots` opens every candidate slot file and flocks the work
+slot, then the variant's lock slot, in the cell's own process, the holder for
+the cell's whole life. Provisioning never touches the slots.
 
 Two rules break mutual exclusion **silently** if violated:
 
@@ -291,7 +291,8 @@ writes an `ALERT SETUP-FAILED` ledger line.
   (24 h) of the reset. A lane tag is covered only when it is listed.
   `experiment pause <agent> --admission-only` parks a lane by hand;
   `experiment resume` reverses it.
-- **A spec is a FILE and its state is the directory it sits in.**
+- **A spec is a FILE and its state is the directory it sits in.** `fae/queues.py`
+  (`Queues`) is the only code that reads or writes `.queues/`.
   `.queues/queue/<agent>/<seq>.<cid>.json` pending (lane order is the sequence
   number), `.queues/running/<agent>/` claimed, `.queues/done/<agent>/` terminal,
   `.queues/backups/` taken out of play by an operator verb. Every transition is

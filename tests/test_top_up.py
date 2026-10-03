@@ -24,7 +24,7 @@ def ns(**kw):
 class TopUpTestCase(OrchTmpCase):
     # WS and plane temp-tree patching is inherited from OrchTmpCase.
     def specs(self, agent="sonnet"):
-        return [runs.queue.read_spec(p) for p in runs.queue.lane_specs(agent)]
+        return [runs.queues.read_spec(p) for p in runs.queues.lane_specs(agent)]
 
 
 class TestSkipRules(TopUpTestCase):
@@ -69,7 +69,7 @@ class TestSkipRules(TopUpTestCase):
         self.assertEqual([s["rep"] for s in self.specs()], [1, 3])
 
     def test_already_queued_spec_is_skipped(self):
-        runs.queue.enqueue("sonnet", {"task": "T1", "variant": "beta_apidocs", "rep": 1,
+        runs.queues.enqueue("sonnet", {"task": "T1", "variant": "beta_apidocs", "rep": 1,
                                 "budget": 10, "fresh": False})
         runs.ops.top_up(ns(variants=["beta_apidocs"]))
         reps = [s["rep"] for s in self.specs()]
@@ -108,11 +108,11 @@ class TestSafety(TopUpTestCase):
     def test_existing_specs_are_untouched_by_an_append(self):
         """No backup dance: each spec is its own file, so appending cannot
         rewrite what is already queued."""
-        runs.queue.enqueue("sonnet", {"task": "T1", "variant": "beta_howto", "rep": 9,
+        runs.queues.enqueue("sonnet", {"task": "T1", "variant": "beta_howto", "rep": 9,
                                 "budget": 10, "fresh": False})
-        before = {p.name for p in runs.queue.lane_specs("sonnet")}
+        before = {p.name for p in runs.queues.lane_specs("sonnet")}
         runs.ops.top_up(ns(variants=["beta_apidocs"]))
-        after = {p.name for p in runs.queue.lane_specs("sonnet")}
+        after = {p.name for p in runs.queues.lane_specs("sonnet")}
         self.assertTrue(before < after)
 
     def test_nothing_is_spawned(self):

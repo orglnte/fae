@@ -14,11 +14,11 @@ class TestRenumberKeepsAdmissionOrder(unittest.TestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
         cids = [f"m_high_beta_apidocs_T1_r{i}" for i in range(1, 24)]
         for i, cid in enumerate(cids):
-            (d / f"{runs.queue.SEQ_START - 5 + i:06d}.{cid}.json").write_text("{}")
-        runs.queue._renumber(d)
-        after = runs.queue._dir_specs(d)
-        self.assertEqual([runs.queue.spec_cid(p) for p in after], cids)
-        self.assertEqual(after[0].name.split(".", 1)[0], f"{runs.queue.SEQ_START:06d}")
+            (d / f"{runs.queues.SEQ_START - 5 + i:06d}.{cid}.json").write_text("{}")
+        runs.queues._renumber(d)
+        after = runs.queues.specs_in(d)
+        self.assertEqual([runs.queues.spec_cid(p) for p in after], cids)
+        self.assertEqual(after[0].name.split(".", 1)[0], f"{runs.queues.SEQ_START:06d}")
 
 
 if __name__ == "__main__":

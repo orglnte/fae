@@ -31,6 +31,7 @@ from _ctx import ROOT
 
 ROOT = Path(ROOT)
 PKG = ROOT / "fae" / "cell"
+QUEUES_SRC = (ROOT / "fae" / "queues.py").read_text()
 CONTRIB = ROOT / "fae" / "cell" / "contrib" / "elastic_resource"
 ENGINE_INSTRUMENTS = ROOT / "fae" / "cell" / "instruments"
 
@@ -248,9 +249,9 @@ class TestTheProcessCountClaim(unittest.TestCase):
         self.assertIn("_mutex.open_lock", block)
         self.assertIn("return fh", block)
 
-    def test_nothing_is_handed_the_arena(self):
+    def test_nothing_is_handed_the_slots(self):
         # provisioning is native: no child inherits the lock fds at all
-        self.assertNotIn("pass_fds=arena", (PKG / "cell.py").read_text())
+        self.assertNotIn("pass_fds=", (PKG / "cell.py").read_text())
 
 
 if __name__ == "__main__":
@@ -283,28 +284,28 @@ class TestTheRunLoopTakesItsLocksAndProvisionsItsArm(unittest.TestCase):
         self.assertIn("raise Halt(", b)
         self.assertIn("self.LOCK_EXIT", b)
 
-    def test_the_arena_is_open_across_the_setup_hook(self):
-        # The hook flocks the slots on INHERITED fds; without the arena a cell
-        # takes no work slot and no arm lock, and every cap is bypassed.
+    def test_the_slots_are_held_across_the_setup_hook(self):
+        # Without its slots a cell takes no work slot and no lock slot, and
+        # every cap is bypassed.
         b = self.block()
-        self.assertIn("arena = self.arena().open()", b)
-        self.assertLess(b.index("arena = self.arena().open()"),
-                        b.index("self.setup(arena)"))
-        self.assertIn("arena.close()", b)
+        self.assertIn("slots, queue = self.acquire_slots()", b)
+        self.assertLess(b.index("slots, queue = self.acquire_slots()"),
+                        b.index("self.setup()"))
+        self.assertIn("slots.close()", b)
 
     def test_setup_and_teardown_both_run(self):
         b = self.block()
-        self.assertIn("self.setup(arena)", b)
+        self.assertIn("self.setup()", b)
         self.assertIn("self.teardown()", b)
 
     def test_teardown_and_release_are_on_the_unconditional_path(self):
         b = self.block()
         tail = b[b.index("finally:"):]
-        for step in ("stop_ticker()", "self.teardown()", "arena.close()",
+        for step in ("stop_ticker()", "self.teardown()", "slots.close()",
                      "loop_lock.close()"):
             self.assertIn(step, tail, f"{step} is not guaranteed to run")
-        self.assertLess(tail.index("self.teardown()"), tail.index("arena.close()"),
-                        "the arena is released before teardown uses its locks")
+        self.assertLess(tail.index("self.teardown()"), tail.index("slots.close()"),
+                        "the slots are released before teardown uses its locks")
 
     def test_a_rig_fault_does_not_consume_an_attempt(self):
         # `charge` is the verifier's word; the loop keeps no table of stages
@@ -320,8 +321,7 @@ class TestTheRunLoopTakesItsLocksAndProvisionsItsArm(unittest.TestCase):
     def test_reverify_provisions_the_arm_too(self):
         b = self.BODY[self.BODY.index("    def reverify(self"):]
         b = b[:b.index("\n    def ", 10)]
-        self.assertIn("self.arena().open()", b)
-        self.assertIn("self.setup(arena)", b)
+        self.assertIn("self.setup()", b)
         self.assertIn("self.teardown()", b)
 
     def test_only_a_variant_that_declares_a_lock_takes_one(self):
@@ -413,7 +413,7 @@ class TestTheCellTakesItsOwnLocks(unittest.TestCase):
     def test_the_slot_is_taken_before_the_hook_provisions(self):
         b = self.BODY[self.BODY.index("    def run(self, stub_overlay"):]
         b = b[:b.index("\n    def ", 10)]
-        self.assertLess(b.index("self.acquire_slots(arena)"), b.index("self.setup(arena)"))
+        self.assertLess(b.index("self.acquire_slots()"), b.index("self.setup()"))
 
     def test_the_slot_is_held_for_the_CELL_not_per_attempt(self):
         # Releasing between attempts would leave the next one with no slot to
@@ -433,17 +433,17 @@ class TestTheCellTakesItsOwnLocks(unittest.TestCase):
     def test_the_arm_lock_is_taken_after_the_work_slot(self):
         # A cell queuing for the scarce arm already holds the work slot; the
         # reverse order blocks a slot waiter behind an arm waiter.
-        b = self.BODY[self.BODY.index("    def acquire_slots(self"):]
+        b = QUEUES_SRC[QUEUES_SRC.index("    def acquire_slots(self"):]
         b = b[:b.index("\n    def ", 10)]
         self.assertLess(b.index('"work-slots"'), b.index('f"arm-lock['))
 
     def test_an_operator_pause_in_either_queue_stands_the_cell_down(self):
         # Each queue returns ITS OWN name, so the StandDown names the queue
         # it happened in instead of blaming the work-slot queue for both.
-        b = self.BODY[self.BODY.index("    def acquire_slots(self"):]
+        b = QUEUES_SRC[QUEUES_SRC.index("    def acquire_slots(self"):]
         b = b[:b.index("\n    def ", 10)]
-        self.assertIn('return "slot-queue"', b)
-        self.assertIn('return "arm-lock-queue"', b)
+        self.assertIn('return slots, "slot-queue"', b)
+        self.assertIn('return slots, "arm-lock-queue"', b)
 
     def test_a_failed_attempt_leaves_the_cell_able_to_verify_again(self):
         from fae.cell.fsm import State, T, step

@@ -25,6 +25,7 @@ from pathlib import Path
 # fae/driver/ sits directly under the repo root, so the repo root is one up.
 from fae import paths as _paths  # noqa: E402
 from fae import plane as _plane  # noqa: E402
+from fae.queues import Queues as _Queues  # noqa: E402
 
 ROOT = _paths.ROOT
 
@@ -221,6 +222,18 @@ def seal_reason(cid):
         return (WS / cid / SEAL_MARKER).read_text().splitlines()[0].replace("\t", " ")
     except (OSError, IndexError):
         return "sealed"
+
+
+def queues():
+    """The queues (fae/queues.py) as the driver sees them: QUEUES, the cell-id
+    grammar, sealed cells refused, the agents' logs read from WS."""
+    return _Queues(QUEUES, cell_id=cell_id, refuse=_queue_refusal, workspaces=WS)
+
+
+def _queue_refusal(cid):
+    # Queueing a sealed cell would put a spec in a lane that conduct can only
+    # ever refuse — a permanently stuck queue entry.
+    return f"SEALED — {seal_reason(cid)}" if is_sealed(cid) else None
 
 
 # TLA+ live-trace conformance: the same global transitions log the driver writes

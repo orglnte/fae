@@ -300,11 +300,10 @@ def find_zombies():
     # its holder dies. What can outlive a holder is INFRA, and an arm
     # slot's last-holder sidecar is the cheapest place to notice it.
     present = None                      # infra that exists, read once
-    for d in sorted(common.QUEUES.glob("arm-*.slots/slot-*")):
-        if d.name.endswith(".holder"):
-            continue
-        owner = mutex.holder_name(d)
-        if not owner or owner in live or state._lock_is_held(d):
+    q = common.queues()
+    for d in [s for lock in q.slot_pools() for s in q.slot_files(lock)]:
+        owner = (q.slot_note(d) or ("",))[0]
+        if not owner or owner in live or q.slot_held(d):
             continue
         if present is None:
             present = _containers_all() | set(common.sh(["kind", "get", "clusters"]).split())
@@ -314,7 +313,7 @@ def find_zombies():
         if not named:
             # The sidecar outlived everything it named: nothing left to reap,
             # and keeping the note would re-report the same phantom every tick.
-            mutex.clear_holder(d)
+            q.clear_slot_note(d)
             continue
         for kind, ident in named:
             zs.append((kind, ident, owner, f"arm slot's last holder is gone"))

@@ -19,11 +19,42 @@ from datetime import datetime, timezone
 
 from fae.driver import common
 from fae.driver import ops
-from fae.driver import queue
 from fae.driver import state
 from fae.driver import validate as taint
-from fae.driver import weekly
 from fae.driver import zombies
+
+# A lane that hits a provider quota/rate wall cools for the provider's
+# parsed reset hint, else this long, rather than retrying a multi-hour cap
+# in-cell.
+COOLDOWN_DEFAULT_S = int(os.environ.get("LIMIT_COOLDOWN_S", 3 * 3600))
+
+
+def _is_quota_wall(text):
+    """True only for provider QUOTA/RATE messages. The harness's `limit`
+    phase also covers transient connection faults (refused, closed
+    mid-response, timeouts), which its own retry loop heals in minutes —
+    cooling a lane hours for those idles a healthy agent.
+
+    `hit your (usage|session) limit` plus a bare `resets \\d` (clock-time
+    form, "resets 7:40pm (UTC)") cover the Claude Code CLI's own wording,
+    which matches none of the other branches: it says "hit your ... limit",
+    not "limit reached/exceeded", and "resets 7:40pm" has no "in"/"at" for
+    the relative-duration branch.
+    """
+    return common.faults.quota_wall(text)
+
+
+def _parse_reset_hint(text):
+    """Seconds until a provider limit resets, parsed from its error message;
+    None when the message carries no usable hint. Day-scale hints ("Resets
+    in 3 days") come from weekly caps; a clock-time hint ("resets 7:40pm
+    (UTC)") is always UTC and a future point today or tomorrow."""
+    return common.faults.reset_hint_s(text, now=datetime.now(timezone.utc))
+
+
+def _set_cooldown(agent, detail):
+    until = time.time() + (_parse_reset_hint(detail) or COOLDOWN_DEFAULT_S)
+    return common.queues().set_cooldown(agent, until, detail[:state.WAIT_REASON_MAX])
 
 def _retire_finished_specs(dry=False):
     """Move a queued spec whose cell is already terminal to done/.
@@ -34,11 +65,12 @@ def _retire_finished_specs(dry=False):
     A cell resumed by hand leaves exactly that: the loop runs and finishes
     while the spec it came from is still in the lane, unclaimed.
     """
+    qs = common.queues()
     boxes = state.containers()
-    for d in queue.lane_dirs():
-        agent = queue.lane_agent(d)
-        for p in queue._dir_specs(d):
-            cid = queue.spec_cid(p)
+    for d in qs.lane_dirs():
+        agent = qs.lane_agent(d)
+        for p in qs.specs_in(d):
+            cid = qs.spec_cid(p)
             if not (common.WS / cid).is_dir():
                 continue
             st = state.cell_state(common.WS / cid, {}, boxes)
@@ -51,9 +83,9 @@ def _retire_finished_specs(dry=False):
             # Through the claim, so done/ holds one filename shape whether the
             # spec got there via admission or from the queue.
             try:
-                queue.finish(agent, queue.claim(agent, p))
+                qs.finish(agent, qs.claim(agent, p))
             except FileExistsError:
-                queue.shelve(p, "done-duplicate")
+                qs.shelve(p, "done-duplicate")
 
 
 T_HANG = int(os.environ.get("T_HANG", 600))     # no output this long = wedged
@@ -141,14 +173,10 @@ def _agent_io(boxes=()):
 
 
 def _agent_io_book(write=None):
-    p = common.QUEUES / "agent-io.json"
+    book = common.queues().agent_io_book()
     if write is not None:
-        p.write_text(json.dumps(write))
-        return write
-    try:
-        return json.loads(p.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
+        return book.save(write)
+    return book.load()
 
 
 def _agent_progressing(cid, io_now, book):
@@ -253,7 +281,7 @@ def _conducts(cid):
     if ops._claimed(cid):
         return True
     parsed = common.parse_cell_id(cid)
-    return bool(parsed and queue.lane_has(parsed[0], cid))
+    return bool(parsed and common.queues().lane_has(parsed[0], cid))
 
 
 def _reclaim(st, dry):
@@ -496,7 +524,7 @@ def _supervise_pass(dry=False, only=""):
             elif terminal:
                 continue                      # done and quiet — the good end
             elif st["state"] == "WAITING" and st["why"] == "limit" \
-                    and not weekly._is_quota_wall(st.get("detail") or ""):
+                    and not _is_quota_wall(st.get("detail") or ""):
                 continue    # transient API fault — the loop's own retry
                             # heals it; a lane cooldown here idles a healthy
                             # agent for hours (observed: ConnectionRefused)
@@ -518,7 +546,7 @@ def _supervise_pass(dry=False, only=""):
                 if not dry:
                     ops.request_pause([cid], "limit-wall", who="conduct")
                     _reclaim(st, dry)
-                    until = weekly._set_cooldown(agent, detail)
+                    until = _set_cooldown(agent, detail)
                     common._rec_log(f"lane {agent}: cooling until "
                              f"{datetime.fromtimestamp(until, timezone.utc):%H:%M}Z")
             elif in_box and (out_size in (None, 0) or (out_age or 0) > T_HANG) \
@@ -533,7 +561,7 @@ def _supervise_pass(dry=False, only=""):
                 _tail = _logs[-1].read_text(errors="replace")[-3000:] \
                     if _logs else ""
                 _line = next((l for l in _tail.splitlines()
-                              if weekly._is_quota_wall(l) and "error" in l.lower()),
+                              if _is_quota_wall(l) and "error" in l.lower()),
                              None)
                 if _line is not None:
                     agent = cid.split("_", 1)[0]
@@ -551,7 +579,7 @@ def _supervise_pass(dry=False, only=""):
                         if _outcome in ("termed", "killed"):
                             common._emit_transition("Crash", cid, "limit-wall")
                         _reclaim(st, dry)
-                        until = weekly._set_cooldown(agent, _line)
+                        until = _set_cooldown(agent, _line)
                         common._rec_log(f"lane {agent}: cooling until "
                                  f"{datetime.fromtimestamp(until, timezone.utc):%m-%d %H:%M}Z")
                     continue
@@ -635,6 +663,7 @@ def conduct_diagnose(_args):
     (or running) the loop — what supervision would do, what is zombie, what
     admission would do next. Mutates nothing: supervision runs dry, zombies
     are listed not reaped, queue lines are read but never popped."""
+    qs = common.queues()
     print("— SUPERVISION (dry run) " + "—" * 36)
     _supervise_pass(dry=True)
     zs = zombies.find_zombies()
@@ -647,12 +676,12 @@ def conduct_diagnose(_args):
     print(f"\n— ADMISSION PREVIEW — {len(live)} live loop(s), per-agent cap "
           f"{common.PER_AGENT_CAP}, run {'UP' if up else 'DOWN'}"
           + ("" if up else " (nothing admits until `experiment run`)"))
-    for d in queue.lane_dirs(include_parked=True):
-        m = queue.lane_agent(d)
+    for d in qs.lane_dirs(include_parked=True):
+        m = qs.lane_agent(d)
         parked = d.name.endswith(".parked")
-        paths = queue._dir_specs(d)
-        claims = queue.running_specs(m)
-        _cu = weekly._cooldown_until(m)
+        paths = qs.specs_in(d)
+        claims = qs.running_specs(m)
+        _cu = qs.cooldown_until(m)
         if parked:
             note = "parked — no admission until experiment resume"
         elif _cu > time.time():
@@ -660,12 +689,12 @@ def conduct_diagnose(_args):
                     f"{datetime.fromtimestamp(_cu, timezone.utc):%m-%d %H:%M}Z "
                     f"— the run retries then")
         elif len(claims) >= common.PER_AGENT_CAP:
-            held = ", ".join(sorted(queue.spec_cid(p) for p in claims))
+            held = ", ".join(sorted(qs.spec_cid(p) for p in claims))
             note = f"HELD at {common.PER_AGENT_CAP}/lane — claimed: {held}"
         else:
             skipped = 0
             for p in paths:
-                cid = queue.spec_cid(p)
+                cid = qs.spec_cid(p)
                 ws = common.WS / cid
                 if ws.is_dir():
                     if (ws / "reconcile.flagged").exists():

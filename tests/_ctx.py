@@ -46,9 +46,9 @@ _EXPERIMENT = Path(os.environ.get("FAE_TEST_EXPERIMENT") or _TREE / "tests" / "f
 os.environ["EXPERIMENT_DIR"] = str(_EXPERIMENT)
 
 from fae.driver import (        # noqa: E402
-    common, conduct, ops, queue, render, rig, score, state, supervise,
-    weekly, zombies,
+    common, conduct, ops, render, rig, score, state, supervise, zombies,
 )
+from fae import queues as _queues_module  # noqa: E402
 from fae.cell import experiment as _experiment  # noqa: E402
 _experiment.load(_EXPERIMENT)
 exp1 = importlib.import_module("experiment.exp1") if (_EXPERIMENT / "exp1.py").is_file() else None
@@ -67,14 +67,24 @@ runs.common = common
 runs.conduct = conduct
 runs.exp1 = exp1
 runs.ops = ops
-runs.queue = queue
+
+
+class _QueuesNow:
+    """The driver's Queues as this test has patched the plane: resolved at
+    each lookup, so a patched common.QUEUES is always the one used."""
+
+    def __getattr__(self, name):
+        return getattr(common.queues(), name)
+
+
+runs.queues = _QueuesNow()
+runs.queues_module = _queues_module
 runs.render = render
 runs.rig = rig
 runs.score = score
 runs.state = state
 runs.supervise = supervise
 runs.taint = taint          # driver.validate's own name is "validate"
-runs.weekly = weekly
 runs.zombies = zombies
 runs.ROOT = _COMMON_ROOT
 runs.AUTH_HINTS = AUTH_HINTS

@@ -79,8 +79,9 @@ def _holder_of(lock_dir):
 
 
 def _slot_holders():
-    d = common.QUEUES / "work-slots"
-    return {c for c in (_holder_of(p) for p in sorted(d.glob("slot-*"))) if c}
+    """cids holding a work slot now: the kernel says held, the note says who."""
+    q = common.queues()
+    return {n[0] for n in (q.slot_note(s) for s in q.slot_files() if q.slot_held(s)) if n}
 
 
 def _verify_holder():

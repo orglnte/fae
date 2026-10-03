@@ -118,7 +118,7 @@ class TestTheAgesTheSupervisorReads(SleepCase):
         Path(str(slot) + ".holder").write_text(
             f"cid 1234 {int(self.now - 7200)}\n")
         with mock.patch.object(runs.mutex, "holder_name", return_value="cid"), \
-             mock.patch.object(runs.state, "_lock_is_held", return_value=True):
+             mock.patch.object(runs.queues_module.Queues, "slot_held", return_value=True):
             held = runs.state._arm_slot_of("keda", "cid")
         self.assertLess(held, 400)
         self.assertGreater(held, 250)
