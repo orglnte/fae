@@ -157,7 +157,7 @@ def cell_state(ws, loops=None, boxes=None):
     c = _cell(ws)
     if not c.has_ledger:
         return None
-    return c.status(parsed, _experiment.definition().gate.arity, heartbeat(ws, c),
+    return c.status(parsed, _experiment.definition().gate.arrangements_nr, heartbeat(ws, c),
                     looping=lambda: ws.name in live_loops(), queued=lambda: queued(ws.name))
 
 

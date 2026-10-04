@@ -58,7 +58,7 @@ class TestMinimalDefinition(unittest.TestCase):
         return r.stdout
 
     def test_defaults_when_the_definition_declares_nothing(self):
-        out = self._run("", "print(d.name, d.ids, d.active, d.gate.arity, d.verbs, d.exclusive)\n")
+        out = self._run("", "print(d.name, d.ids, d.active, d.gate.arrangements_nr, d.verbs, d.exclusive)\n")
         self.assertEqual(out.split(), ["experiment", "()", "()", "1", "{}", "None"])
 
     def test_each_file_is_a_variant_and_retired_ones_are_not_scheduled(self):
@@ -161,7 +161,7 @@ from fae.cell import Cell
 root = Path(tempfile.mkdtemp()); (root / "workspaces").mkdir()
 os.environ["EXPERIMENT_DIR"] = str(d.path)
 c = Cell("m_high_only_v_T1_r1", workspaces=root / "workspaces", root=root)
-print(c.gate_shapes, c.gate_def.arity, c.gate_def.rotate)
+print(c.gate_shapes, c.gate_def.arrangements_nr, c.gate_def.rotate)
 ''')
         self.assertEqual(out.strip(), "('A', 'B', 'C') 3 False")
 

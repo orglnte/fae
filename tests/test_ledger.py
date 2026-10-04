@@ -382,7 +382,7 @@ class TestTheLedgerHasOneWriter(unittest.TestCase):
 
 
 class TestGateArity(unittest.TestCase):
-    """The gate's arity is the experiment's; the ledger text stays `shapes=all`."""
+    """The gate's number of arrangements is the experiment's; the ledger text stays `shapes=all`."""
 
     def test_a_full_gate_counts_the_declared_arrangements(self):
         p = ledger.parse(ws_with(ev("ITER", "green", "attempt=1 shapes=all")), gate_n=3)

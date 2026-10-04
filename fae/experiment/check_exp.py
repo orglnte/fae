@@ -248,7 +248,7 @@ def _definition(ctx):
     except Exception as e:
         out.append(Finding(False, f"verifier_class(): {_last_line(e)}",
                            f"verifier_class() returns a {Verifier.__name__} subclass (HOWTO §6)"))
-    out.append(Finding(d.gate.arity >= 1, f"gate: {d.gate.arity} arrangement(s)",
+    out.append(Finding(d.gate.arrangements_nr >= 1, f"gate: {d.gate.arrangements_nr} arrangement(s)",
                        "GATE needs at least one arrangement"))
     return out
 
