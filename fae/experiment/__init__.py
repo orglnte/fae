@@ -273,34 +273,6 @@ def for_config(path):
     return _loaded["def"] if _loaded["def"] is not None else load(path)
 
 
-_current: dict = {"x": None}
-
-
-def current():
-    """The experiment this process runs, built on first use from the
-    environment: REPO_ROOT (else the working directory) and WORKSPACES_DIR."""
-    if _current["x"] is None:
-        _current["x"] = Experiment()
-    return _current["x"]
-
-
-def workspace():
-    """The workspace this process runs on: current().workspace."""
-    return current().workspace
-
-
-def definition():
-    """The definition this process runs: current().definition."""
-    return current().definition
-
-
-def set_current(experiment):
-    """Make `experiment` the one this process runs (tests only); returns the
-    previous one."""
-    prev, _current["x"] = _current["x"], experiment
-    return prev
-
-
 def unload():
     """Forget the loaded definition (tests only: a process runs one experiment)."""
     with _lock:
@@ -338,7 +310,8 @@ def parse_cell_id(cid):
         return None
     i = 3 if t[2] == "smoke" else 2
     variant = "_".join(t[i:-2])
-    if not variant or variant not in definition().variants:
+    from fae import shared as _shared
+    if not variant or variant not in _shared.definition().variants:
         return None
     return t[0], variant, t[-2], rep.group(1)
 

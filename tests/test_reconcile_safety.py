@@ -4,7 +4,7 @@ preview writing state.
 Money is at stake in both: an unordered respawn is a paid agent run, and a
 dry-run that flags a cell silently removes it from supervision.
 
-`runs.experiment.workspace().path` and the scheduling plane are patched to a TemporaryDirectory in every test that
+`runs.shared.workspace().path` and the scheduling plane are patched to a TemporaryDirectory in every test that
 writes. Nothing touches the live workspace tree.
 """
 import fcntl
@@ -206,7 +206,7 @@ class TestTheEpochSeedIsComplete(unittest.TestCase):
             self.addCleanup(vlock.close)
             fcntl.flock(vlock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             (Path(d) / ".locks" / "verify-lock.holder").write_text("cell-b 99 123\n")
-            exp = runs.experiment.current()
+            exp = runs.shared.current()
             self.assertEqual(exp.slot_holders(), {"cell-a"})
             self.assertEqual(exp.verify_holder(), "cell-b")
 
@@ -217,12 +217,12 @@ class TestTheEpochSeedIsComplete(unittest.TestCase):
             (Path(d) / ".locks").mkdir()
             (Path(d) / ".locks" / "verify-lock").touch()
             (Path(d) / ".locks" / "verify-lock.holder").write_text("cell-b 99 123\n")
-            self.assertEqual(runs.experiment.current().verify_holder(), "")
+            self.assertEqual(runs.shared.current().verify_holder(), "")
 
     def test_no_locks_held_reads_empty(self):
         with tempfile.TemporaryDirectory() as d, \
                 at_workspace(plane=Path(d)):
-            exp = runs.experiment.current()
+            exp = runs.shared.current()
             self.assertEqual(exp.slot_holders(), set())
             self.assertEqual(exp.verify_holder(), "")
 
@@ -465,7 +465,7 @@ class TestDryRunWritesNothing(unittest.TestCase):
 
     def test_dry_run_writes_no_transition(self):
         runs.conduct.Conduct().respawn(self.st(), dry=True)
-        self.assertFalse(runs.experiment.workspace().transitions.exists(),
+        self.assertFalse(runs.shared.workspace().transitions.exists(),
                          "a preview wrote to the trace the TLA+ check replays")
 
 
@@ -491,7 +491,7 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
     def spawn(self, argv, cid):
         """Conduct.launch, the cell's process being `argv`."""
         with mock.patch.object(Cell, "process_argv", return_value=argv):
-            return runs.conduct.Conduct().launch(runs.experiment.workspace().named_cell(cid), "sonnet")
+            return runs.conduct.Conduct().launch(runs.shared.workspace().named_cell(cid), "sonnet")
 
     def test_immediate_failure_returns_the_exit_code(self):
         rc = self.spawn(
@@ -527,37 +527,37 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         # anyway must lift it, or the model keeps intent='paused' and every
         # later event on the cell replays as an illegal transition.
         cid = "cell-paused"
-        (runs.experiment.workspace().path / cid).mkdir(parents=True, exist_ok=True)
-        self.addCleanup(shutil.rmtree, runs.experiment.workspace().path / cid, True)
-        (runs.experiment.workspace().path / cid / ".paused").write_text("stopped by=operator\n")
+        (runs.shared.workspace().path / cid).mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, runs.shared.workspace().path / cid, True)
+        (runs.shared.workspace().path / cid / ".paused").write_text("stopped by=operator\n")
         # The Resume is gated on the LEDGER pause, exactly as replay judges
         # it — so the fixture seeds the Pause `stop` emits.
-        log = runs.experiment.workspace().transitions
+        log = runs.shared.workspace().transitions
         with log.open("a") as f:
             f.write(f"{TS}\tPause\t{cid}\treason=stopped\n")
         self.spawn(["bash", "-c", "exit 0"], cid)
         self.assertEqual([l.split("\t")[1] for l in log.read_text().splitlines()
                           if l.split("\t")[2] == cid], ["Pause", "Resume"])
-        self.assertFalse((runs.experiment.workspace().path / cid / ".paused").exists())
+        self.assertFalse((runs.shared.workspace().path / cid / ".paused").exists())
 
     def test_a_cancelled_cell_is_never_resumed_by_a_spawn(self):
         cid = "cell-cancelled"
-        (runs.experiment.workspace().path / cid).mkdir(parents=True, exist_ok=True)
-        self.addCleanup(shutil.rmtree, runs.experiment.workspace().path / cid, True)
-        (runs.experiment.workspace().path / cid / ".paused").write_text("killed by=operator\n")
-        (runs.experiment.workspace().path / cid / ".cancelled").write_text("by=operator\n")
-        with runs.experiment.workspace().transitions.open("a") as f:
+        (runs.shared.workspace().path / cid).mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, runs.shared.workspace().path / cid, True)
+        (runs.shared.workspace().path / cid / ".paused").write_text("killed by=operator\n")
+        (runs.shared.workspace().path / cid / ".cancelled").write_text("by=operator\n")
+        with runs.shared.workspace().transitions.open("a") as f:
             f.write(f"{TS}\tKill\t{cid}\treason=killed\n")
         self.spawn(["bash", "-c", "exit 0"], cid)
-        self.assertNotIn("\tResume\t", runs.experiment.workspace().transitions.read_text())
-        self.assertTrue((runs.experiment.workspace().path / cid / ".paused").exists())
+        self.assertNotIn("\tResume\t", runs.shared.workspace().transitions.read_text())
+        self.assertTrue((runs.shared.workspace().path / cid / ".paused").exists())
 
     def test_it_never_creates_a_workspace(self):
         # The sink must not be minted under WS: a spawn precedes prepare, so
         # writing there invents a workspace for a cell that never ran — and
         # every scanner that walks WS then sees it.
         self.spawn(["bash", "-c", "exit 3"], "cell-never")
-        self.assertFalse((runs.experiment.workspace().path / "cell-never").exists())
+        self.assertFalse((runs.shared.workspace().path / "cell-never").exists())
 
 
 if __name__ == "__main__":
@@ -1148,4 +1148,4 @@ class TestRespawnKeepsTheCellsImplementation(unittest.TestCase):
             (Path(d) / cid).mkdir()
             (Path(d) / cid / "cell.env").write_text("TASK=T1\nIMPL=py\n")
             with at_workspace(Path(d)):
-                self.assertEqual(runs.experiment.current().cell(cid).impl, "py")
+                self.assertEqual(runs.shared.current().cell(cid).impl, "py")

@@ -9,7 +9,7 @@ installing it is plan-gated. Nothing here needs a third-party runner.
 
 ## Safety rule — these tests never touch the live fleet
 
-The current Experiment (`fae.experiment.current()`) names the workspace
+The current Experiment (`fae.shared.current()`) names the workspace
 (`workspaces.nosync/`) and the scheduling plane (`.queues/`, `.conduct/`,
 `.locks/`, `transitions.log`; `fae/plane.py`), and the fleet reads those paths
 while it runs. A test that wrote a pause file or a queue line

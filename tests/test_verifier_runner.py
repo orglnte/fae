@@ -15,7 +15,7 @@ from unittest import mock
 from _ctx import ROOT
 
 sys.path.insert(0, str(ROOT))
-from fae import experiment as _experiment  # noqa: E402
+from fae import shared as _shared  # noqa: E402
 from fae.cell import image as _image  # noqa: E402
 from fae.cell import verify  # noqa: E402
 from fae.cell.verify import Ctx, Verdict, run_verifier, verify_argv  # noqa: E402
@@ -289,7 +289,7 @@ class TestTheTeardownChild(unittest.TestCase):
     then the verifier's own, even when the infra's raises."""
 
     def test_the_verifier_tears_down_what_it_provisioned_after_the_infra(self):
-        d = _experiment.definition()
+        d = _shared.definition()
         vid = sorted(d.variants)[0]
         order = []
         with tempfile.TemporaryDirectory() as t:
@@ -343,7 +343,7 @@ class TestTheDeclaredImage(unittest.TestCase):
     def test_the_fixture_verifier_declares_a_buildable_image(self):
         """A verifier whose IMAGE_DIR is missing voids every verify; the tag
         must resolve without a daemon."""
-        cls = _experiment.definition().verifier_class()
+        cls = _shared.definition().verifier_class()
         self.assertTrue(cls.IMAGE_DIR and (Path(cls.IMAGE_DIR) / "Dockerfile").is_file())
         self.assertRegex(_image.tag("fixture-verifier", cls.IMAGE_DIR, cls.image_context(None)),
                          r"^fae-fixture-verifier:[0-9a-f]{12}$")
@@ -360,7 +360,7 @@ class TestTheRealRoundTrip(unittest.TestCase):
         out = Path(tmp.name) / "ws" / "real-x"
         (out / "artifacts").mkdir(parents=True)
         (out / "artifacts" / "answer.txt").write_text("42\n")
-        fixture = Path(_experiment.definition().path)      # the suite's own experiment
+        fixture = Path(_shared.definition().path)      # the suite's own experiment
         ctx = Ctx(root=str(ROOT), experiment_dir=str(fixture), workspace=str(out),
                   artifacts=str(out / "artifacts"), out=str(out), cid="real-x",
                   task="T1", variant="alpha", arrangement="G1")
@@ -429,7 +429,7 @@ class TestTheTeardownRunsInAFreshContainer(RunnerCase):
         # one process, one experiment: the class the runner reads is the
         # loaded definition's verifier, so its cap is patched there
         exp = _definition(self.root, "")
-        with mock.patch.object(_experiment.definition().verifier_class(), "CPUS", 2):
+        with mock.patch.object(_shared.definition().verifier_class(), "CPUS", 2):
             self.run_with(exp, self._child_writes(Verdict(ok=True)))
         argv = next(c[1] for c in self.calls if c[0] == "popen")
         self.assertIn("--cpus=2", argv)
@@ -461,7 +461,7 @@ class TestTheTeardownRunsInAFreshContainer(RunnerCase):
         self.assertIn("teardown start image=fae-mini-verifier:abc", (self.out / "verifier.log").read_text())
 
     def test_the_teardown_child_stops_the_runner_before_the_infras_teardown(self):
-        d = _experiment.definition()
+        d = _shared.definition()
         cls = d.variant("alpha_apidocs")
         ctx = Ctx(root=str(ROOT), experiment_dir=str(d.path), workspace=str(self.out),
                   artifacts=str(self.out / "artifacts"), out=str(self.out), cid="cell-x",

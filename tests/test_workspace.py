@@ -53,13 +53,13 @@ class TestTheCells(unittest.TestCase):
 
 class TestTheExperiment(unittest.TestCase):
     def test_its_definition_is_the_one_this_process_runs(self):
-        self.assertIs(Experiment().definition, runs.experiment.definition())
+        self.assertIs(Experiment().definition, runs.shared.definition())
 
     def test_the_drivers_experiment_is_on_the_drivers_workspace(self):
-        e = runs.experiment.current()
-        self.assertEqual(e.workspace.path, runs.experiment.workspace().path)
-        self.assertEqual(e.workspace.locks, runs.experiment.workspace().locks)
-        self.assertEqual(e.workspace.transitions, runs.experiment.workspace().transitions)
+        e = runs.shared.current()
+        self.assertEqual(e.workspace.path, runs.shared.workspace().path)
+        self.assertEqual(e.workspace.locks, runs.shared.workspace().locks)
+        self.assertEqual(e.workspace.transitions, runs.shared.workspace().transitions)
 
 
 if __name__ == "__main__":

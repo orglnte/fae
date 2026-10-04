@@ -49,7 +49,7 @@ class TestNoDriverOnTheResultsPath(unittest.TestCase):
 class TestScoreScoresWhatValidateFound(unittest.TestCase):
 
     def _score(self, validated, rcs):
-        exp = runs.experiment.current()
+        exp = runs.shared.current()
         ws = SimpleNamespace(cell=lambda cid: SimpleNamespace(cid=cid))
         calls = []
         from fae.experiment.scoring import score_cell
@@ -83,8 +83,8 @@ class TestFinished(unittest.TestCase):
     def _finished(self, state, why, has_ledger=True, cid="sonnet_high_beta_apidocs_T1_r1"):
         cell = mock.Mock(cid=cid, has_ledger=has_ledger)
         cell.status.return_value = {"state": state, "why": why}
-        ws = runs.experiment.current().workspace
-        return runs.experiment.current().finished(cell, ws)
+        ws = runs.shared.current().workspace
+        return runs.shared.current().finished(cell, ws)
 
     def test_outcomes_count(self):
         for why in ("green", "failed", "revoked"):
@@ -103,7 +103,7 @@ class TestValidationPrinting(unittest.TestCase):
         import contextlib
         import io
         buf = io.StringIO()
-        with mock.patch.object(runs.experiment.current(), "validate", return_value=results), \
+        with mock.patch.object(runs.shared.current(), "validate", return_value=results), \
              contextlib.redirect_stdout(buf):
             runs.render.results_validate(SimpleNamespace(selector=None), quiet=quiet)
         return buf.getvalue()

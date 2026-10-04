@@ -44,7 +44,7 @@ class TestACrashIsRecordedBeforeTheRespawn(OrchTmpCase):
         # Admitting on top of that is not enabled.
         self.trace(("Admit", self.CID))
         with mock.patch.object(Cell, "loop_pid", return_value=None):
-            self.assertTrue(runs.experiment.current().cell(self.CID)._crash_before_spawn())
+            self.assertTrue(runs.shared.current().cell(self.CID)._crash_before_spawn())
         self.assertEqual(self.actions()[-1], "Crash")
 
     def test_a_cleanly_ended_loop_is_not_crashed(self):
@@ -53,20 +53,20 @@ class TestACrashIsRecordedBeforeTheRespawn(OrchTmpCase):
         self.trace(("Admit", self.CID),
                    ("ReleaseSlot", self.CID))
         with mock.patch.object(Cell, "loop_pid", return_value=None):
-            self.assertFalse(runs.experiment.current().cell(self.CID)._crash_before_spawn())
+            self.assertFalse(runs.shared.current().cell(self.CID)._crash_before_spawn())
         self.assertNotIn("Crash", self.actions())
 
     def test_a_first_ever_spawn_is_not_crashed(self):
         self.trace()
         with mock.patch.object(Cell, "loop_pid", return_value=None):
-            self.assertFalse(runs.experiment.current().cell(self.CID)._crash_before_spawn())
+            self.assertFalse(runs.shared.current().cell(self.CID)._crash_before_spawn())
 
     def test_a_LIVE_loop_is_never_declared_crashed(self):
         # Declaring a running cell dead desyncs every later event for it —
         # the same failure, pointed the other way.
         self.trace(("Admit", self.CID))
         with mock.patch.object(Cell, "loop_pid", return_value=4242):
-            self.assertFalse(runs.experiment.current().cell(self.CID)._crash_before_spawn())
+            self.assertFalse(runs.shared.current().cell(self.CID)._crash_before_spawn())
         self.assertNotIn("Crash", self.actions())
 
     def test_it_runs_on_the_spawn_path_itself_not_only_in_supervision(self):
@@ -79,7 +79,7 @@ class TestACrashIsRecordedBeforeTheRespawn(OrchTmpCase):
              mock.patch.object(runs.conduct.Conduct, "SPAWN_PROBE_S", 0), \
              mock.patch.object(runs.subprocess, "Popen") as popen:
             popen.return_value.poll.return_value = None
-            runs.conduct.Conduct().launch(runs.experiment.workspace().named_cell(self.CID), "sonnet")
+            runs.conduct.Conduct().launch(runs.shared.workspace().named_cell(self.CID), "sonnet")
         self.assertEqual(self.actions()[-1], "Crash")
         self.assertLess(runs.supervise.AGENT_DEAD_GRACE, 3600)
 

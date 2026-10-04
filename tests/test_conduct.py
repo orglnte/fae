@@ -1,5 +1,5 @@
 """conduct: the unified scheduler. Everything it touches is mocked; nothing
-here starts a process. Fixtures patch runs.experiment.workspace().path and the scheduling plane to a temp tree, the
+here starts a process. Fixtures patch runs.shared.workspace().path and the scheduling plane to a temp tree, the
 same convention as test_operator_control.py.
 """
 import contextlib
@@ -176,7 +176,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         with mock.patch.object(runs.host, "containers", return_value=set()):
             runs.supervise._retire_finished_specs()
         self.assertEqual(runs.queues.lane_specs(m), [])
-        self.assertTrue((runs.experiment.workspace().queues.base / "done" / m / f"{cid}.json").exists())
+        self.assertTrue((runs.shared.workspace().queues.base / "done" / m / f"{cid}.json").exists())
 
     def test_an_unfinished_cells_spec_stays(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
@@ -228,7 +228,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
                 mock.patch.object(runs.conduct.Conduct, "_spawn", return_value=None):
             runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
         self.assertEqual(runs.queues.lane_specs(m), [], "spec still in the lane")
-        self.assertTrue((runs.experiment.workspace().queues.base / "running" / m / f"{cid}.json").exists())
+        self.assertTrue((runs.shared.workspace().queues.base / "running" / m / f"{cid}.json").exists())
 
     def test_a_spawn_that_never_starts_gives_the_spec_back(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
@@ -247,7 +247,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
                 mock.patch.object(runs.conduct.Conduct, "_spawn", return_value=3):
             runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
         self.assertEqual(len(runs.queues.lane_specs(m)), 1, "spec was not returned")
-        self.assertFalse((runs.experiment.workspace().queues.base / "running" / m / f"{cid}.json").exists())
+        self.assertFalse((runs.shared.workspace().queues.base / "running" / m / f"{cid}.json").exists())
 
     def test_a_preview_moves_nothing(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
@@ -381,7 +381,7 @@ class TestClaims(ConductCase):
         ws = self.ws / cid
         ws.mkdir(parents=True)
         def liveness():
-            return runs.experiment.current().cell(cid).liveness(None, lambda: False,
+            return runs.shared.current().cell(cid).liveness(None, lambda: False,
                                                   lambda: runs.host.queued(cid))
         with mock.patch.object(runs.host, "live_loops", return_value=set()):
             self.assertIn("cell resume", liveness()[2])
@@ -628,7 +628,7 @@ class TestLimitCooldown(ConductCase):
         out = self.run_conduct()
         self.assertIn("cooldown expired", out)
         self.assertFalse(runs.queues.cooldown_file("aaa").exists())
-        self.assertIsNone(runs.experiment.current().cell(cid).pause_reason)
+        self.assertIsNone(runs.shared.current().cell(cid).pause_reason)
         self.assertEqual(self.spawned, [cid])
 
 
@@ -699,7 +699,7 @@ class TestReapingBelongsToConduct(unittest.TestCase):
              mock.patch.object(runs.subprocess, "run",
                                side_effect=lambda a, **k: ran.append(a)), \
              mock.patch.object(runs.subprocess, "Popen") as popen:
-            runs.experiment.current().cell("some_cell").prestart_clean()
+            runs.shared.current().cell("some_cell").prestart_clean()
         popen.assert_not_called()
         self.assertEqual(ran, [["docker", "rm", "-f", "fae-agent-some_cell"]],
                          "only the cell's own agent container")
@@ -709,7 +709,7 @@ class TestReapingBelongsToConduct(unittest.TestCase):
         with mock.patch.object(Cell, "loop_pid", return_value=4242), \
              mock.patch.object(runs.subprocess, "run",
                                side_effect=lambda a, **k: ran.append(a)):
-            runs.experiment.current().cell("some_cell").prestart_clean()
+            runs.shared.current().cell("some_cell").prestart_clean()
         self.assertEqual(ran, [])
 
     def test_a_spawn_still_clears_its_own_leftovers(self):
@@ -720,7 +720,7 @@ class TestReapingBelongsToConduct(unittest.TestCase):
         with mock.patch.object(Cell, "loop_pid", return_value=None), \
              mock.patch.object(runs.subprocess, "run",
                                side_effect=lambda a, **k: removed.append(a)):
-            runs.experiment.current().cell(cid).prestart_clean()
+            runs.shared.current().cell(cid).prestart_clean()
         self.assertIn(["docker", "rm", "-f", f"fae-agent-{cid}"], removed)
         self.assertFalse((self.ws / cid / ".loop").exists())
 
@@ -1008,13 +1008,13 @@ class TestConductLiftsItsOwnStandDowns(ConductCase):
         (self.ws / self.CID).mkdir(parents=True)
         (self.ws / self.CID / ".paused").write_text(
             "arm-stuck by=conduct at=2026-08-25T20:02:17Z\n")
-        r = runs.experiment.current().cell(self.CID).pause_request()
+        r = runs.shared.current().cell(self.CID).pause_request()
         self.assertEqual((r.reason, r.who), ("arm-stuck", "conduct"))
         self.assertEqual(int(r.at), 1787688137)
         (self.ws / self.CID / ".paused").write_text("manual\n")
-        r = runs.experiment.current().cell(self.CID).pause_request()
+        r = runs.shared.current().cell(self.CID).pause_request()
         self.assertEqual((r.reason, r.who, r.at), ("manual", None, None))
-        self.assertIsNone(runs.experiment.current().cell("nope").pause_request())
+        self.assertIsNone(runs.shared.current().cell("nope").pause_request())
 
     def test_a_walled_cell_is_exempt_from_arm_stuck(self):
         """The wall branch owns a cell in the limit phase; ARM-STUCK must

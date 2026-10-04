@@ -15,6 +15,7 @@ from _ctx import ROOT
 
 sys.path.insert(0, str(ROOT))
 from fae import experiment as exp  # noqa: E402
+from fae import shared  # noqa: E402
 
 ENGINE = ["fae"]
 _IMPORT = re.compile(r"^\s*(from experiment[.\s]|import experiment[.\s]|import experiment$)", re.M)
@@ -205,7 +206,7 @@ class TestTheExperimentsOwnCommands(unittest.TestCase):
     experiment; it lists and runs what the definition's commands() declares."""
 
     def _with(self, commands):
-        d = exp.definition()
+        d = shared.definition()
         return mock.patch.object(type(d), "commands", new_callable=mock.PropertyMock,
                                  return_value=commands), exp.Experiment()
 
@@ -237,7 +238,7 @@ class TestTheExperimentsOwnCommands(unittest.TestCase):
             e.verb("nosuch", [])
 
     def test_a_definition_without_commands_has_none(self):
-        self.assertEqual(exp.definition().commands, {})
+        self.assertEqual(shared.definition().commands, {})
 
 
 class TestTheAgentsFile(unittest.TestCase):

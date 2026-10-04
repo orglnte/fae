@@ -375,7 +375,8 @@ def verify_mounts(ctx, root_reads=None):
     from . import image as _image
     if root_reads is None:
         from fae import experiment as _experiment
-        root_reads = _experiment.definition().verifier_class().ROOT_READS
+        from fae import shared as _shared
+        root_reads = _shared.definition().verifier_class().ROOT_READS
     out = Path(ctx.out)
     root, ws = Path(ctx.root), Path(ctx.workspace)
 
@@ -450,6 +451,7 @@ def run_teardown(ctx, infra, timeout_s=900, log_dir=None):
     reaper covers what this leaves. `log_dir` holds verifier.log (the host's
     record of the run), default `ctx.out`."""
     from fae import experiment as _experiment
+    from fae import shared as _shared
     from . import image as _image
     work = Path(ctx.out) / WORKDIR
     out = Path(log_dir or ctx.out)
@@ -457,7 +459,7 @@ def run_teardown(ctx, infra, timeout_s=900, log_dir=None):
     (work / "teardown.ctx.json").write_text(ctx.to_json())
     conf = getattr(infra, "conf", None)
     try:
-        image = _image.for_variant(infra.variant, _experiment.definition(), conf,
+        image = _image.for_variant(infra.variant, _shared.definition(), conf,
                                    log=lambda m: _log_line(out, m))
     except RuntimeError as e:
         _log_line(out, f"teardown image: {e}")
@@ -488,6 +490,7 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
     infra, a store) does not die with it. `log_dir` holds verifier.log (the
     host's record of the run), default `ctx.out`."""
     from fae import experiment as _experiment
+    from fae import shared as _shared
     from . import image as _image
     work = Path(ctx.out) / WORKDIR
     out = Path(log_dir or ctx.out)
@@ -497,7 +500,7 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
     ctx_path.write_text(ctx.to_json())
     conf = getattr(infra, "conf", None)
     try:
-        image = _image.for_variant(infra.variant, _experiment.definition(), conf,
+        image = _image.for_variant(infra.variant, _shared.definition(), conf,
                                    log=lambda m: _log_line(out, m))
     except RuntimeError as e:
         _log_line(out, f"verifier image: {e}")
@@ -505,7 +508,7 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
                        why=f"no verify image: {str(e).splitlines()[0]}", arrangement=ctx.arrangement)
     name = _image.verify_container(ctx.cid)
     _image.remove_container(name)                 # a previous run's, if any
-    cls = _experiment.definition().verifier_class()
+    cls = _shared.definition().verifier_class()
     argv = verify_argv(ctx, image, conf, cpus=cls.CPUS)
     _log_line(out, f"verifier start arrangement={ctx.arrangement or 'seed'} "
                    f"image={image} container={name}"
@@ -569,6 +572,7 @@ def main(argv=None):
     if ctx.root not in sys.path:
         sys.path.insert(0, ctx.root)
     from fae import experiment as _experiment
+    from fae import shared as _shared
     definition = _experiment.load(ctx.experiment_dir)
     if a.teardown:
         from .variants import _ShimCell

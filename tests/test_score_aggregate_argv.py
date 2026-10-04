@@ -12,7 +12,7 @@ class TestAggregateForwardsOptions(unittest.TestCase):
 
     def _run(self, **kw):
         with mock.patch.object(runs.experiment.subprocess, "run") as run:
-            runs.experiment.current().aggregate(**kw)
+            runs.shared.current().aggregate(**kw)
         return run.call_args
 
     def _argv(self, **kw):
@@ -52,13 +52,13 @@ class TestAggregateForwardsOptions(unittest.TestCase):
             self._argv(sort_by_magic=True)
 
     def test_the_process_aggregates_the_workspace_named(self):
-        exp = runs.experiment.current()
+        exp = runs.shared.current()
         other = exp.beside(exp.root / "other.nosync")
         env = self._run(workspace=other).kwargs["env"]
         self.assertEqual(env["WORKSPACES_DIR"], str(other.path))
 
     def test_by_default_the_experiment_workspace(self):
-        exp = runs.experiment.current()
+        exp = runs.shared.current()
         self.assertEqual(self._run().kwargs["env"]["WORKSPACES_DIR"], str(exp.workspace.path))
 
 

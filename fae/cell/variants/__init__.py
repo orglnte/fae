@@ -25,8 +25,8 @@ NOOP_ENV = "FAE_VARIANT_NOOP"
 
 def registry():
     """id -> class, from the experiment's variant files."""
-    from fae import experiment as _experiment
-    return _experiment.definition().variants
+    from fae import shared as _shared
+    return _shared.definition().variants
 
 
 def for_cell(cell):

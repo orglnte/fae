@@ -50,6 +50,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from fae import experiment as _experiment  # noqa: E402
+from fae import shared as _shared  # noqa: E402
 from fae.cell.cell import Busy  # noqa: E402
 from fae.cli import render  # noqa: E402
 from fae import conduct, host  # noqa: E402
@@ -129,8 +130,8 @@ def spawn(args):
         print(f"refusing: loop already running for {cid} (pid {live[cid]}) — "
               f"two loops on one workspace corrupt its logs")
         return
-    if (_experiment.workspace().path / cid).is_dir() and not args.fresh:
-        c = _experiment.current().cell(cid)
+    if (_shared.workspace().path / cid).is_dir() and not args.fresh:
+        c = _shared.current().cell(cid)
         L = c.read_ledger()
         if L["verdict"] in ("green", "failed", "revoked"):
             at = f" @{L['green_at']}" if L["verdict"] == "green" else f" @{L['att']}"
@@ -139,7 +140,7 @@ def spawn(args):
         if c.cancelled:
             print(f"skipping {cid}: already DONE·cancelled — use --fresh to force a new run")
             return
-    cell = _experiment.current().cell(cid, args.task, args.variant, rep, agent=args.agent)
+    cell = _shared.current().cell(cid, args.task, args.variant, rep, agent=args.agent)
     if not cell.ready_image():
         sys.exit(f"refusing: the agent image for {args.variant} could not be built "
                  f"(the lines above say why)")
@@ -152,7 +153,7 @@ def spawn(args):
         # the human pseudo-agent is interactive (the driver pauses on a tty each
         # attempt): the command goes to the person's own terminal
         print(f"HUMAN cell {cid} — run this in YOUR terminal (tmux for long sessions):\n")
-        print(f"  cd {_experiment.current().root} && {cell.IGNORE_SLOTS_ENV}=1 AGENT=human "
+        print(f"  cd {_shared.current().root} && {cell.IGNORE_SLOTS_ENV}=1 AGENT=human "
               f"python3 -m fae.cell {args.task} {args.variant} {rep}\n")
         print(f"Each attempt: edit workspaces*/{cid}/artifacts, press ENTER to "
               f"verify (q to stop).")
@@ -164,12 +165,12 @@ def spawn(args):
 def pause(args):
     """Queue a pause of ONE cell for the run to act on. Returns the cid, or None."""
     sels = _selectors(args)
-    cids = _experiment.workspace().select(*sels)
+    cids = _shared.workspace().select(*sels)
     if not cids:
         print(f"no cells match {' '.join(sels)!r}")
         return None
     _one_cell("pause", sels, len(cids))
-    _experiment.workspace().queues.request(cids[0], "pause", reason=args.reason, who="operator")
+    _shared.workspace().queues.request(cids[0], "pause", reason=args.reason, who="operator")
     print(f"pause requested [{args.reason}] for {cids[0]}")
     return cids[0]
 
@@ -180,10 +181,10 @@ def stop_cells(args):
     with no workspace is the queue's alone and is shelved here. Returns the
     cids queued."""
     sels = _selectors(args)
-    cids = _experiment.workspace().select(*sels)
+    cids = _shared.workspace().select(*sels)
     # specs with no workspace are invisible to the selection; a stop that
     # ignored them would leave the cell to be admitted later
-    q_only = [c for c in _experiment.workspace().queued_cells(*sels) if c not in cids]
+    q_only = [c for c in _shared.workspace().queued_cells(*sels) if c not in cids]
     if not cids and not q_only:
         print(f"no cells match {' '.join(sels)!r}")
         return None
@@ -192,7 +193,7 @@ def stop_cells(args):
     if getattr(args, "dry_run", False):
         verb = "cancel" if cancel else "stop"
         for cid in cids:
-            st = host.cell_state(_experiment.workspace().path / cid, host.loop_pids(), host.containers())
+            st = host.cell_state(_shared.workspace().path / cid, host.loop_pids(), host.containers())
             print(f"would {verb} {cid}" + (f" ({st['state']}·{st['why']})" if st else ""))
         for cid in q_only:
             print(f"would drop queued spec {cid} (no workspace; backed up)")
@@ -200,14 +201,14 @@ def stop_cells(args):
         return None
     # never cancel a finished verdict: a stop halts runs, it does not relabel data
     done = [c for c in cids
-            if (st := host.cell_state(_experiment.workspace().path / c, {}, set())) and st["state"] == "DONE"]
+            if (st := host.cell_state(_shared.workspace().path / c, {}, set())) and st["state"] == "DONE"]
     cids = [c for c in cids if c not in set(done)]
     for c in done:
         print(f"  {c}: already DONE — left untouched")
     if not cids and not q_only:
         print("nothing to stop (all matches are DONE)")
         return None
-    qs = _experiment.workspace().queues
+    qs = _shared.workspace().queues
     n = sum(qs.shelve_cell(c, "cancelled" if cancel else "stopped") for c in q_only)
     if n:
         print(f"  {n} spec(s) out of the backlog (restore from .queues/backups/)")
@@ -222,19 +223,19 @@ def resume(args):
     flag cleared, its respawn budget reset, and its loop respawned without
     slots when it has none (never fresh). A blanket selection leaves standing
     operator decisions (roster/manual pauses, a cancel) alone."""
-    qs = _experiment.workspace().queues
+    qs = _shared.workspace().queues
     sels = _selectors(args)
-    matches = _experiment.workspace().select(*sels)
+    matches = _shared.workspace().select(*sels)
     _one_cell("resume", sels, len(matches))
     blanket = _experiment.is_blanket(sels)
     parents = host.loop_parents()
     run = conduct.Conduct()
     touched = 0
     for cid in matches:
-        st = host.cell_state(_experiment.workspace().path / cid, host.loop_pids(), host.containers())
+        st = host.cell_state(_shared.workspace().path / cid, host.loop_pids(), host.containers())
         if st is None:
             continue
-        c = _experiment.current().cell(cid)
+        c = _shared.current().cell(cid)
         if c.sealed:
             print(f"{cid}: SEALED — {c.seal_record().replace(chr(9), ' ') or 'sealed'}; "
                   f"not restartable")
@@ -285,8 +286,8 @@ def resume(args):
                 continue
         if run.reset_respawn_budgets([cid]):
             acts.append("respawn budget reset")
-        for other in _experiment.workspace().select(agent):
-            _experiment.current().cell(other).refresh_creds()
+        for other in _shared.workspace().select(agent):
+            _shared.current().cell(other).refresh_creds()
         # claim before spawning: claim() is one rename and refuses an existing
         # claim, so the run cannot admit the same spec meanwhile
         claimed = None
@@ -319,11 +320,11 @@ def seal(args):
     no inverse, so writing the markers is an explicit act (--apply)."""
     loops, boxes, live = host.loop_pids(), host.containers(), host.loop_parents()
     todo, already, skipped = [], 0, {}
-    for cid in _experiment.workspace().select(args.selector):
-        st = host.cell_state(_experiment.workspace().path / cid, loops, boxes)
+    for cid in _shared.workspace().select(args.selector):
+        st = host.cell_state(_shared.workspace().path / cid, loops, boxes)
         if st is None:
             continue
-        if _experiment.current().cell(cid).sealed:
+        if _shared.current().cell(cid).sealed:
             already += 1
             continue
         why = st.get("why", "")
@@ -338,7 +339,7 @@ def seal(args):
     for cid, verdict, att in todo:
         if args.apply:
             try:
-                _experiment.current().cell(cid).seal(verdict, att, by="cli.py seal")
+                _shared.current().cell(cid).seal(verdict, att, by="cli.py seal")
             except Busy:
                 print(f"skipped       {cid}  (held by another process)")
                 continue
@@ -354,7 +355,7 @@ def seal(args):
 def reverify(args):
     """Re-run the shape gate on finished cells without touching their result:
     everything lands under <ws>/reverify/<ts>/ (Cell.reverify)."""
-    cids = _experiment.workspace().select(*_selectors(args))
+    cids = _shared.workspace().select(*_selectors(args))
     if not cids:
         sys.exit("no cells match")
     if len(cids) > 1 and not args.all:
@@ -366,7 +367,7 @@ def reverify(args):
               f"verify lock behind its cells and holds it for the whole gate", flush=True)
     stamp = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
     for cid in cids:
-        c = _experiment.current().cell(cid)
+        c = _shared.current().cell(cid)
         if not c.terminal:
             print(f"skipping {cid}: not finished ({c.verdict or 'open'}) — "
                   f"re-verify applies to a recorded result")
@@ -388,7 +389,7 @@ def reverify(args):
 
 def tail(args):
     """The agent transcript of the cell's latest attempt."""
-    logs = _experiment.current().cell(args.cell).agent_logs()
+    logs = _shared.current().cell(args.cell).agent_logs()
     if not logs:
         sys.exit("no attempt logs")
     subprocess.run(["tail", *(["-f"] if args.follow else ["-n", "40"]), str(logs[-1])])
@@ -396,7 +397,7 @@ def tail(args):
 
 def log(args):
     """The cell's most recent story (Cell.console_log)."""
-    c = _experiment.current().cell(args.cell)
+    c = _shared.current().cell(args.cell)
     path = c.console_log()
     if path is None:
         print(f"no log under {c.ws}")
@@ -408,7 +409,7 @@ def log(args):
 def _variants(variants):
     """The variants named, each one of the experiment's; none named: every
     active one."""
-    d = _experiment.definition()
+    d = _shared.definition()
     for v in variants:
         if v not in d.variants:
             sys.exit(f"unknown variant '{v}' — valid: {', '.join(d.active)}")
@@ -417,7 +418,7 @@ def _variants(variants):
 
 def spawn_matrix(args):
     """Every active variant, --reps reps each, rep-outer."""
-    n, asked = _experiment.workspace().queues.enqueue_matrix(args.agent, args.task, _experiment.definition().active,
+    n, asked = _shared.workspace().queues.enqueue_matrix(args.agent, args.task, _shared.definition().active,
                                               args.reps, fresh=args.fresh)
     print(f"enqueued {n} runs for {args.agent} — `experiment run` admits them "
           f"(start it if not running: python3 cli.py experiment run)"
@@ -431,14 +432,14 @@ def top_up(args):
     would cap the variant below target. Nothing is started."""
     variants = _variants(getattr(args, "variants", []))
     have, unstarted = {}, {}
-    for cid in _experiment.workspace().select(args.agent):
+    for cid in _shared.workspace().select(args.agent):
         p = _experiment.parse_cell_id(cid)
         if p[0] != args.agent or p[2] != args.task:
             continue
-        c = _experiment.current().cell(cid)
+        c = _shared.current().cell(cid)
         ran = c.read_ledger()["iters"] or c.heartbeat() is not None
         (have if ran else unstarted).setdefault(p[1], set()).add(int(p[3]))
-    need, n = _experiment.workspace().queues.top_up(args.agent, args.task, variants, args.to_rep, have,
+    need, n = _shared.workspace().queues.top_up(args.agent, args.task, variants, args.to_rep, have,
                                      dry_run=args.dry_run)
     for v in variants:
         idle = sorted(unstarted.get(v, set()) & set(need[v]))
@@ -456,12 +457,12 @@ def top_up(args):
 def cancel_pending(args):
     """Take pending specs out of the queue before admission (Queues.cancel_pending):
     moved aside, never deleted; running and done specs are never touched."""
-    hits = _experiment.workspace().queues.cancel_pending(
+    hits = _shared.workspace().queues.cancel_pending(
         lambda cid: any(_experiment.matches(cid, s) for s in args.selectors), dry_run=args.dry_run)
     if not hits:
         print("cancel: no pending spec matches")
         return []
-    qs = _experiment.workspace().queues
+    qs = _shared.workspace().queues
     for agent, p, dest in hits:
         if dest is None:
             print(f"  would cancel  {agent:10s} {qs.spec_cid(p)}")
@@ -784,7 +785,7 @@ def results_run_report(
     """What THIS run produced: completed cells by variant (green rate + mean
     iterations-to-green) and the cells still working."""
     since_ts = render.parse_since(since) if since is not None else conduct.Conduct().started_at()
-    done, live = _experiment.current().run_report(since_ts)
+    done, live = _shared.current().run_report(since_ts)
     print(render.run_report_text(done, live, since_ts))
 
 
@@ -838,13 +839,13 @@ def experiment_init(experiment: str = typer.Option("", "--experiment",
                                                  "root or absolute); default `experiment`")):
     """Write fae.toml at the root with every key at its default; refuses to
     overwrite one that exists."""
-    _experiment.current().init(experiment)
+    _shared.current().init(experiment)
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         print("next: `python3 cli.py experiment check --walk`, step by step through "
               "what the experiment needs before a cell runs")
         return
     if input("Walk through the readiness check now? [Y/n] ").strip().lower() in ("", "y", "yes"):
-        sys.exit(_experiment.current().check(walk=True))
+        sys.exit(_shared.current().check(walk=True))
 
 
 @experiment_app.command("check")
@@ -867,7 +868,7 @@ def experiment_check(walk: bool = typer.Option(False, "--walk",
     the definition, each variant, every cell's seed, the invariants, the
     infra, the agents' images, no leftovers. Exit 1 on any failure; each
     names its fix."""
-    sys.exit(_experiment.current().check(walk=walk, static=static, smoke=smoke,
+    sys.exit(_shared.current().check(walk=walk, static=static, smoke=smoke,
                                          tla_trace=tla_trace, variants=variants, task=task))
 
 
@@ -875,7 +876,7 @@ def experiment_check(walk: bool = typer.Option(False, "--walk",
 def rig_trace_reset(dry_run: bool = typer.Option(False, "--dry-run",
                                                  help="preview the EPOCH lines, write nothing")):
     """Re-anchor transitions.log: append the recorded state of every cell (EPOCH)."""
-    _experiment.current().reset_trace(dry_run=dry_run)
+    _shared.current().reset_trace(dry_run=dry_run)
 
 
 @experiment_app.command("infra")
@@ -883,7 +884,7 @@ def experiment_infra():
     """Every variant's infra preflight (its infra's ok()) + a sweep
     of stale per-verify kind clusters. Creates nothing: each verify provisions
     its own infra."""
-    bad = _experiment.current().infra()
+    bad = _shared.current().infra()
     if bad:
         sys.exit(f"infra: {bad} variant(s) refused — see hooks.log lines above")
 
@@ -899,7 +900,7 @@ def experiment_smoke(variants: str = typer.Option("", "--variants",
                                                   "(default: the canonical one)")):
     """Pipeline check: one reference cell per variant through the driver
     (`-m fae.cell ... --stub`), in ws-smoke.nosync. Exit 0 iff all green."""
-    _experiment.current().smoke(variants=variants, only=only, rep=rep, full_gate=full_gate)
+    _shared.current().smoke(variants=variants, only=only, rep=rep, full_gate=full_gate)
 
 
 @experiment_app.command("prepare")
@@ -911,7 +912,7 @@ def experiment_prepare(agent: str = typer.Option("", "--agent", help="lane name 
     agent = agent or os.environ.get("AGENT")
     if not agent:
         sys.exit("prepare: --agent AGENT (or AGENT in the environment) is required")
-    _experiment.current().prepare(agent, reps, task, fresh=bool(os.environ.get("FRESH")))
+    _shared.current().prepare(agent, reps, task, fresh=bool(os.environ.get("FRESH")))
 
 
 @experiment_app.command("verb", context_settings=_PASSTHROUGH)
@@ -920,7 +921,7 @@ def experiment_verb(ctx: typer.Context):
     definition's commands()), ARGS passed through untouched; no NAME lists
     them."""
     args = list(ctx.args)
-    raise SystemExit(_experiment.current().verb(args[0] if args else "", args[1:]) or 0)
+    raise SystemExit(_shared.current().verb(args[0] if args else "", args[1:]) or 0)
 
 
 # --- rig tool: an instrument, run standalone (debug/one-off) ----------------
@@ -931,7 +932,7 @@ def _instrument_dirs():
     from fae.cell.contrib import elastic_resource
     from fae import paths
     return [paths.ENGINE / "cell" / "instruments", elastic_resource.DIR,
-            _experiment.definition().path / "instruments"]
+            _shared.definition().path / "instruments"]
 
 
 @rig_app.command("tool", context_settings=_PASSTHROUGH)

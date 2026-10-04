@@ -60,7 +60,7 @@ class TestTheValidatorAppliesIt(unittest.TestCase):
         ws, _ = ledger_of(("ITER", "fail", "attempt=1 stage=e2e"), ALERT)
         definition = mock.Mock(taint_rules=None)
         definition.report_text.return_value = ""
-        with mock.patch.object(runs.experiment, "definition", return_value=definition), \
+        with mock.patch.object(runs.shared, "definition", return_value=definition), \
              at_workspace(ws.parent, ws.parent):
             doc = runs.validate_ws(ws)
         self.assertEqual((doc["verdict"], doc["rule_set"]), ("TAINTED", 10))

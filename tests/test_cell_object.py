@@ -14,8 +14,8 @@ from pathlib import Path
 from _ctx import ROOT
 
 from fae import cell            # the package, not a file loaded by path
-from fae import experiment as _experiment  # noqa: E402
-SHAPES = _experiment.definition().gate.arrangements
+from fae import shared as _shared  # noqa: E402
+SHAPES = _shared.definition().gate.arrangements
 
 T, Loop, Phase = cell.T, cell.Loop, cell.Phase
 
@@ -758,6 +758,7 @@ class TestAnUndeclaredSurfaceHaltsAtPreflight(CellTestCase):
     def test_infra_ok_is_false_and_names_the_variant(self):
         from unittest import mock
         from fae import experiment
+        from fae import shared
         from fae.cell.variants.base import Variant
 
         from fae.cell.infra.base import NoopInfra

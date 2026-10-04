@@ -54,13 +54,13 @@ class TestFeedbackLogs(unittest.TestCase):
     def stage(self, names):
         from types import SimpleNamespace
         from unittest import mock
-        from fae import experiment as _experiment
+        from fae import shared as _shared
         from fae.cell.cell import Cell
         ws = Path(tempfile.mkdtemp())
         for n in ("verify.log", "deploy.log", "tool.log", "other.log"):
             (ws / n).write_text(n)
         verifier = type("V", (), {"FEEDBACK_LOGS": names})
-        with mock.patch.object(_experiment.definition(), "verifier_class", return_value=verifier):
+        with mock.patch.object(_shared.definition(), "verifier_class", return_value=verifier):
             staged = Cell._stage_feedback(SimpleNamespace(ws=ws))
         return staged, sorted(p.name for p in (ws / "feedback").iterdir())
 
