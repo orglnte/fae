@@ -267,3 +267,23 @@ The words an experiment is described in. A cell id spells most of them:
     answer the others are judged against.
 17. **Lane.** One agent's queue. Like a lane on a road: its cells go in
     order and do not overtake each other.
+
+## 5. Resources (data)
+
+Where the objects keep their data, and the external systems they drive. A
+resource has one owner; code that is not its owner and reaches it directly
+(a path joined to its name, a glob, the system's own command) goes around
+the owner. "Reached by" lists the code patterns (regexes) that reach it.
+
+| Resource | Kind | Owner | Reached by |
+|---|---|---|---|
+| `<workspaces>/<cid>/` | folder | `Cell` | `/ "cell\.env"`, `/ "iterations\.log"`, `/ "\.sealed"`, `/ "\.paused"`, `/ "\.cancelled"`, `/ "\.loop"`, `/ "metrics\.json"`, `/ "verify\.log"`, `/ "deploy\.log"`, `/ "resources\.json"`, `/ "PROMPT\.md"`, `/ "artifacts"`, `/ "arrangements"`, `/ "\.verify-out"`, `"agent\.attempt-`, `glob\("\*/` |
+| `transitions.log` | file | `Cell` | `plane\.transitions_log\(`, `plane\.TRANSITIONS\b` |
+| `.queues/` | folder | `Queues` | `/ "queue"`, `/ "running"`, `/ "done"`, `/ "requests"`, `work-slots`, `weekly\.json`, `agent-io\.json`, `\.parked"` |
+| `.locks/` (a cell's locks) | folder | `Cell` | `"loop-locks"`, `/ "verify-lock"`, `/ "rig-lock"` |
+| `.locks/queues-lock` | file | `Queues` | `"queues-lock"` |
+| `.images/` | folder | `AgentImage` | `plane\.images\(`, `agent_image\.json`, `"image-lock"` |
+| `.conduct/` | folder | `Conduct` | `plane\.conduct\(`, `conduct\.pid`, `reconcile\.log` |
+| `results.csv`, `results.json` | file | `Experiment` | `OUT_CSV`, `OUT_JSON`, `/ "results\.csv"`, `/ "results\.json"` |
+| Docker (containers, networks, images) | external | — | `\["docker"`, `"docker",` |
+
