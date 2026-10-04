@@ -3,12 +3,11 @@
 A concept is a unit of function the operator meets: it has a name, one
 purpose, a state of its own, actions, and an operational principle (the
 typical scenario that shows the purpose being met). Concepts are independent
-and work together through the objects that implement them. The approach is
-Daniel Jackson's, *The Essence of Software* (2021), with the qualities each
-concept is checked against (user-facing, functional, behavioural,
-independent, purposive, reusable) and the aliases and clusters of
-Wilczynski, Gregoire-Wright and Jackson, *Concept-Centric Software
-Development: An Experience Report* (arXiv 2304.14975).
+and work together through the objects that implement them. It follows
+[concept design](https://essenceofsoftware.com): each concept is checked
+against six qualities (user-facing, functional, behavioural, independent,
+purposive, reusable) and carries aliases and a cluster, as in
+[concept-centric development](https://arxiv.org/abs/2304.14975).
 
 Read the map first, then the entry of a concept you need. Aliases are the
 other names a reader may know, or that the code or older text uses; the
