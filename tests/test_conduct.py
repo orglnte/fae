@@ -176,7 +176,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         with runs.patch_host("containers", return_value=set()):
             runs.supervise._retire_finished_specs()
         self.assertEqual(runs.queues.lane_specs(m), [])
-        self.assertTrue((runs.experiment.exp().workspace.queues.base / "done" / m / f"{cid}.json").exists())
+        self.assertTrue((runs.conduct.queues().base / "done" / m / f"{cid}.json").exists())
 
     def test_an_unfinished_cells_spec_stays(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
@@ -228,7 +228,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
                 mock.patch.object(runs.conduct.Conduct, "_spawn", return_value=None):
             runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
         self.assertEqual(runs.queues.lane_specs(m), [], "spec still in the lane")
-        self.assertTrue((runs.experiment.exp().workspace.queues.base / "running" / m / f"{cid}.json").exists())
+        self.assertTrue((runs.conduct.queues().base / "running" / m / f"{cid}.json").exists())
 
     def test_a_spawn_that_never_starts_gives_the_spec_back(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"
@@ -247,7 +247,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
                 mock.patch.object(runs.conduct.Conduct, "_spawn", return_value=3):
             runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
         self.assertEqual(len(runs.queues.lane_specs(m)), 1, "spec was not returned")
-        self.assertFalse((runs.experiment.exp().workspace.queues.base / "running" / m / f"{cid}.json").exists())
+        self.assertFalse((runs.conduct.queues().base / "running" / m / f"{cid}.json").exists())
 
     def test_a_preview_moves_nothing(self):
         cid = "sonnet_high_beta_apidocs_T1_r1"

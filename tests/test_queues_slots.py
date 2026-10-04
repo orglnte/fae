@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fae.queues import Queues
+from fae.conduct import Queues
 
 
 class SlotCase(unittest.TestCase):

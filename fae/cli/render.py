@@ -3,7 +3,7 @@ backlog summary they all fold in.
 
 render() is the one table-builder every view (status, watch, monitor) prints
 through — a single source keeps the flat and grouped layouts consistent.
-queued_summary/_pending_kind read the backlog (fae/queues.py) and resolve
+queued_summary/_pending_kind read the backlog (the Conduct's queues) and resolve
 each pending spec's cell (its status, with the host's facts) into the
 QUEUED section's tags.
 """
@@ -102,7 +102,7 @@ def queued_summary():
     and `prepared` are work nobody has started; the rest are queued for a
     reason the operator can act on.
     """
-    qs = fae.experiment.exp().workspace.queues
+    qs = fae.conduct.queues()
     rows, total = [], 0
     kinds = collections.Counter()
     live_loops = set(fae.conduct.loop_parents())
@@ -110,7 +110,7 @@ def queued_summary():
     # untouched, so they are still backlog — shown here tagged rather than
     # vanishing from the fleet picture.
     for d in qs.lane_dirs(include_parked=True):
-        is_parked = d.name.endswith(".parked")
+        is_parked = qs.lane_is_parked(d)
         agent = qs.lane_agent(d)
         paths = qs.specs_in(d)
         if not paths:
@@ -283,7 +283,7 @@ def render(flat=False, running_only=False):
             out.append(f"mem: {_mp['used_gb']:.1f}/{_mp['total_gb']:.1f}GB used "
                        f"({_mp['avail_pct']}% avail), pressure={_mp['label']}  ·  "
                        f"swap {_mp['swap_used_mb']:.0f}/{_mp['swap_total_mb']:.0f}MB")
-        out.append(fae.experiment.exp().workspace.queues.weekly_line())
+        out.append(fae.conduct.queues().weekly_line())
     return "\n".join(out)
 
 
@@ -373,7 +373,7 @@ def monitor(args):
 def queue_list(args):
     """The work list per agent lane: pending (in admission order, parked
     lanes marked), running, and with --done the terminal specs."""
-    qs = fae.experiment.exp().workspace.queues
+    qs = fae.conduct.queues()
     agents = set(args.agents or [])
     pending = [(a, p, parked) for a, p, parked in qs.pending_specs()
                if not agents or a in agents]

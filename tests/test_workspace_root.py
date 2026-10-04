@@ -32,7 +32,7 @@ class TestThePythonOrchestratorKnob(unittest.TestCase):
             w = runs.experiment._experiment.Workspace(Path("/r"))
         self.assertEqual(w.plane, Path("/r/workspaces.nosync"))
         self.assertEqual((w.conduct, w.locks), (w.plane / ".conduct", w.plane / ".locks"))
-        self.assertEqual(w.queues.base, w.plane / ".queues")
+        self.assertEqual(runs.conduct.queues(w).base, w.plane / ".queues")
 
     def test_without_the_environment_the_cells_live_on_the_plane(self):
         env = {k: v for k, v in os.environ.items() if k != "WORKSPACES_DIR"}

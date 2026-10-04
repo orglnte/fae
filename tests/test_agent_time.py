@@ -10,7 +10,7 @@ from _ctx import ROOT
 
 from fae.cell import cell as cellmod
 from fae.experiment import config as _config
-from fae.queues import Book
+from fae.book import Book
 
 
 class TestTheFields(unittest.TestCase):

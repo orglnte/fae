@@ -3,7 +3,7 @@ it as a whole.
 
     exp()        the experiment this process runs; its `definition` and
                  `workspace` are public, and every caller reaches them
-                 through it: fae.experiment.exp().workspace.queues
+                 through it: fae.experiment.exp().workspace.cells()
     Gate         what an experiment declares its gate with
     cell_id, parse_cell_id, matches, is_cell_selector_blanket   the cell-id grammar
 

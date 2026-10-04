@@ -1,4 +1,4 @@
-"""fae/queues.py is the only code that names what lives in .queues/. A path
+"""fae/conduct/_queues.py is the only code that names what lives in .queues/. A path
 built anywhere else — `x / "work-slots"`, `f"cooldown.{agent}"` — is a second
 owner of the same files, and the queues-lock no longer covers every change.
 
@@ -15,7 +15,7 @@ SEGMENTS = {"queue", "running", "done", "backups", "work-slots"}
 # Names and name prefixes that only .queues/ uses, in any string.
 NAMES = (".queues", "work-slots", "weekly.json", "agent-io.json", "queues-lock")
 PREFIXES = ("arm-", "slot-", "cooldown.")
-OWNER = "queues.py"
+OWNER = "_queues.py"
 # fae/plane.py says where .queues/ is, and nothing about what is in it.
 LOCATION = {"plane.py": {".queues"}}
 
@@ -29,10 +29,10 @@ def _leading(node):
 
 
 def offenders(root):
-    """[(file, line, text)] of every .queues name outside fae/queues.py."""
+    """[(file, line, text)] of every .queues name outside fae/conduct/_queues.py."""
     out = []
     for p in sorted(Path(root).rglob("*.py")):
-        if "__pycache__" in p.parts or p.name == OWNER and p.parent.name == "fae":
+        if "__pycache__" in p.parts or p.name == OWNER and p.parent.name == "conduct":
             continue
         allowed = LOCATION.get(p.name, set()) if p.parent.name == "fae" else set()
         tree = ast.parse(p.read_text())

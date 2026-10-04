@@ -27,7 +27,8 @@ import fae.experiment
 from fae.cell.cell import Cell
 from fae import experiment as _experiment
 from fae import mutex
-from fae.queues import hhmm
+from . import _queues
+from ._queues import Queues, hhmm, queues  # noqa: F401
 from . import _host
 from ._host import (agent_containers, all_states, cell_state, containers,  # noqa: F401
                     heartbeat, loop_parents, loop_pids, mem_pressure, queued)
@@ -66,7 +67,7 @@ def _spec_of(st):
 
 def _known_agents():
     """Every agent with a lane (live or parked) or a workspace."""
-    known = {fae.experiment.exp().workspace.queues.lane_agent(d) for d in fae.experiment.exp().workspace.queues.lane_dirs(include_parked=True)}
+    known = {queues().lane_agent(d) for d in queues().lane_dirs(include_parked=True)}
     known |= {d.name.split("_", 1)[0] for d in fae.experiment.exp().workspace.path.iterdir()
               if d.is_dir() and _experiment.parse_cell_id(d.name)}
     return known
@@ -154,7 +155,7 @@ class Conduct:
         if pid and pid != os.getpid():
             print(f"  the run (pid {pid}) acts on it at its next pass", flush=True)
             return
-        qs = fae.experiment.exp().workspace.queues
+        qs = queues()
         for p, r in qs.requests():
             cid, verb = r.get("cid", ""), r.get("verb")
             if verb == "pause":
@@ -171,7 +172,7 @@ class Conduct:
     def stop_cell(self, cid, cancel=False):
         """The run's half of `cell stop`: the cell's queued specs out of the
         backlog (backed up), then the cell halted (Cell.stop)."""
-        n = fae.experiment.exp().workspace.queues.shelve_cell(cid, "cancelled" if cancel else "stopped")
+        n = queues().shelve_cell(cid, "cancelled" if cancel else "stopped")
         if n:
             print(f"  {n} spec(s) out of the backlog (restore from .queues/backups/)")
         outcome = fae.experiment.exp().workspace.named_cell(cid).stop(cancel=cancel)
@@ -217,7 +218,7 @@ class Conduct:
     def is_claimed(cid):
         """Is this cell's spec claimed — is the run already responsible for
         restarting it?"""
-        return fae.experiment.exp().workspace.queues.is_claimed(cid.split("_", 1)[0], cid)
+        return queues().is_claimed(cid.split("_", 1)[0], cid)
 
     def refusal_while_up(self, verb, ignore):
         """A manual start runs without slots; while the run admits cells with
@@ -274,7 +275,7 @@ class Conduct:
         (or running) the loop — what supervision would do, what is zombie, what
         admission would do next. Mutates nothing: supervision runs dry, zombies
         are listed not reaped, queue lines are read but never popped."""
-        qs = fae.experiment.exp().workspace.queues
+        qs = queues()
         print("— SUPERVISION (dry run) " + "—" * 36)
         supervise.supervise_pass(self.alerts, dry=True)
         zs = zombies.find_zombies()
@@ -289,7 +290,7 @@ class Conduct:
               + ("" if up else " (nothing admits until `experiment run`)"))
         for d in qs.lane_dirs(include_parked=True):
             m = qs.lane_agent(d)
-            parked = d.name.endswith(".parked")
+            parked = qs.lane_is_parked(d)
             paths = qs.specs_in(d)
             claims = qs.running_specs(m)
             _cu = qs.cooldown_until(m)
@@ -368,7 +369,7 @@ class Conduct:
         convergence, not respawns: a crashed cell's spec is still claimed in
         running/, and the next pass restarts it. One controller, one spawner.
         """
-        qs = fae.experiment.exp().workspace.queues
+        qs = queues()
         n = args.limit
         if not _ws_is_default():
             # The backlog lives in the GLOBAL .queues: a scheduler running against
@@ -647,7 +648,7 @@ class Conduct:
 
         Cells report PAUSED·drain. Same per-cell locks as `cell pause`, same
         cooperative exit — no separate mechanism and no separate state."""
-        qs = fae.experiment.exp().workspace.queues
+        qs = queues()
         scope = list(args.scope)
         blanket = _experiment.is_cell_selector_blanket(scope)
         agents = [] if blanket else scope
@@ -769,7 +770,7 @@ class Conduct:
         pauses and cancelled cells are skipped, exactly the old `resume all`
         guard (the 2026-07-24 resurrection incident). Naming agents lifts
         roster/manual for those agents."""
-        qs = fae.experiment.exp().workspace.queues
+        qs = queues()
         scope = list(args.scope)
         blanket = _experiment.is_cell_selector_blanket(scope)
         if not blanket:
@@ -844,7 +845,7 @@ class Conduct:
         RUNNING, and the backlog is not run state. RESUMABLE: cells read
         PAUSED·stopped and come back via experiment resume. The terminal verdict
         lives elsewhere (`cell stop --cancel`). Confirms before acting."""
-        qs = fae.experiment.exp().workspace.queues
+        qs = queues()
         scope = list(args.scope)
         blanket = _experiment.is_cell_selector_blanket(scope)
         agents = None if blanket else scope
@@ -1073,7 +1074,7 @@ class Conduct:
 
         Nothing is moved while deciding — a spec only leaves the queue when it is
         claimed, so an interrupted decision costs nothing."""
-        qs = fae.experiment.exp().workspace.queues
+        qs = queues()
         for p in qs.lane_specs(agent):
             cid = qs.spec_cid(p)
             ws = fae.experiment.exp().workspace.path / cid
@@ -1105,7 +1106,7 @@ class Conduct:
             st = _host.cell_state(fae.experiment.exp().workspace.path / cid, {}, set())
             if not st:
                 continue
-            fae.experiment.exp().workspace.queues.adopt(cid.split("_", 1)[0], cid, _spec_of(st))
+            queues().adopt(cid.split("_", 1)[0], cid, _spec_of(st))
             n += 1
         if n:
             print(f"run: adopted {n} live cell(s) started outside this run",
@@ -1145,7 +1146,7 @@ class Conduct:
         This is the whole repair path — a claimed spec sits in running/ until it
         reaches a verdict, so a conduct that dies mid-attempt (or a cell killed by
         a hang sweep) is recovered by the next pass with no journal to replay."""
-        qs = fae.experiment.exp().workspace.queues
+        qs = queues()
         live = _host.loop_parents()
         boxes = _host.containers()
         for p in qs.running_specs():

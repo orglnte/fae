@@ -21,7 +21,7 @@ from fae.cell.fsm import LOOP_CLEARED_BY, WAIT_PHASES
 from fae import experiment as _experiment
 from fae.cell import faults
 
-from . import _host
+from . import _host, _queues
 from . import records, zombies
 
 # A lane that hits a provider quota/rate wall cools for the provider's
@@ -55,7 +55,7 @@ def _parse_reset_hint(text):
 
 def _set_cooldown(agent, detail):
     until = time.time() + (_parse_reset_hint(detail) or COOLDOWN_DEFAULT_S)
-    return fae.experiment.exp().workspace.queues.set_cooldown(agent, until, detail[:Cell.WAIT_REASON_MAX])
+    return _queues.queues().set_cooldown(agent, until, detail[:Cell.WAIT_REASON_MAX])
 
 def _arm_slot_of(arm, cid):
     """Seconds this cid has held a slot of `arm`, or None if it holds none.
@@ -63,7 +63,7 @@ def _arm_slot_of(arm, cid):
     it is still held — the note alone would age a slot released long ago."""
     if not arm:
         return None
-    q = fae.experiment.exp().workspace.queues
+    q = _queues.queues()
     for slot in q.slot_files(arm):
         note = q.slot_note(slot)
         if not note or note[0] != cid or not q.slot_held(slot):
@@ -81,7 +81,7 @@ def _retire_finished_specs(dry=False):
     A cell resumed by hand leaves exactly that: the loop runs and finishes
     while the spec it came from is still in the lane, unclaimed.
     """
-    qs = fae.experiment.exp().workspace.queues
+    qs = _queues.queues()
     boxes = _host.containers()
     for d in qs.lane_dirs():
         agent = qs.lane_agent(d)
@@ -184,7 +184,7 @@ def _agent_io(boxes=()):
 
 
 def _agent_io_book(write=None):
-    book = fae.experiment.exp().workspace.queues.agent_io_book()
+    book = _queues.queues().agent_io_book()
     if write is not None:
         return book.save(write)
     return book.load()
@@ -286,10 +286,10 @@ def _reconcile_dead_loop(cid, loop_pid, in_box, out_age, last, dry,
 def _conducts(cid):
     """Is this cell conduct's to restart: claimed (converge restarts it) or
     its spec waiting in its lane (admission restarts it)?"""
-    if fae.experiment.exp().workspace.queues.is_claimed(cid.split("_", 1)[0], cid):
+    if _queues.queues().is_claimed(cid.split("_", 1)[0], cid):
         return True
     parsed = _experiment.parse_cell_id(cid)
-    return bool(parsed and fae.experiment.exp().workspace.queues.lane_has(parsed[0], cid))
+    return bool(parsed and _queues.queues().lane_has(parsed[0], cid))
 
 
 def _reclaim(st, dry):
