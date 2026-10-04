@@ -24,7 +24,7 @@ whatever directory it lives in. Loading a second definition into the same
 process is refused; tests that need one call `unload()` first.
 
 The experiment's variants are files, one per variant:
-`<experiment>/variants/<id>.toml` (fae/cell/variants/files.py). A variant
+`<experiment>/variants/<id>.toml` (fae/experiment/variants/files.py). A variant
 is one complete set of what the agent is given and how its work is judged;
 the set of files is the set of variants.
 

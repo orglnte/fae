@@ -49,7 +49,7 @@ def _refuse_unknown(path, section, table):
 
 def _infra_class(path, spec):
     """`module:Class` under the experiment package, an Infra subclass."""
-    from ..infra.base import Infra
+    from fae.cell.infra.base import Infra
     module, _, name = str(spec).partition(":")
     if not module or not name:
         raise VariantFileError(f"{path}: [infra] class must be 'module:Class', got {spec!r}")

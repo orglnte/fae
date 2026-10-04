@@ -568,7 +568,7 @@ def main(argv=None):
         sys.path.insert(0, ctx.root)
     definition = fae.experiment._experiment.load(ctx.experiment_dir)
     if a.teardown:
-        from .variants import _ShimCell
+        from fae.experiment.variants import _ShimCell
         vcls = definition.variant(ctx.variant)
         if vcls is None:
             return 2

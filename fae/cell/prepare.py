@@ -90,7 +90,7 @@ def _lay(src, dst):
 def seed(task, vid, artifacts):
     """The variant's template directories merged in order, then its inputs at
     their workspace paths; then the manifest and the seal."""
-    from .variants import files
+    from fae.experiment.variants import files
     cls = variant_of(vid)
     problems = files.problems(cls)
     if problems:

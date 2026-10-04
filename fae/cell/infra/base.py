@@ -5,7 +5,7 @@ shares.
 
 A variant file's `[infra] class` names a subclass of `Infra`; a variant
 without one gets `DefaultInfra`. The engine instantiates it with the
-variant (the file's data, fae/cell/variants) and the cell; it reads what
+variant (the file's data, fae/experiment/variants) and the cell; it reads what
 the file says of it (`ACCESS_INFRA`, `PARAMS`) from `self.variant`.
 """
 from __future__ import annotations

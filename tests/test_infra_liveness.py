@@ -11,7 +11,7 @@ from _ctx import ROOT
 import fae.experiment
 from fae.cell import cell
 from fae.cell.infra import base
-from fae.cell.variants.base import Variant
+from fae.experiment.variants.base import Variant
 from fae.cell.verify import Verdict
 
 

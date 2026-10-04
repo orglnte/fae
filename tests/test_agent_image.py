@@ -151,7 +151,7 @@ class TheLayer(unittest.TestCase):
     one, rebuilt when what it is built from moved."""
 
     def _variant(self, layer):
-        from fae.cell.variants.base import Variant
+        from fae.experiment.variants.base import Variant
         d = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
         if layer:

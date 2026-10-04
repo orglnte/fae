@@ -173,7 +173,7 @@ class TestForVariant(unittest.TestCase):
     """for_variant: the runner of a variant's program, from its [verify.run]."""
 
     def variant(self, **run):
-        from fae.cell.variants.base import Variant
+        from fae.experiment.variants.base import Variant
         return type("Prog", (Variant,), {"ID": "prog", "RUN": run})
 
     def test_a_program_that_ends_has_no_network_and_the_tight_caps(self):

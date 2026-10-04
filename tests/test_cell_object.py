@@ -727,7 +727,7 @@ class TestAnUndeclaredLivenessProbeHaltsAtPreflight(CellTestCase):
 
     def test_infra_ok_is_false_and_names_the_infra_class(self):
         from fae.cell.infra.base import Infra
-        from fae.cell.variants.base import Variant
+        from fae.experiment.variants.base import Variant
 
         class Probeless(Infra):
             pass
@@ -741,7 +741,7 @@ class TestAnUndeclaredLivenessProbeHaltsAtPreflight(CellTestCase):
 
     def test_a_declared_probe_passes_the_check(self):
         from fae.cell.infra.base import Infra, liveness_declared
-        from fae.cell.variants.base import Variant
+        from fae.experiment.variants.base import Variant
 
         class Probed(Infra):
             def alive(self):
@@ -758,7 +758,7 @@ class TestAnUndeclaredSurfaceHaltsAtPreflight(CellTestCase):
     def test_infra_ok_is_false_and_names_the_variant(self):
         from unittest import mock
         from fae import experiment
-        from fae.cell.variants.base import Variant
+        from fae.experiment.variants.base import Variant
 
         from fae.cell.infra.base import NoopInfra
 

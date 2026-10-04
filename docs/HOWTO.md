@@ -697,7 +697,7 @@ variant files against all of the below, without docker.
 | `taint_rules`, `report_text`, `POOLED_MODELS`, `verbs()` | no | none |
 
 **Variant file** (`<EXPERIMENT_DIR>/variants/<id>.toml`, read by
-`fae/cell/variants/files.py`; paths relative to the experiment directory,
+`fae/experiment/variants/files.py`; paths relative to the experiment directory,
 unknown keys refused):
 
 | Key | Purpose |

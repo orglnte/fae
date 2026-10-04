@@ -70,7 +70,7 @@ loads `<EXPERIMENT_DIR>/__init__.py` BY PATH as the package `experiment`
 (one process, one experiment — a second definition is refused; tests call
 `unload()`), and every reader goes through the `Definition` it returns: the
 variants (read on first use from `<EXPERIMENT_DIR>/variants/*.toml` by
-`fae/cell/variants/files.py`, each file's `[infra] class` imported from the
+`fae/experiment/variants/files.py`, each file's `[infra] class` imported from the
 package then), `GATE`, `CONFIG`, `fingerprint_trees`, `verifier_class()`,
 `verbs()`, `taint_rules`, `POOLED_MODELS`,
 `report_summary`. A variant file's unknown key is refused, and so is an
@@ -368,7 +368,7 @@ writes an `ALERT SETUP-FAILED` ledger line.
 ## 4. Variants and infra
 
 A variant is a file, `<experiment>/variants/<id>.toml`
-(`fae/cell/variants/files.py` reads it; `Variant`, `fae/cell/variants/base.py`,
+(`fae/experiment/variants/files.py` reads it; `Variant`, `fae/experiment/variants/base.py`,
 is its data): its template, `[authoring] surface` (required; the engine has
 no default, and the preflight refuses a variant without it — the exact
 files and directory prefixes the agent may write), its inputs, its tools
