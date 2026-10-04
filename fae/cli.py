@@ -6,8 +6,7 @@ run calls the Conduct (fae/conduct/); one acting on cells selects
 them and asks each Cell; one on the work list asks the Queues. What stays here
 is selection and printing. The verbs on the experiment as a whole (init,
 smoke, prepare, verb; the rig's trace-reset) are its Experiment's
-(fae/experiment.py); `experiment check` and `experiment infra` are
-fae/driver/check.py's.
+(fae/experiment/), `experiment check` and `experiment infra` included.
 
 GROUPS
   experiment  the experiment this root runs: set it up (init, check, infra,
@@ -53,7 +52,7 @@ sys.path.insert(0, str(ROOT))
 
 from fae import experiment as _experiment  # noqa: E402
 from fae.cell.cell import Busy  # noqa: E402
-from fae.driver import check, render  # noqa: E402
+from fae.driver import render  # noqa: E402
 from fae import conduct, host  # noqa: E402
 
 
@@ -845,8 +844,7 @@ def experiment_init(experiment: str = typer.Option("", "--experiment",
               "what the experiment needs before a cell runs")
         return
     if input("Walk through the readiness check now? [Y/n] ").strip().lower() in ("", "y", "yes"):
-        check.main(_ns(walk=True, static=False, smoke=False, tla_trace=False, variants="",
-                       task="T1"))
+        sys.exit(_experiment.current().check(walk=True))
 
 
 @experiment_app.command("check")
@@ -869,8 +867,8 @@ def experiment_check(walk: bool = typer.Option(False, "--walk",
     the definition, each variant, every cell's seed, the invariants, the
     infra, the agents' images, no leftovers. Exit 1 on any failure; each
     names its fix."""
-    check.main(_ns(walk=walk, static=static, smoke=smoke, tla_trace=tla_trace, variants=variants,
-                   task=task))
+    sys.exit(_experiment.current().check(walk=walk, static=static, smoke=smoke,
+                                         tla_trace=tla_trace, variants=variants, task=task))
 
 
 @rig_app.command("trace-reset")
@@ -885,7 +883,9 @@ def experiment_infra():
     """Every variant's infra preflight (its infra's ok()) + a sweep
     of stale per-verify kind clusters. Creates nothing: each verify provisions
     its own infra."""
-    check.infra(_ns())
+    bad = _experiment.current().infra()
+    if bad:
+        sys.exit(f"infra: {bad} variant(s) refused — see hooks.log lines above")
 
 
 @experiment_app.command("smoke")

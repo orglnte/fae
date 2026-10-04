@@ -1,5 +1,5 @@
 """The fingerprint covers every .py of the engine's cell package, subpackages
-included, and the definition reader (fae/experiment.py) — found where the
+included, and the experiment package (fae/experiment/) — found where the
 engine is, never under the experiment root."""
 from __future__ import annotations
 
@@ -16,7 +16,8 @@ CELL = Path(C.__file__).resolve().parent
 class TestFpExtraFiles(unittest.TestCase):
     def test_every_module_of_the_cell_package_is_hashed_subpackages_included(self):
         got = C._fp_extra_files(tempfile.mkdtemp(), []).split()
-        want = sorted(str(p) for p in CELL.rglob("*.py")) + [str(CELL.parent / "experiment.py")]
+        want = (sorted(str(p) for p in CELL.rglob("*.py"))
+                + sorted(str(p) for p in (CELL.parent / "experiment").rglob("*.py")))
         self.assertEqual(got, want)
         self.assertTrue(any("/fae/cell/contrib/" in f for f in got))
 

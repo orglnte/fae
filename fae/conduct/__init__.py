@@ -973,9 +973,9 @@ class Conduct:
         # Every variant's own preflight — its daemon, its images (built here,
         # not under a cell), its tools — and a sweep of its stale infra:
         # what `cli.py experiment infra` shows, run once before admission.
-        from fae.driver import check
+        from fae.experiment import check_exp
         print("run: infra preflight", flush=True)
-        bad = check.probe_variants()
+        bad = check_exp.probe_variants()
         if bad:
             print(f"run: NOTE — {bad} variant(s) refused their preflight; cells of "
                   f"those variants will HALT.", flush=True)

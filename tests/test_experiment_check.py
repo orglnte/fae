@@ -12,7 +12,7 @@ from _ctx import ROOT, at_workspace  # noqa: F401  (sys.path, EXPERIMENT_DIR = t
 
 from fae import experiment as _experiment
 from fae.cell.variants.base import Variant
-from fae.driver import check
+from fae.experiment import check_exp as check
 
 
 class CheckCase(unittest.TestCase):
@@ -177,10 +177,9 @@ class TestTheWalk(CheckCase):
         self.assertEqual(calls["a"], 0)
 
     def test_walk_without_a_terminal_is_refused(self):
-        args = SimpleNamespace(walk=True, static=True, smoke=False, variants="", task="T1")
         with mock.patch.object(check.sys, "stdin", io.StringIO("")):
             with self.assertRaisesRegex(SystemExit, "needs a terminal"):
-                check.main(args)
+                check.check(self.root, walk=True, static=True)
 
 
 class TestTheCli(unittest.TestCase):

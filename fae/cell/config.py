@@ -207,12 +207,12 @@ def _fp_extra_files(root, trees):
             raise RuntimeError(f"FATAL config: {d} exists but has no .py — the "
                                "fingerprint would silently shrink its guarded surface")
         parts += got
-    # the engine's own cell package and the definition reader, wherever they
-    # are — never under the root: an experiment repo imports the engine and
+    # the engine's own cell package and the experiment package (the
+    # definition reader), wherever they are — never under the root: an experiment repo imports the engine and
     # does not contain it
     cell_pkg = Path(__file__).resolve().parent
     parts += sorted(str(p) for p in cell_pkg.rglob("*.py"))
-    parts.append(str(cell_pkg.parent / "experiment.py"))
+    parts += sorted(str(p) for p in (cell_pkg.parent / "experiment").rglob("*.py"))
     return " ".join(parts)
 
 
