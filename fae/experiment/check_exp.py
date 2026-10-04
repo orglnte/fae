@@ -281,13 +281,13 @@ def _variants(ctx):
 
 
 def _seeds(ctx):
-    from fae.cell import config as _cfg
-    from fae.cell import prepare as _prepare
     from fae.cell.surface import authorable
     d = ctx.definition()
-    cfg = _cfg.load(ctx.root)
     out = []
     with tempfile.TemporaryDirectory(prefix="fae-check-") as tmp:
+        # a workspace whose whole plane is the temp dir: the check's cells
+        # take their locks there, never in the root's live plane
+        ws = _experiment.Workspace(ctx.root, tmp, plane=tmp)
         for vid in ctx.selected():
             try:
                 authorable(vid)
@@ -302,8 +302,7 @@ def _seeds(ctx):
                 what = f"{vid}{' (reference)' if reference else ''}"
                 cid = _experiment.cell_id("check", vid, 2 if reference else 1, ctx.task)
                 try:
-                    _prepare.prepare(cid, ctx.task, vid, 1, workspaces=tmp, root=ctx.root,
-                                     reference=reference, cfg=cfg)
+                    ws.cell(cid, ctx.task, vid, 1, reference=reference).prepare()
                     out.append(Finding(True, f"{what} seeds"))
                 except (OSError, RuntimeError) as e:
                     out.append(Finding(False, f"{what}: {_last_line(e)}",
@@ -322,7 +321,8 @@ def _infra(ctx):
 
 def _invariants(ctx):
     from fae import mutex
-    from fae.cell import config as _config, prepare as _prep, rig as _rig, verify as _verify
+    from fae.cell import config as _config, rig as _rig, verify as _verify
+    from fae.cell.cell import Cell
     from fae.cell.variants import files as _files
     from fae import host
     out = []
@@ -330,7 +330,7 @@ def _invariants(ctx):
                for mod, names in ((_rig, ("fp", "free_port_from")),
                                   (_verify, ("run_verifier", "call", "run_in_thread")),
                                   (mutex, ("open_lock", "try_fd", "wait_fds")),
-                                  (_prep, ("prepare", "seed", "safe_wipe")),
+                                  (Cell, ("prepare", "new")),
                                   (_config, ("load", "opencode_key_file", "stage_agent")))
                for name in names if not callable(getattr(mod, name, None))]
     out.append(Finding(not missing, "the engine's own functions are all there" if not missing
