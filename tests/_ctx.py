@@ -50,7 +50,8 @@ os.environ["EXPERIMENT_DIR"] = str(_EXPERIMENT)
 import fae.experiment  # noqa: E402
 from fae.cli import render  # noqa: E402
 from fae.experiment import check_exp as check  # noqa: E402
-from fae import conduct, host  # noqa: E402
+from fae import conduct  # noqa: E402
+from fae.conduct import _host as host  # noqa: E402
 from fae.conduct import records, supervise, zombies  # noqa: E402
 from fae import cli as _cli     # noqa: E402
 from fae import queues as _queues_module  # noqa: E402
@@ -63,7 +64,7 @@ from fae.experiment import cell_id, parse_cell_id  # noqa: E402
 from fae.cell import ledger  # noqa: E402
 
 # The facade every test file imports as `runs`: a real module object, so
-# `mock.patch.object(runs.host, "sh", ...)` patches the module itself.
+# `runs.patch_host("sh", ...)` patches the module itself.
 runs = types.ModuleType("runs")
 runs.conduct = conduct
 runs.exp1 = exp1
@@ -90,6 +91,36 @@ runs.render = render
 runs.check = check
 runs.experiment = _experiment
 runs.host = host
+
+
+class _HostPatch:
+    """mock.patch.object(host, name, ...) wherever the name is looked up: the
+    Conduct's host module, and the copy fae.conduct exports to its readers.
+    A context manager, or start()/stop() like a patcher."""
+
+    def __init__(self, name, *args, **kw):
+        self.name, self.patches = name, [mock.patch.object(host, name, *args, **kw)]
+        self.exported = getattr(conduct, name, None) is getattr(host, name)
+
+    def start(self):
+        new = self.patches[0].start()
+        if self.exported:
+            self.patches.append(mock.patch.object(conduct, self.name, new))
+            self.patches[1].start()
+        return new
+
+    def stop(self):
+        while len(self.patches) > 1:
+            self.patches.pop().stop()
+        self.patches[0].stop()
+
+    __enter__ = start
+
+    def __exit__(self, *exc):
+        self.stop()
+
+
+runs.patch_host = _HostPatch
 runs.records = records
 runs.Cell = _Cell
 runs.supervise = supervise

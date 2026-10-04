@@ -583,7 +583,7 @@ class SweepCase(unittest.TestCase):
             # patch os.kill with a bare Mock — every pid then looks alive
             # forever and the full grace is burned in a unit test.
             mock.patch.object(Cell, "_gone", return_value=True),
-            mock.patch.object(runs.host, "loop_pids", return_value={}),
+            runs.patch_host("loop_pids", return_value={}),
         ]
         for p in self.patches:
             p.start()
@@ -596,13 +596,13 @@ class SweepCase(unittest.TestCase):
         doc.update(ledger_doc or {})
         # only the cell dir is a cell: the plane lives under WS and cell_state
         # returns None for it in production
-        with mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("cell_state",
                                side_effect=lambda w, *a: st
                                if Path(w).name == self.cid else None), \
-             mock.patch.object(runs.host, "loop_parents", return_value=live or {}), \
-             mock.patch.object(runs.host, "containers", return_value=set(boxes)), \
+             runs.patch_host("loop_parents", return_value=live or {}), \
+             runs.patch_host("containers", return_value=set(boxes)), \
              mock.patch.object(runs.ledger, "parse", return_value=doc), \
-             mock.patch.object(runs.host, "sh", return_value=ps), \
+             runs.patch_host("sh", return_value=ps), \
              mock.patch.object(runs.taint, "validate_cell",
                                return_value={"verdict": "VALID", "taints": []},
                                side_effect=validate_error) as val, \
@@ -837,9 +837,9 @@ class TestAStaleArmSlotSidecarIsNotAZombieForever(unittest.TestCase):
         (slots / "slot-2.holder").write_text("sonnet_high_alpha_apidocs_T1_r6 54638 1\n")
         use_workspace(self, self.ws)
         self.patches = [
-            mock.patch.object(runs.host, "loop_parents", return_value={}),
+            runs.patch_host("loop_parents", return_value={}),
             mock.patch.object(runs.zombies, "_leaked_lock_holders", return_value=[]),
-            mock.patch.object(runs.host, "containers", return_value=[]),
+            runs.patch_host("containers", return_value=[]),
             mock.patch.object(runs.zombies, "_cluster_map", return_value={}),
             mock.patch.object(runs.zombies, "_strays", return_value=[]),
             mock.patch.object(runs.queues_module.Queues, "slot_held", return_value=False),
@@ -850,7 +850,7 @@ class TestAStaleArmSlotSidecarIsNotAZombieForever(unittest.TestCase):
 
     def _found(self, existing):
         with mock.patch.object(runs.zombies, "_containers_all", return_value=set(existing)), \
-             mock.patch.object(runs.host, "sh", return_value=""):
+             runs.patch_host("sh", return_value=""):
             return [z for z in runs.zombies.find_zombies() if z[0] == "container"]
 
     def test_a_note_naming_nothing_that_exists_is_dropped_and_reports_nothing(self):
@@ -939,7 +939,7 @@ class TestArmStuckMeasuresProgressNotLiveness(SweepCase):
         st = self.st(state="RUNNING", why="agent")
         st["variant"] = "alpha_apidocs"
         with mock.patch.object(runs.supervise, "_arm_slot_of", return_value=slot_age), \
-             mock.patch.object(runs.host, "heartbeat",
+             runs.patch_host("heartbeat",
                                return_value={"phase_age": phase_age,
                                              "age": 1.0, "phase": phase}), \
              mock.patch.object(Cell, "take_down") as td, \
@@ -1002,13 +1002,13 @@ class TestLeakedLockHolders(unittest.TestCase):
 
     def _find(self, *, held, entitled_running, fd_pids, alive=True, loops=None):
         with mock.patch.object(runs.mutex, "probe_held", return_value=held), \
-             mock.patch.object(runs.host, "sh",
+             runs.patch_host("sh",
                                side_effect=lambda a, **k:
                                    ("999\n" if entitled_running else "")
                                    if a[0] == "pgrep" else ""), \
              mock.patch.object(runs.zombies, "_fd_holders", return_value=fd_pids), \
              mock.patch.object(runs.zombies, "_pid_alive", return_value=alive), \
-             mock.patch.object(runs.host, "loop_parents", return_value=loops or {}):
+             runs.patch_host("loop_parents", return_value=loops or {}):
             return runs.zombies._leaked_lock_holders()
 
     def test_a_driver_holding_the_lock_from_another_root_is_not_a_leak(self):
@@ -1020,10 +1020,10 @@ class TestLeakedLockHolders(unittest.TestCase):
                 return "python3 -m fae.cell T1 alpha reference 2 --stub /tmp/x\n"
             return ""
         with mock.patch.object(runs.mutex, "probe_held", return_value=True), \
-             mock.patch.object(runs.host, "sh", side_effect=ps), \
+             runs.patch_host("sh", side_effect=ps), \
              mock.patch.object(runs.zombies, "_fd_holders", return_value=[4242]), \
              mock.patch.object(runs.zombies, "_pid_alive", return_value=True), \
-             mock.patch.object(runs.host, "loop_parents", return_value={}):
+             runs.patch_host("loop_parents", return_value={}):
             self.assertEqual(runs.zombies._leaked_lock_holders(), [])
 
     def test_a_held_lock_with_nothing_entitled_is_a_leak(self):
@@ -1043,7 +1043,7 @@ class TestLeakedLockHolders(unittest.TestCase):
                      "python3 cli.py cell reverify x --all",
                      "python3 cli.py experiment smoke --only alpha"):
             self.assertRegex(argv, runs.zombies.VERIFY_HOLDER_ARGV)
-            with mock.patch.object(runs.host, "sh", return_value=argv + "\n"):
+            with runs.patch_host("sh", return_value=argv + "\n"):
                 self.assertTrue(runs.zombies._is_driver_pid(4242), argv)
         for argv in ("python3 cli.py experiment status", "python3 cli.py experiment run",
                      "python3 cli.py rig reverify x",    # wrong group: not a real invocation
@@ -1100,7 +1100,7 @@ class TestTheGateColumnIsLiveDuringAVerify(unittest.TestCase):
             (ws / "iterations.log").write_text("")
             with mock.patch.object(runs.ledger, "parse", return_value=led), \
                  mock.patch.object(runs.ledger, "hist", return_value=[]), \
-                 mock.patch.object(runs.host, "heartbeat",
+                 runs.patch_host("heartbeat",
                                    return_value={"phase": phase, "pid": 1,
                                                  "phase_age": 5, "attempt": "2"}):
                 st = runs.host.cell_state(ws, {}, set())

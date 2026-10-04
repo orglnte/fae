@@ -27,8 +27,8 @@ class ConductCase(OrchTmpCase):
             # per-pid conduct logs land in the tmp tree, not the repo
             mock.patch.dict(runs.os.environ,
                             {"CONDUCT_LOG_DIR": self._tmp.name}),
-            mock.patch.object(runs.host, "loop_parents", side_effect=lambda: dict(self.live)),
-            mock.patch.object(runs.host, "containers", return_value=set()),
+            runs.patch_host("loop_parents", side_effect=lambda: dict(self.live)),
+            runs.patch_host("containers", return_value=set()),
             mock.patch.object(Cell, "prestart_clean"),
             mock.patch.object(runs.Cell, "pause_reason", new_callable=mock.PropertyMock,
                               return_value=None),
@@ -173,7 +173,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         runs.queues.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         self._done_cell(cid)
-        with mock.patch.object(runs.host, "containers", return_value=set()):
+        with runs.patch_host("containers", return_value=set()):
             runs.supervise._retire_finished_specs()
         self.assertEqual(runs.queues.lane_specs(m), [])
         self.assertTrue((runs.experiment.exp().workspace.queues.base / "done" / m / f"{cid}.json").exists())
@@ -188,7 +188,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         (d / "iterations.log").write_text(
             "2026-08-15T09:00:00Z\tITER\tfail\tattempt=1 stage=scaling\n")
         (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
-        with mock.patch.object(runs.host, "containers", return_value=set()):
+        with runs.patch_host("containers", return_value=set()):
             runs.supervise._retire_finished_specs()
         self.assertEqual(len(runs.queues.lane_specs(m)), 1)
 
@@ -202,8 +202,8 @@ class TestFinishedSpecsAreRetired(ConductCase):
         self._done_cell(cid)
         out = io.StringIO()
         with contextlib.redirect_stdout(out), \
-                mock.patch.object(runs.host, "loop_parents", return_value={}), \
-                mock.patch.object(runs.host, "containers", return_value=set()):
+                runs.patch_host("loop_parents", return_value={}), \
+                runs.patch_host("containers", return_value=set()):
             runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
         self.assertIn("spec retired", out.getvalue())
         self.assertEqual(runs.queues.lane_specs(m), [])
@@ -222,8 +222,8 @@ class TestFinishedSpecsAreRetired(ConductCase):
             "2026-08-15T09:00:00Z\tITER\tfail\tattempt=1 stage=scaling\n")
         (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
         with contextlib.redirect_stdout(io.StringIO()), \
-                mock.patch.object(runs.host, "loop_parents", return_value={}), \
-                mock.patch.object(runs.host, "containers", return_value=set()), \
+                runs.patch_host("loop_parents", return_value={}), \
+                runs.patch_host("containers", return_value=set()), \
                 mock.patch.object(Cell, "refresh_creds"), \
                 mock.patch.object(runs.conduct.Conduct, "_spawn", return_value=None):
             runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
@@ -241,8 +241,8 @@ class TestFinishedSpecsAreRetired(ConductCase):
             "2026-08-15T09:00:00Z\tITER\tfail\tattempt=1 stage=scaling\n")
         (d / "cell.env").write_text("ATTEMPT_BUDGET=10\nAGENT_MODEL=5\n")
         with contextlib.redirect_stdout(io.StringIO()), \
-                mock.patch.object(runs.host, "loop_parents", return_value={}), \
-                mock.patch.object(runs.host, "containers", return_value=set()), \
+                runs.patch_host("loop_parents", return_value={}), \
+                runs.patch_host("containers", return_value=set()), \
                 mock.patch.object(Cell, "refresh_creds"), \
                 mock.patch.object(runs.conduct.Conduct, "_spawn", return_value=3):
             runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
@@ -255,7 +255,7 @@ class TestFinishedSpecsAreRetired(ConductCase):
         runs.queues.enqueue(m, dict(task=task, variant=v, rep=int(rep),
                              budget=10, fresh=False))
         self._done_cell(cid)
-        with mock.patch.object(runs.host, "containers", return_value=set()):
+        with runs.patch_host("containers", return_value=set()):
             runs.supervise._retire_finished_specs(dry=True)
         self.assertEqual(len(runs.queues.lane_specs(m)), 1)
 
@@ -383,7 +383,7 @@ class TestClaims(ConductCase):
         def liveness():
             return runs.experiment.exp().cell(cid).liveness(None, lambda: False,
                                                   lambda: runs.host.queued(cid))
-        with mock.patch.object(runs.host, "live_loops", return_value=set()):
+        with runs.patch_host("live_loops", return_value=set()):
             self.assertIn("cell resume", liveness()[2])
             self.q("aaa", [self.spec()])
             self.assertEqual(liveness(),
@@ -413,7 +413,7 @@ class TestClaims(ConductCase):
         self.live[cid] = 4242
         self.per_agent = 1
         self.q("aaa", [self.spec()])
-        with mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("cell_state",
                                return_value={"cid": cid, "state": "RUNNING",
                                              "why": "agent", "agent": "aaa",
                                              "variant": "beta_apidocs", "task": "T1",
@@ -430,7 +430,7 @@ class TestClaims(ConductCase):
         self.run_conduct()
         self.live.clear()
         self.max_rounds, self.rounds = 2, 0
-        with mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("cell_state",
                                return_value={"cid": cid, "state": "DONE",
                                              "why": "green"}):
             self.run_conduct()
@@ -481,7 +481,7 @@ class TestGates(ConductCase):
     def test_done_cell_spec_is_skipped(self):
         cid = runs.cell_id("aaa", "beta_apidocs", 1, "T1")
         (self.ws / cid).mkdir(parents=True)
-        with mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("cell_state",
                                return_value={"cid": cid, "state": "DONE", "why": "green"}):
             self.q("aaa", [self.spec()])
             self.run_conduct()
@@ -644,7 +644,7 @@ class TestNarration(ConductCase):
         self.live[cid] = 1
         seq = [([dict(cid=cid, state="RUNNING", why="agent")], 0, 0),
                ([dict(cid=cid, state="DONE", why="green")], 0, 0)]
-        with mock.patch.object(runs.host, "all_states",
+        with runs.patch_host("all_states",
                                side_effect=lambda *a, **k:
                                seq.pop(0) if seq else ([], 0, 0)), \
              mock.patch.object(runs.ledger, "parse",
@@ -891,7 +891,7 @@ class TestSpawnAndAdoptEdges(ConductCase):
         """A live loop whose workspace says nothing must not get a fabricated
         claim — the claim would describe a cell that does not exist."""
         self.live["aaa_high_beta_apidocs_T1_r5"] = 4242
-        with mock.patch.object(runs.host, "cell_state", return_value=None):
+        with runs.patch_host("cell_state", return_value=None):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 runs.conduct.Conduct()._adopt_live_cells()
@@ -1186,12 +1186,12 @@ class TestMemoryPressureMonitor(unittest.TestCase):
                 "swap_used_mb": 40000.0, "swap_total_mb": 41000.0}
         with tempfile.TemporaryDirectory() as d, \
              at_workspace(Path(d)), \
-             mock.patch.object(runs.host, "mem_pressure", return_value=crit), \
-             mock.patch.object(runs.host, "host_sleep_observe", lambda *a, **k: None), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.host, "loop_parents", return_value={}), \
-             mock.patch.object(runs.host, "last_transitions", return_value={}), \
+             runs.patch_host("mem_pressure", return_value=crit), \
+             runs.patch_host("host_sleep_observe", lambda *a, **k: None), \
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
+             runs.patch_host("loop_parents", return_value={}), \
+             runs.patch_host("last_transitions", return_value={}), \
              mock.patch.object(runs.supervise, "_agent_io", return_value={}), \
              mock.patch.object(runs.supervise, "_agent_io_book", return_value={}), \
              mock.patch.object(runs.records, "rec_log") as rec:
@@ -1207,13 +1207,13 @@ class TestMemoryPressureMonitor(unittest.TestCase):
         fake = {"label": "WARN", "level": 2, "avail_pct": 40,
                 "used_gb": 9.6, "total_gb": 16.0,
                 "swap_used_mb": 9000.0, "swap_total_mb": 10000.0}
-        with mock.patch.object(runs.host, "mem_pressure", return_value=fake), \
-             mock.patch.object(runs.host, "all_states", return_value=([], {}, set())), \
+        with runs.patch_host("mem_pressure", return_value=fake), \
+             runs.patch_host("all_states", return_value=([], {}, set())), \
              mock.patch.object(runs.render, "queued_summary", return_value=[]), \
              mock.patch.object(runs.queues_module.Queues, "weekly_line", return_value=""), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "loop_parents", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("loop_parents", return_value={}), \
              mock.patch.object(runs.zombies, "find_zombies", return_value=[]):
             out = runs.render.render()
         self.assertIn("pressure=WARN", out)

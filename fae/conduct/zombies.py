@@ -26,7 +26,7 @@ from pathlib import Path
 import fae.experiment
 from fae.cell.cell import Cell
 from fae.experiment import parse_cell_id
-from fae import host
+from . import _host
 
 ZOMBIE_GRACE_S = int(os.environ.get("ZOMBIE_GRACE_S", 600))      # owned, recent
 
@@ -72,7 +72,7 @@ def _infra_of(variant, cid):
 def _containers_all():
     """Every container name, running or not. containers() is `docker ps` and
     its callers mean "running"; a STOPPED sidecar still owns its name."""
-    return set(host.sh(["docker", "ps", "-a", "--format", "{{.Names}}"]).split())
+    return set(_host.sh(["docker", "ps", "-a", "--format", "{{.Names}}"]).split())
 
 
 def _pid_alive(pid):
@@ -102,7 +102,7 @@ def _prefixes():
     each infra class's PREFIXES and the verifier's."""
     from fae.cell import image as _image
     from fae.experiment import variants as _tr
-    out = [("container", host.agent_container("")),
+    out = [("container", _host.agent_container("")),
            ("container", _image.VERIFY_PREFIX), ("container", _image.TOOL_PREFIX),
            ("container", _image.RUN_PREFIX),
            ("network", _image.NET_PREFIX)]
@@ -116,7 +116,7 @@ def _prefixes():
 
 
 def _docker_net_age_s(name):
-    out = host.sh(["docker", "network", "inspect", "-f", "{{.Created}}", name]).strip()
+    out = _host.sh(["docker", "network", "inspect", "-f", "{{.Created}}", name]).strip()
     try:
         return time.time() - datetime.fromisoformat(out.replace("Z", "+00:00")).timestamp()
     except ValueError:
@@ -139,7 +139,7 @@ def _kill_process(pid):
 
 
 def _docker_age_s(name):
-    out = host.sh(["docker", "inspect", "-f", "{{.Created}}", name]).strip()
+    out = _host.sh(["docker", "inspect", "-f", "{{.Created}}", name]).strip()
     try:
         return time.time() - datetime.fromisoformat(
             out.replace("Z", "+00:00")).timestamp()
@@ -149,14 +149,14 @@ def _docker_age_s(name):
 
 def _iter_age_s(cid):
     mt = fae.experiment.exp().cell(cid).mtimes()["ledger"]
-    return host.awake_age(mt / 1e9) if mt is not None else None
+    return _host.awake_age(mt / 1e9) if mt is not None else None
 
 
 def _fd_holders(path):
     """pids with `path` open. Not the flock holder — every driver opens all
     of its candidates — so this is only meaningful once the legitimate holder
     is known to be gone."""
-    out = host.sh(["lsof", "-t", "-n", str(path)])
+    out = _host.sh(["lsof", "-t", "-n", str(path)])
     return [int(x) for x in out.split() if x.strip().isdigit()]
 # The processes entitled to hold the rig lock or the verify lock: a cell loop
 # (found by loop_parents(), default root only) and the out-of-loop commands
@@ -171,7 +171,7 @@ VERIFY_HOLDER_ARGV = r"cli\.py\s+(experiment\s+(verb|smoke)|cell\s+reverify)\b"
 
 
 def _verify_holders_alive():
-    return bool(host.sh(["pgrep", "-f", VERIFY_HOLDER_ARGV]).split())
+    return bool(_host.sh(["pgrep", "-f", VERIFY_HOLDER_ARGV]).split())
 
 
 def _leaked_lock_holders():
@@ -192,7 +192,7 @@ def _leaked_lock_holders():
     out = []
     for name in ("rig", "verify"):
         if not Cell.shared_lock_held(fae.experiment.exp().workspace.locks, name) \
-                or host.loop_parents() or _verify_holders_alive():
+                or _host.loop_parents() or _verify_holders_alive():
             continue
         p = Cell.shared_lock(fae.experiment.exp().workspace.locks, name)
         for pid in _fd_holders(p):
@@ -207,21 +207,21 @@ def _is_driver_pid(pid):
     lives. loop_parents() sees only the default root, so a cell run by hand
     in another root (WORKSPACES_DIR) is invisible to it; the lock it
     holds is not a leak."""
-    cmd = host.sh(["ps", "-o", "command=", "-p", str(pid)])
+    cmd = _host.sh(["ps", "-o", "command=", "-p", str(pid)])
     return "fae.cell" in cmd or bool(re.search(VERIFY_HOLDER_ARGV, cmd))
 
 
 def find_zombies():
     """[(kind, ident, owner, note)] — resources with no live owner, past
     grace. Read-only; reap_zombies() acts."""
-    live = host.loop_parents()
+    live = _host.loop_parents()
     zs = []
     for lock, pid in _leaked_lock_holders():
         who = Cell.shared_lock_holder(fae.experiment.exp().workspace.locks, lock[:-len("-lock")])
         zs.append(("lockholder", f"{pid}:{lock}", who or "?",
                    f"holds {lock} with no process entitled to it"))
     prefixes = _prefixes()
-    for name in host.containers():
+    for name in _host.containers():
         for pfx in [p for k, p in prefixes if k == "container"]:
             if not name.startswith(pfx):
                 continue
@@ -244,7 +244,7 @@ def find_zombies():
             zs.append(("container", name, cid, "no live loop"))
     by_cluster = {v: k for k, v in _cluster_map().items()}
     cluster_prefixes = tuple(p for k, p in prefixes if k == "cluster")
-    for cl in host.sh(["kind", "get", "clusters"]).split():
+    for cl in _host.sh(["kind", "get", "clusters"]).split():
         if not cluster_prefixes or not cl.startswith(cluster_prefixes):
             continue
         owner = by_cluster.get(cl)
@@ -259,7 +259,7 @@ def find_zombies():
                                   # clusters briefly — long grace covers them
         zs.append(("cluster", cl, owner or "?", "no live owner"))
     net_prefixes = tuple(p for k, p in prefixes if k == "network")
-    for net in (host.sh(["docker", "network", "ls", "--format", "{{.Name}}"]).split()
+    for net in (_host.sh(["docker", "network", "ls", "--format", "{{.Name}}"]).split()
                 if net_prefixes else []):
         if not net.startswith(net_prefixes):
             continue
@@ -272,9 +272,9 @@ def find_zombies():
             continue              # young or unknown: a verify may be between
                                   # creating it and starting its store
         zs.append(("network", net, cid, "no live loop"))
-    for pid, cid in host.loop_pids().items():
+    for pid, cid in _host.loop_pids().items():
         try:
-            ppid = int(host.sh(["ps", "-o", "ppid=", "-p", str(pid)]).strip() or 0)
+            ppid = int(_host.sh(["ps", "-o", "ppid=", "-p", str(pid)]).strip() or 0)
         except ValueError:
             continue
         if ppid == 1:
@@ -283,7 +283,7 @@ def find_zombies():
         if not ws.is_dir():
             continue
         c = fae.experiment.exp().cell(ws.name, workspaces=ws.parent)
-        if c.heartbeat() is not None and host.heartbeat(ws, c) is None:
+        if c.heartbeat() is not None and _host.heartbeat(ws, c) is None:
             zs.append(("heartbeat", str(ws), ws.name, "corpse file"))
     # No stale-lock class: a lock is held by fd, so the kernel frees it when
     # its holder dies. What can outlive a holder is INFRA, and an arm
@@ -295,7 +295,7 @@ def find_zombies():
         if not owner or owner in live or q.slot_held(d):
             continue
         if present is None:
-            present = _containers_all() | set(host.sh(["kind", "get", "clusters"]).split())
+            present = _containers_all() | set(_host.sh(["kind", "get", "clusters"]).split())
         named = [(k, i) for k, i in fae.experiment.exp().workspace.named_cell(owner).provisions() if i in present]
         if not named:
             # The sidecar outlived everything it named: nothing left to reap,
@@ -338,7 +338,7 @@ def reap_zombies(zs):
                 # Re-confirm the corpse: a new loop may have written a fresh
                 # .loop in the interval, and deleting a LIVE heartbeat costs
                 # the phase/WAITING display for the rest of the attempt.
-                if host.heartbeat(Path(ident)) is not None:
+                if _host.heartbeat(Path(ident)) is not None:
                     done.append(f"skipped heartbeat {ident} — beating again")
                     continue
                 ws = Path(ident)
@@ -349,7 +349,7 @@ def reap_zombies(zs):
                 # Re-confirm at reap time: gathering and acting are minutes
                 # apart, and a pid can be recycled or the cell resumed since.
                 pid_s, _, cid = ident.partition(":")
-                if (kind, ident, cid) not in _strays(host.loop_parents()):
+                if (kind, ident, cid) not in _strays(_host.loop_parents()):
                     done.append(f"skipped process {ident} — live again or "
                                 f"pid recycled")
                     continue

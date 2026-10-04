@@ -162,7 +162,7 @@ class TestQueuedSummaryCountsOnlyRealBacklog(OperatorTestCase):
         self.queue("sonnet", [dict(task=task, variant=v,
                                    rep=int(rep), budget=10, fresh=False)])
         (self.ws / CIDS[0] / ".paused").write_text("manual by=operator\n")
-        with mock.patch.object(runs.host, "loop_parents", return_value={}):
+        with runs.patch_host("loop_parents", return_value={}):
             head = runs.render.queued_summary()[0]
         self.assertIn("QUEUED (2)", head)
         self.assertIn("1 fresh", head)
@@ -177,7 +177,7 @@ class TestQueuedSummaryCountsOnlyRealBacklog(OperatorTestCase):
         self.queue("sonnet", [dict(task=task, variant=v,
                                    rep=int(rep), budget=10, fresh=False)])
         (self.ws / CIDS[0] / ".paused").write_text("manual by=operator\n")
-        with mock.patch.object(runs.host, "loop_parents", return_value={}):
+        with runs.patch_host("loop_parents", return_value={}):
             lines = runs.render.queued_summary()
         lane = next(l for l in lines if l.strip().startswith("sonnet"))
         self.assertIn("[1 paused]", lane)
@@ -185,7 +185,7 @@ class TestQueuedSummaryCountsOnlyRealBacklog(OperatorTestCase):
 
     def test_a_lane_with_nothing_paused_says_nothing(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7, budget=10)])
-        with mock.patch.object(runs.host, "loop_parents", return_value={}):
+        with runs.patch_host("loop_parents", return_value={}):
             lane = next(l for l in runs.render.queued_summary()
                         if l.strip().startswith("sonnet"))
         self.assertNotIn("paused", lane)
@@ -195,7 +195,7 @@ class TestQueuedSummaryCountsOnlyRealBacklog(OperatorTestCase):
         m, v, task, rep = runs.parse_cell_id(cid)
         self.queue("sonnet", [dict(task=task, variant=v,
                                    rep=int(rep), budget=10)])
-        with mock.patch.object(runs.host, "loop_parents", return_value={cid: 4242}):
+        with runs.patch_host("loop_parents", return_value={cid: 4242}):
             lines = runs.render.queued_summary()
         head = lines[0]
         self.assertIn("QUEUED (1)", head, head)
@@ -203,7 +203,7 @@ class TestQueuedSummaryCountsOnlyRealBacklog(OperatorTestCase):
 
     def test_a_pending_cell_with_no_loop_still_counts(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2, budget=10)])
-        with mock.patch.object(runs.host, "loop_parents", return_value={}):
+        with runs.patch_host("loop_parents", return_value={}):
             lines = runs.render.queued_summary()
         self.assertIn("QUEUED (1)", lines[0])
         self.assertIn("1 fresh", lines[0])
@@ -211,7 +211,7 @@ class TestQueuedSummaryCountsOnlyRealBacklog(OperatorTestCase):
     def test_a_parked_lane_is_shown_tagged_paused(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2, budget=10)])
         runs.queues.park_lane("sonnet")
-        with mock.patch.object(runs.host, "loop_parents", return_value={}):
+        with runs.patch_host("loop_parents", return_value={}):
             lines = runs.render.queued_summary()
         row = next(l for l in lines if "sonnet" in l)
         self.assertIn("[PAUSED]", row)
@@ -226,8 +226,8 @@ class TestConductStop(OperatorTestCase):
     experiment. It confirms before acting."""
 
     def _stop(self, scope, live=None, yes=True):
-        with mock.patch.object(runs.host, "loop_parents", return_value=live or {}), \
-             mock.patch.object(runs.host, "containers", return_value=[]), \
+        with runs.patch_host("loop_parents", return_value=live or {}), \
+             runs.patch_host("containers", return_value=[]), \
              mock.patch.object(runs.conduct.Conduct, "request_pause") as rp:
             runs.conduct.Conduct().stop(mock.Mock(scope=scope, yes=yes))
         return rp
@@ -263,24 +263,24 @@ class TestConductStop(OperatorTestCase):
         with mock.patch.object(runs.sys.stdin, "isatty", return_value=True), \
              mock.patch("builtins.input", return_value="n"), \
              mock.patch.object(runs.conduct.Conduct, "request_pause") as rp, \
-             mock.patch.object(runs.host, "loop_parents", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=[]):
+             runs.patch_host("loop_parents", return_value={}), \
+             runs.patch_host("containers", return_value=[]):
             runs.conduct.Conduct().stop(mock.Mock(scope=["all"], yes=False))
         rp.assert_not_called()
 
     def test_a_non_terminal_without_yes_does_nothing(self):
         with mock.patch.object(runs.sys.stdin, "isatty", return_value=False), \
              mock.patch.object(runs.conduct.Conduct, "request_pause") as rp, \
-             mock.patch.object(runs.host, "loop_parents", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=[]):
+             runs.patch_host("loop_parents", return_value={}), \
+             runs.patch_host("containers", return_value=[]):
             runs.conduct.Conduct().stop(mock.Mock(scope=["all"], yes=False))
         rp.assert_not_called()
 
     def test_the_warning_names_the_loops_it_will_kill(self):
         live = {"haiku_high_beta_howto_T1_r3": 4242}
         buf = io.StringIO()
-        with mock.patch.object(runs.host, "loop_parents", return_value=live), \
-             mock.patch.object(runs.host, "containers", return_value=[]), \
+        with runs.patch_host("loop_parents", return_value=live), \
+             runs.patch_host("containers", return_value=[]), \
              mock.patch.object(runs.conduct.Conduct, "request_pause"), \
              mock.patch.object(Cell, "take_down"), \
              contextlib.redirect_stdout(buf):
@@ -394,7 +394,7 @@ class TestExactlyOneCellRule(OperatorTestCase):
              mock.patch.object(Conduct, "pid", return_value=4242 if run_up else None), \
              mock.patch.object(runs.conduct.Conduct, "_spawn", return_value=None) as spawned, \
              mock.patch.object(Cell, "prestart_clean"), \
-             mock.patch.object(runs.host, "loop_parents", return_value={}), \
+             runs.patch_host("loop_parents", return_value={}), \
              contextlib.redirect_stdout(out):
             try:
                 runs.cli.spawn(args)
@@ -440,12 +440,12 @@ class TestStopCells(OperatorTestCase):
 
     def _stop(self, cid, cancel=False, live=None):
         live = live or {}
-        with mock.patch.object(runs.host, "loop_parents", return_value=live), \
+        with runs.patch_host("loop_parents", return_value=live), \
              mock.patch.object(Cell, "loop_pid", lambda c: live.get(c.cid)), \
              mock.patch.object(Cell, "_gone", staticmethod(lambda pid, grace: True)), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=[]), \
-             mock.patch.object(runs.host, "cell_state",
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=[]), \
+             runs.patch_host("cell_state",
                                return_value=dict(cid=cid, state="RUNNING",
                                                  why="agent",
                                                  variant="beta_apidocs")), \
@@ -489,12 +489,12 @@ class TestStopCells(OperatorTestCase):
         cid = CIDS[0]
         (self.ws / cid / "artifacts").mkdir(parents=True, exist_ok=True)
         groups, torn = [], []
-        with mock.patch.object(runs.host, "loop_parents", return_value={cid: 4242}), \
+        with runs.patch_host("loop_parents", return_value={cid: 4242}), \
              mock.patch.object(Cell, "loop_pid", lambda c: 4242), \
              mock.patch.object(Cell, "_gone", staticmethod(lambda pid, grace: False)), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=[]), \
-             mock.patch.object(runs.host, "cell_state",
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=[]), \
+             runs.patch_host("cell_state",
                                return_value=dict(cid=cid, state="RUNNING",
                                                  why="agent", variant="beta_apidocs")), \
              mock.patch.object(runs.subprocess, "run", return_value=mock.Mock(returncode=0)), \
@@ -550,10 +550,10 @@ class TestConductResume(OperatorTestCase):
             cid = Path(ws).name
             return st_map.get(cid, self._st(cid, state="DONE", why="green"))
 
-        with mock.patch.object(runs.host, "loop_parents", return_value=live or {}), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=[]), \
-             mock.patch.object(runs.host, "cell_state", side_effect=_cs):
+        with runs.patch_host("loop_parents", return_value=live or {}), \
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=[]), \
+             runs.patch_host("cell_state", side_effect=_cs):
             runs.conduct.Conduct().resume(mock.Mock(scope=scope))
 
     def test_no_loop_is_ever_spawned(self):
@@ -719,10 +719,10 @@ class TestLimitWall(OperatorTestCase):
             c = Path(ws).name
             return st if c == cid else None
 
-        with mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.host, "loop_parents", return_value={cid: 4242}), \
-             mock.patch.object(runs.host, "cell_state", side_effect=_cs):
+        with runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
+             runs.patch_host("loop_parents", return_value={cid: 4242}), \
+             runs.patch_host("cell_state", side_effect=_cs):
             runs.supervise.supervise_pass(runs.supervise.Alerts(), dry=dry)
 
     def test_walled_cell_is_stood_down_and_lane_cooled(self):
@@ -779,14 +779,14 @@ class TestLimitWall(OperatorTestCase):
         st = dict(cid=cid, state="RUNNING", why="agent", detail="",
                   agent="sonnet", variant="beta_apidocs",
                   task="T1", rep="1", budget=10)
-        with mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "loop_parents", return_value={}), \
-             mock.patch.object(runs.host, "containers",
+        with runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("loop_parents", return_value={}), \
+             runs.patch_host("containers",
                                return_value={f"fae-agent-{cid}"}), \
-             mock.patch.object(runs.host, "cell_state",
+             runs.patch_host("cell_state",
                                side_effect=lambda w, l, b:
                                st if Path(w).name == cid else None), \
-             mock.patch.object(runs.host, "heartbeat",
+             runs.patch_host("heartbeat",
                                return_value={"age": 1e9}), \
              mock.patch.object(runs.subprocess, "run"):
             runs.supervise.supervise_pass(runs.supervise.Alerts(), dry=False)
@@ -882,10 +882,10 @@ class TestStopRemovesTheClaim(OperatorTestCase):
         self.queue("sonnet", [dict(task="T1", variant="beta_apidocs", rep=1, budget=10,
                                    fresh=False)])
         runs.queues.claim("sonnet", runs.queues.lane_specs("sonnet")[0])
-        with mock.patch.object(runs.host, "loop_parents", return_value={}), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("loop_parents", return_value={}), \
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
+             runs.patch_host("cell_state",
                                return_value=dict(cid=cid, state="RUNNING",
                                                  why="agent",
                                                  variant="beta_apidocs")), \
@@ -932,10 +932,10 @@ class TestResumeRespectsPerModelCap(OperatorTestCase):
 
     def _resume(self, cid, force=False, live=None):
         args = mock.Mock(selectors=[cid], force=force)
-        with mock.patch.object(runs.host, "loop_parents", return_value=live or {}), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=[]), \
-             mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("loop_parents", return_value=live or {}), \
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=[]), \
+             runs.patch_host("cell_state",
                                return_value=dict(cid=cid, state="CRASHED",
                                                  why="loop")), \
              mock.patch.object(Cell, "refresh_creds"), \
@@ -995,14 +995,14 @@ class TestPendingKind(OperatorTestCase):
 
     def test_terminal_is_done(self):
         cid = CIDS[0]
-        with mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("cell_state",
                                return_value={"cid": cid, "state": "DONE",
                                              "why": "green"}):
             self.assertEqual(self.kind(cid), "done")
 
     def test_seeded_but_never_launched_is_prepared(self):
         cid = CIDS[0]
-        with mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("cell_state",
                                return_value={"cid": cid, "state": "CRASHED",
                                              "why": "loop"}), \
              mock.patch.object(runs.Cell, "never_started", return_value=True):
@@ -1010,7 +1010,7 @@ class TestPendingKind(OperatorTestCase):
 
     def test_a_stopped_cell_is_interrupted(self):
         cid = CIDS[0]
-        with mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("cell_state",
                                return_value={"cid": cid, "state": "CRASHED",
                                              "why": "loop"}), \
              mock.patch.object(runs.Cell, "never_started", return_value=False):
@@ -1022,19 +1022,19 @@ class TestQueuedSummaryDisplay(OperatorTestCase):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         runs.queues.cooldown_file("sonnet").write_text(
             f"{int(runs.time.time()) + 9999} quota\n")
-        with mock.patch.object(runs.host, "loop_parents", return_value={}):
+        with runs.patch_host("loop_parents", return_value={}):
             row = next(l for l in runs.render.queued_summary() if "sonnet" in l)
         self.assertIn("[LIMIT until", row)
 
     def test_an_empty_lane_directory_is_not_a_row(self):
         runs.queues.lane_dir("sonnet").mkdir(parents=True)
-        with mock.patch.object(runs.host, "loop_parents", return_value={}):
+        with runs.patch_host("loop_parents", return_value={}):
             self.assertEqual(runs.render.queued_summary(), [])
 
     def test_an_unreadable_head_spec_drops_the_row_not_the_count(self):
         d = runs.queues.lane_dir("sonnet"); d.mkdir(parents=True)
         (d / "100000.sonnet_high_beta_apidocs_T1_r9.json").write_text("{bad\n")
-        with mock.patch.object(runs.host, "loop_parents", return_value={}):
+        with runs.patch_host("loop_parents", return_value={}):
             self.assertEqual(runs.render.queued_summary(), [])
 
 
@@ -1045,9 +1045,9 @@ class TestConductPauseDryRun(OperatorTestCase):
         import io, contextlib
         out = io.StringIO()
         with contextlib.redirect_stdout(out), \
-             mock.patch.object(runs.host, "loop_parents", return_value=live or {}), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
+             runs.patch_host("loop_parents", return_value=live or {}), \
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
              mock.patch.object(runs.conduct.Conduct, "request_pause") as rp, \
              mock.patch.object(runs.conduct.Conduct, "stop_conductor") as sc:
             runs.conduct.Conduct().pause(mock.Mock(scope=scope, admission_only=admission_only,
@@ -1108,10 +1108,10 @@ class TestConductPauseFullWindow(OperatorTestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), \
              mock.patch.object(runs.conduct.Conduct, "stop_conductor", return_value=True) as sc, \
-             mock.patch.object(runs.host, "loop_parents", return_value={}), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.host, "sh", return_value=""), \
+             runs.patch_host("loop_parents", return_value={}), \
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
+             runs.patch_host("sh", return_value=""), \
              mock.patch.object(runs.conduct.Conduct, "request_pause") as rp:
             runs.conduct.Conduct().pause(mock.Mock(scope=["all"], admission_only=False,
                                          dry_run=False, interval=1))
@@ -1127,10 +1127,10 @@ class TestConductPauseFullWindow(OperatorTestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), \
              mock.patch.object(runs.conduct.Conduct, "stop_conductor", return_value=False), \
-             mock.patch.object(runs.host, "loop_parents", return_value={}), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.host, "sh", side_effect=lambda *a, **k: seen.pop(0) if seen else ""), \
+             runs.patch_host("loop_parents", return_value={}), \
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
+             runs.patch_host("sh", side_effect=lambda *a, **k: seen.pop(0) if seen else ""), \
              mock.patch.object(runs.time, "sleep", lambda s: None), \
              mock.patch.object(runs.conduct.Conduct, "request_pause"):
             runs.conduct.Conduct().pause(mock.Mock(scope=["all"], admission_only=False,
@@ -1159,9 +1159,9 @@ class TestVerbEdges(OperatorTestCase):
 
     def test_stop_dry_run_previews_a_cell(self):
         cid = CIDS[0]
-        with mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
+             runs.patch_host("cell_state",
                                return_value={"cid": cid, "state": "RUNNING",
                                              "why": "agent"}):
             out = self.out_of(runs.cli.stop_cells,
@@ -1172,9 +1172,9 @@ class TestVerbEdges(OperatorTestCase):
 
     def test_stop_dry_run_previews_a_queued_spec(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
-        with mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.host, "cell_state", return_value=None):
+        with runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
+             runs.patch_host("cell_state", return_value=None):
             out = self.out_of(runs.cli.stop_cells,
                               mock.Mock(selectors=[runs.cell_id("sonnet", "alpha_apidocs", 7)],
                                         cancel=True, dry_run=True))
@@ -1184,7 +1184,7 @@ class TestVerbEdges(OperatorTestCase):
 
     def test_stop_leaves_a_finished_cell_alone(self):
         cid = CIDS[0]
-        with mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("cell_state",
                                return_value={"cid": cid, "state": "DONE",
                                              "why": "green"}):
             out = self.out_of(runs.cli.stop_cells,
@@ -1197,10 +1197,10 @@ class TestVerbEdges(OperatorTestCase):
     def test_resume_lifts_a_lock_without_respawning_a_live_cell(self):
         cid = CIDS[0]
         (self.ws / cid / ".paused").write_text("manual by=operator\n")
-        with mock.patch.object(runs.host, "loop_parents", return_value={cid: 4242}), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("loop_parents", return_value={cid: 4242}), \
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
+             runs.patch_host("cell_state",
                                return_value={"cid": cid, "state": "RUNNING",
                                              "why": "agent"}):
             out = self.out_of(runs.cli.resume, mock.Mock(selectors=[cid], force=False))
@@ -1211,10 +1211,10 @@ class TestVerbEdges(OperatorTestCase):
     def test_resume_does_not_soften_a_cancel(self):
         cid = CIDS[0]
         (self.ws / cid / ".paused").write_text("killed by=operator\n")
-        with mock.patch.object(runs.host, "loop_parents", return_value={}), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("loop_parents", return_value={}), \
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
+             runs.patch_host("cell_state",
                                return_value={"cid": cid, "state": "DONE",
                                              "why": "cancelled"}):
             self.out_of(runs.cli.resume, mock.Mock(selectors=[cid], force=False))
@@ -1233,9 +1233,9 @@ class TestVerbEdges(OperatorTestCase):
     def test_conduct_stop_terms_conduct_and_the_scope_loops(self):
         (self.conduct / "conduct.pid").write_text("4242 cap=7")
         killed = []
-        with mock.patch.object(runs.host, "loop_parents",
+        with runs.patch_host("loop_parents",
                                return_value={CIDS[0]: 111, CIDS[3]: 222}), \
-             mock.patch.object(runs.host, "containers",
+             runs.patch_host("containers",
                                return_value={f"fae-agent-{CIDS[0]}"}), \
              mock.patch.object(runs.conduct.Conduct, "request_pause") as pause, \
              mock.patch.object(runs.subprocess, "run") as sub, \
@@ -1254,8 +1254,8 @@ class TestVerbEdges(OperatorTestCase):
         self.assertTrue(sub.called, "the scope's infra is torn down")
 
     def test_conduct_stop_survives_a_loop_that_already_exited(self):
-        with mock.patch.object(runs.host, "loop_parents", return_value={CIDS[0]: 111}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
+        with runs.patch_host("loop_parents", return_value={CIDS[0]: 111}), \
+             runs.patch_host("containers", return_value=set()), \
              mock.patch.object(runs.conduct.Conduct, "request_pause"), \
              mock.patch.object(runs.os, "kill", side_effect=ProcessLookupError):
             out = self.out_of(runs.conduct.Conduct().stop, mock.Mock(scope=["all"]))
@@ -1265,10 +1265,10 @@ class TestVerbEdges(OperatorTestCase):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         runs.queues.park_lane("sonnet")
         runs.queues.lane_dir("sonnet").mkdir(parents=True)
-        with mock.patch.object(runs.host, "loop_parents", return_value={}), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.host, "cell_state", return_value=None):
+        with runs.patch_host("loop_parents", return_value={}), \
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
+             runs.patch_host("cell_state", return_value=None):
             out = self.out_of(runs.conduct.Conduct().resume, mock.Mock(scope=["sonnet"]))
         self.assertIn("refusing to clobber", out)
 
@@ -1277,10 +1277,10 @@ class TestVerbEdges(OperatorTestCase):
         (self.ws / cid / "reconcile.flagged").touch()
         (self.ws / cid / ".paused").write_text("drain by=conduct\n")
         (self.conduct / "reconcile.respawns.json").write_text("{not json")
-        with mock.patch.object(runs.host, "loop_parents", return_value={}), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("loop_parents", return_value={}), \
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
+             runs.patch_host("cell_state",
                                return_value=dict(cid=cid, state="CRASHED",
                                                  why="loop", agent="sonnet",
                                                  variant="beta_apidocs", task="T1",
@@ -1300,8 +1300,8 @@ class TestStandingStateSurvivesBulkVerbs(OperatorTestCase):
             (self.ws / c / ".paused").write_text("roster by=operator\n")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), \
-             mock.patch.object(runs.host, "loop_parents", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
+             runs.patch_host("loop_parents", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
              mock.patch.object(runs.conduct.Conduct, "request_pause"):
             runs.conduct.Conduct().stop(mock.Mock(scope=["all"]))
         out = buf.getvalue()
@@ -1310,10 +1310,10 @@ class TestStandingStateSurvivesBulkVerbs(OperatorTestCase):
 
     def test_stopping_a_cell_whose_loop_already_exited(self):
         cid = CIDS[0]
-        with mock.patch.object(runs.host, "loop_parents", return_value={cid: 111}), \
-             mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("loop_parents", return_value={cid: 111}), \
+             runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
+             runs.patch_host("cell_state",
                                return_value={"cid": cid, "state": "RUNNING",
                                              "why": "agent",
                                              "variant": "beta_apidocs"}), \
@@ -1429,10 +1429,10 @@ class TestTheWeeklyWallCoolsTheLane(OperatorTestCase):
                   agent="sonnet", variant="beta_apidocs",
                   task="T1", rep="1", budget=10)
         (self.ws / cid / "iterations.log").touch()
-        with mock.patch.object(runs.host, "loop_pids", return_value={}), \
-             mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.host, "loop_parents", return_value={cid: 4242}), \
-             mock.patch.object(runs.host, "cell_state",
+        with runs.patch_host("loop_pids", return_value={}), \
+             runs.patch_host("containers", return_value=set()), \
+             runs.patch_host("loop_parents", return_value={cid: 4242}), \
+             runs.patch_host("cell_state",
                                side_effect=lambda w, l, b:
                                st if Path(w).name == cid else None):
             runs.supervise.supervise_pass(runs.supervise.Alerts(), dry=False)

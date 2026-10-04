@@ -326,7 +326,7 @@ def _invariants(ctx):
     from fae.cell import verify as _verify
     from fae.cell.cell import Cell
     from fae.experiment.variants import files as _files
-    from fae import host
+    import fae.conduct
     out = []
     missing = [f"{mod.__name__}.{name}"
                for mod, names in ((_verify, ("run_verifier", "call", "run_in_thread")),
@@ -357,7 +357,7 @@ def _invariants(ctx):
         for ws in sorted(fae.experiment.exp().workspace.path.iterdir()):
             if not ws.is_dir() or not _experiment.parse_cell_id(ws.name):
                 continue
-            st = host.cell_state(ws)
+            st = fae.conduct.cell_state(ws)
             if st and st["state"] == "DONE" and st["why"] in ("green", "failed", "revoked"):
                 if fae.experiment.exp().cell(ws.name, workspaces=ws.parent).read_ledger()["verdict"] != st["why"]:
                     disagree.append(ws.name)
