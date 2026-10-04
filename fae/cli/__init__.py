@@ -227,7 +227,7 @@ def resume(args):
     sels = _selectors(args)
     matches = fae.experiment.exp().workspace.select(*sels)
     _one_cell("resume", sels, len(matches))
-    blanket = _experiment.is_blanket(sels)
+    blanket = _experiment.is_cell_selector_blanket(sels)
     parents = host.loop_parents()
     run = conduct.Conduct()
     touched = 0

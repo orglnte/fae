@@ -5,7 +5,7 @@ it as a whole.
                  `workspace` are public, and every caller reaches them
                  through it: fae.experiment.exp().workspace.queues
     Gate         what an experiment declares its gate with
-    cell_id, parse_cell_id, matches, is_blanket   the cell-id grammar
+    cell_id, parse_cell_id, matches, is_cell_selector_blanket   the cell-id grammar
 
 Nothing else is exposed: the classes live in the private _experiment.
 
@@ -71,4 +71,4 @@ The definition's `__init__.py` declares, all optional:
     directory — fae/cell/image.py)
 """
 
-from ._experiment import Gate, cell_id, exp, is_blanket, matches, parse_cell_id  # noqa: F401
+from ._experiment import Gate, cell_id, exp, is_cell_selector_blanket, matches, parse_cell_id  # noqa: F401
