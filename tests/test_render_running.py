@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from _ctx import runs
+import fae.experiment
 
 
 def _state(cid, phase, **over):
@@ -34,7 +35,7 @@ class TestTheRunningTable(unittest.TestCase):
              mock.patch.object(runs.zombies, "find_zombies", return_value=[]), \
              mock.patch.object(runs.render, "queued_summary", return_value=[]), \
              mock.patch.object(runs.queues_module.Queues, "weekly_line", return_value=""), \
-             mock.patch.object(runs.shared, "definition") as d:
+             mock.patch.object(fae.experiment._experiment.Experiment, "definition", new_callable=mock.PropertyMock) as d:
             d.return_value.matrix = {"alpha": ["apidocs"]}
             d.return_value.tech_of = lambda arm: arm
             return runs.render.render(running_only=True)
@@ -59,11 +60,11 @@ class TestTheInFlightE2E(unittest.TestCase):
     def test_a_failed_e2e_reads_as_an_x(self):
         with tempfile.TemporaryDirectory() as d:
             ws = Path(d)
-            self.assertFalse(runs.shared.current().cell(ws.name, workspaces=ws.parent).e2e_failed())
+            self.assertFalse(runs.experiment.exp().cell(ws.name, workspaces=ws.parent).e2e_failed())
             (ws / "metrics.json").write_text(json.dumps({"e2e_pass": 7, "e2e_total": 7}))
-            self.assertFalse(runs.shared.current().cell(ws.name, workspaces=ws.parent).e2e_failed())
+            self.assertFalse(runs.experiment.exp().cell(ws.name, workspaces=ws.parent).e2e_failed())
             (ws / "metrics.json").write_text(json.dumps({"e2e_pass": 5, "e2e_total": 7}))
-            self.assertTrue(runs.shared.current().cell(ws.name, workspaces=ws.parent).e2e_failed())
+            self.assertTrue(runs.experiment.exp().cell(ws.name, workspaces=ws.parent).e2e_failed())
 
 
 if __name__ == "__main__":

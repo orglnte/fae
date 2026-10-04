@@ -20,9 +20,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config as _config
-from fae import shared as _shared
 from .surface import Surface
 
+import fae.experiment  # noqa: E402
 from fae import paths as _paths  # noqa: E402
 
 ROOT = _paths.ROOT
@@ -39,7 +39,7 @@ CELL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*_r[0-9]+$")
 
 
 def variant_of(vid):
-    cls = _shared.definition().variant(vid)
+    cls = fae.experiment.exp().definition.variant(vid)
     if cls is None:
         raise FileNotFoundError(f"no variant named {vid!r} in the experiment")
     return cls

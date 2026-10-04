@@ -9,6 +9,7 @@ from unittest import mock
 
 from _ctx import ROOT
 
+import fae.experiment
 from fae import paths as _paths
 from fae.cell import image as _image
 from fae.cell.infra import base
@@ -78,7 +79,7 @@ class TestTheToolContainer(unittest.TestCase):
         from fae.conduct import zombies
         d = mock.Mock()
         d.verifier_class.return_value.PREFIXES = {}
-        with mock.patch.object(zombies._shared, "definition", return_value=d), \
+        with mock.patch.object(fae.experiment._experiment.Experiment, "definition", new_callable=mock.PropertyMock, return_value=d), \
                 mock.patch("fae.cell.variants.registry", return_value={}):
             self.assertIn(("container", "fae-tool-"), zombies._prefixes())
 

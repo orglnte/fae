@@ -20,9 +20,9 @@ import subprocess
 import sys
 import time
 
+import fae.experiment
 from fae.cell.fsm import LOOP_UNCHANGED_BY
 from fae import experiment as _experiment
-from fae import shared as _shared
 
 
 HOST_SLEEP_GAP_S = 30
@@ -42,7 +42,7 @@ def loop_pids():
     pids = {}
     # Anchored to THIS invocation's workspace root, so an alternative root's
     # loops are not read as dead.
-    pat = re.compile(re.escape(str(_shared.workspace().path)) + r"/([^/ ]+)/run_cell\.log")
+    pat = re.compile(re.escape(str(fae.experiment.exp().workspace.path)) + r"/([^/ ]+)/run_cell\.log")
     for line in sh(["ps", "-axww", "-o", "pid=,command="]).splitlines():
         if "tee -a " not in line:
             continue
@@ -80,8 +80,8 @@ def loop_parents():
     text is scanned for those keys only and never printed — it also carries
     agent credentials."""
     out = {}
-    if _shared.workspace().path.exists():
-        for ws in _shared.workspace().path.iterdir():
+    if fae.experiment.exp().workspace.path.exists():
+        for ws in fae.experiment.exp().workspace.path.iterdir():
             if not ws.is_dir():
                 continue
             hb = heartbeat(ws)
@@ -132,7 +132,7 @@ def run_cell_pids():
 
 
 def _cell(ws):
-    return _shared.current().cell(ws.name, workspaces=ws.parent)
+    return fae.experiment.exp().cell(ws.name, workspaces=ws.parent)
 
 
 def heartbeat(ws, cell=None):
@@ -144,7 +144,7 @@ def heartbeat(ws, cell=None):
 def queued(cid):
     """Does the cell's spec wait in its lane (admission resumes it)?"""
     parsed = _experiment.parse_cell_id(cid)
-    return bool(parsed) and _shared.workspace().queues.lane_has(parsed[0], cid)
+    return bool(parsed) and fae.experiment.exp().workspace.queues.lane_has(parsed[0], cid)
 
 
 def cell_state(ws, loops=None, boxes=None):
@@ -158,7 +158,7 @@ def cell_state(ws, loops=None, boxes=None):
     c = _cell(ws)
     if not c.has_ledger:
         return None
-    return c.status(parsed, _shared.definition().gate.arrangements_nr, heartbeat(ws, c),
+    return c.status(parsed, fae.experiment.exp().definition.gate.arrangements_nr, heartbeat(ws, c),
                     looping=lambda: ws.name in live_loops(), queued=lambda: queued(ws.name))
 
 
@@ -166,7 +166,7 @@ def all_states(running_only=False):
     loops, boxes = loop_pids(), containers()
     active_cids = set(loop_parents().keys()) if running_only else None
     out = []
-    for w in sorted(_shared.workspace().path.iterdir()):
+    for w in sorted(fae.experiment.exp().workspace.path.iterdir()):
         if not w.is_dir():
             continue
         if active_cids is not None and w.name not in active_cids:
@@ -191,7 +191,7 @@ def agent_container(cid):
 
 def infra_containers(variant, cid):
     """The containers a cell of this variant provisions, as its infra class names them."""
-    s = _shared.definition().variant(variant)
+    s = fae.experiment.exp().definition.variant(variant)
     return [i for k, i in (s.INFRA.identities(cid) if s else []) if k == "container"]
 
 
@@ -237,7 +237,7 @@ def last_transitions():
     """
     last = {}
     try:
-        for line in _shared.workspace().transitions.read_text(errors="replace").splitlines():
+        for line in fae.experiment.exp().workspace.transitions.read_text(errors="replace").splitlines():
             f = line.split("\t")
             if len(f) < 3 or not f[2] or f[1] in LOOP_UNCHANGED_BY:
                 continue
@@ -253,7 +253,7 @@ def last_transitions():
 # --- the host-sleep book -------------------------------------------------------
 
 def _host_sleep_book():
-    return _shared.workspace().conduct / "host_sleep.json"
+    return fae.experiment.exp().workspace.conduct / "host_sleep.json"
 
 
 def _host_sleep_gaps():

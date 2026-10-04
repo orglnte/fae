@@ -9,6 +9,7 @@ import unittest.mock
 from pathlib import Path
 
 from _ctx import ROOT, at_workspace
+import fae.experiment
 
 _spec = _ilu.spec_from_file_location("aggregate", Path(ROOT) / "fae" / "experiment" / "scoring" / "aggregate.py")
 aggregate = _ilu.module_from_spec(_spec)
@@ -247,14 +248,12 @@ class TestTheSummaryCarriesTheExperimentsEntries(unittest.TestCase):
         self.assertEqual(seen["metrics"], ["green_rate"])
 
     def test_a_definition_without_the_hook_adds_nothing(self):
-        from fae import shared as _shared
         self.assertEqual(aggregate.experiment_summary([cell(True)], ("green_rate",)), {})
-        self.assertFalse(hasattr(_shared.definition().module, "report_summary"))
+        self.assertFalse(hasattr(fae.experiment.exp().definition.module, "report_summary"))
 
     def test_the_engine_names_no_arm_of_its_experiment(self):
         import re
-        from fae import shared as _shared
-        d = _shared.definition()
+        d = fae.experiment.exp().definition
         src = (Path(ROOT) / "fae" / "experiment" / "scoring" / "aggregate.py").read_text()
         for word in set(d.ids) | {f for c in d.variants.values() for f in c.FACTORS.values()}:
             self.assertIsNone(re.search(rf"\b{re.escape(word)}\b", src), word)

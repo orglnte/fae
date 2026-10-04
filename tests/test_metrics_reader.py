@@ -12,6 +12,7 @@ from unittest import mock
 
 from _ctx import runs, at_workspace, use_workspace
 
+import fae.experiment
 from fae.cell import metrics
 from fae.cell.cell import Cell
 
@@ -60,7 +61,7 @@ class TestTheReadersUseIt(unittest.TestCase):
             return [], [], {}
 
         definition = mock.Mock(taint_rules=rules)
-        with mock.patch.object(runs.shared, "definition", return_value=definition), \
+        with mock.patch.object(fae.experiment._experiment.Experiment, "definition", new_callable=mock.PropertyMock, return_value=definition), \
              at_workspace(ws.parent, ws.parent):
             runs.validate_ws(ws)
         self.assertEqual((seen["load_total"], seen["load_errors"]), (28114, 3))

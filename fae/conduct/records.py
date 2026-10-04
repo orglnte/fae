@@ -3,12 +3,12 @@ written to."""
 from __future__ import annotations
 
 import time
+import fae.experiment
 
-from fae import shared as _shared
 
 
 def reconcile_log():
-    return _shared.workspace().conduct / "reconcile.log"
+    return fae.experiment.exp().workspace.conduct / "reconcile.log"
 
 
 def rec_log(msg):

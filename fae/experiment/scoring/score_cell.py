@@ -16,6 +16,7 @@ import re
 import sys
 from pathlib import Path
 
+import fae.experiment
 from fae.experiment.scoring import surface_filter
 
 from fae import paths as _paths  # noqa: E402
@@ -68,8 +69,7 @@ def _factors(vid) -> dict:
         for p in (str(_paths.ROOT), str(_paths.ENGINE.parent)):
             if p not in sys.path:
                 sys.path.insert(0, p)
-        from fae import shared as _shared
-        cls = _shared.definition().variant(vid)
+        cls = fae.experiment.exp().definition.variant(vid)
     except (OSError, RuntimeError, ValueError, ImportError):
         return {}
     return dict(cls.FACTORS) if cls is not None else {}
@@ -277,8 +277,7 @@ def score_one(cell_id: str, cell=None) -> int:
     sweep pays interpreter and import startup once). The record is written
     through the cell (`cell`, else the current workspace's)."""
     if cell is None:
-        from fae import shared as _shared
-        cell = _shared.current().cell(cell_id)
+        cell = fae.experiment.exp().cell(cell_id)
     ws = cell.ws
     if not ws.is_dir():
         print(f"ERROR: no such cell '{cell_id}' at {ws}", file=sys.stderr)

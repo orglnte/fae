@@ -26,8 +26,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+import fae.experiment
 from fae import experiment as _experiment
-from fae import shared as _shared
 from fae import paths as _paths
 
 HOWTO = "docs/HOWTO.md"
@@ -50,8 +50,8 @@ def probe_variants(variants=None):
     printed one per line; the count refused."""
     from fae.cell import variants as _tr
     bad = 0
-    for vid in sorted(variants or _shared.definition().active):
-        cell = _tr._ShimCell(f"infra-probe-{vid}", "/nonexistent", _shared.current().root)
+    for vid in sorted(variants or fae.experiment.exp().definition.active):
+        cell = _tr._ShimCell(f"infra-probe-{vid}", "/nonexistent", fae.experiment.exp().root)
         cell.variant = vid
         infra = _tr.for_cell(cell)
         ok, note = True, ""
@@ -152,12 +152,12 @@ class Ctx:
 
     def definition(self):
         if self._definition is None:
-            self._definition = _shared.definition()
+            self._definition = fae.experiment.exp().definition
         return self._definition
 
     def forget(self):
         """Drop the loaded definition, so a retry sees the files as they are now."""
-        _experiment.unload()
+        fae.experiment._experiment.unload()
         self._definition = None
 
     def selected(self):
@@ -192,7 +192,7 @@ def _prerequisites(ctx):
         out.append(Finding(ok, "docker daemon " + ("answers" if ok else "unreachable"),
                            "start Docker, then `docker info` must succeed"))
     from fae import mutex as _mutex
-    local, fstype = _mutex.fs_is_local(_shared.workspace().path)
+    local, fstype = _mutex.fs_is_local(fae.experiment.exp().workspace.path)
     if local is False:
         out.append(Finding(True, f"WARNING: workspaces on {fstype}, not a local disk: ledger "
                                  f"appends from conduct and a cell can interleave"))
@@ -288,7 +288,7 @@ def _seeds(ctx):
     with tempfile.TemporaryDirectory(prefix="fae-check-") as tmp:
         # a workspace whose whole plane is the temp dir: the check's cells
         # take their locks there, never in the root's live plane
-        ws = _experiment.Workspace(ctx.root, tmp, plane=tmp)
+        ws = fae.experiment._experiment.Workspace(ctx.root, tmp, plane=tmp)
         for vid in ctx.selected():
             try:
                 authorable(vid)
@@ -344,7 +344,7 @@ def _invariants(ctx):
                        "not smoke, a cell started from this shell would name itself otherwise"))
     d = ctx.definition()
     hook = d.verbs.get("selftest")
-    problems = list(hook(_shared.workspace().path)) if hook else []
+    problems = list(hook(fae.experiment.exp().workspace.path)) if hook else []
     out += [Finding(False, f"the experiment's own check: {p}",
                     "what it names (the experiment's selftest hook)") for p in problems]
     if not problems:
@@ -353,13 +353,13 @@ def _invariants(ctx):
         where = cls.SOURCE.name if cls.SOURCE else vid
         out += [Finding(False, f"variant {vid}: {p}", f"fix {where}") for p in _files.problems(cls)]
     disagree = []
-    if _shared.workspace().path.is_dir():
-        for ws in sorted(_shared.workspace().path.iterdir()):
+    if fae.experiment.exp().workspace.path.is_dir():
+        for ws in sorted(fae.experiment.exp().workspace.path.iterdir()):
             if not ws.is_dir() or not _experiment.parse_cell_id(ws.name):
                 continue
             st = host.cell_state(ws)
             if st and st["state"] == "DONE" and st["why"] in ("green", "failed", "revoked"):
-                if _shared.current().cell(ws.name, workspaces=ws.parent).read_ledger()["verdict"] != st["why"]:
+                if fae.experiment.exp().cell(ws.name, workspaces=ws.parent).read_ledger()["verdict"] != st["why"]:
                     disagree.append(ws.name)
     out.append(Finding(not disagree, "every finished cell's ledger agrees with its state" if not disagree
                        else f"ledger and state disagree: {', '.join(disagree[:5])}",
@@ -383,7 +383,7 @@ def _trace(ctx):
     if tool is None:
         return [Finding(False, "no TLA+ trace checker",
                         "unset FAE_TLA_VERIFY to use fae/utils/tla_verify.py, or point it at a file")]
-    log = _shared.workspace().transitions
+    log = fae.experiment.exp().workspace.transitions
     if not (log.exists() and log.stat().st_size):
         return [Finding(True, "no transitions recorded yet: nothing to replay")]
     spec = sorted(TLA_DIR.glob("*.tla"))
@@ -405,7 +405,7 @@ def _trace(ctx):
 
 
 def _pipeline(ctx):
-    exp = _shared.current()
+    exp = fae.experiment.exp()
     try:
         exp.smoke(variants=",".join(v for v in exp.smoke_variants() if v in ctx.selected()))
         rc = 0

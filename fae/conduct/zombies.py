@@ -23,8 +23,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import fae.experiment
 from fae.cell.cell import Cell
-from fae import shared as _shared
 from fae.experiment import parse_cell_id
 from fae import host
 
@@ -40,7 +40,7 @@ def _workspace_entries():
     """The workspace root's entries; none when the root does not exist yet
     (a fresh checkout, a root no cell has run in)."""
     try:
-        return list(_shared.workspace().path.iterdir())
+        return list(fae.experiment.exp().workspace.path.iterdir())
     except OSError:
         return []
 
@@ -91,7 +91,7 @@ def _strays(live):
     from fae.cell import variants as _tr
     out = []
     for infra in {cls.INFRA for cls in _tr.registry().values()}:
-        for item in infra.stray(live, _shared.workspace().path):
+        for item in infra.stray(live, fae.experiment.exp().workspace.path):
             if item not in out:
                 out.append(item)
     return out
@@ -106,7 +106,7 @@ def _prefixes():
            ("container", _image.VERIFY_PREFIX), ("container", _image.TOOL_PREFIX),
            ("container", _image.RUN_PREFIX),
            ("network", _image.NET_PREFIX)]
-    classes = list(dict.fromkeys(c.INFRA for c in _tr.registry().values())) + [_shared.definition().verifier_class()]
+    classes = list(dict.fromkeys(c.INFRA for c in _tr.registry().values())) + [fae.experiment.exp().definition.verifier_class()]
     for cls in classes:
         for kind, pfxs in cls.PREFIXES.items():
             for pfx in ((pfxs,) if isinstance(pfxs, str) else pfxs):
@@ -148,7 +148,7 @@ def _docker_age_s(name):
 
 
 def _iter_age_s(cid):
-    mt = _shared.current().cell(cid).mtimes()["ledger"]
+    mt = fae.experiment.exp().cell(cid).mtimes()["ledger"]
     return host.awake_age(mt / 1e9) if mt is not None else None
 
 
@@ -191,10 +191,10 @@ def _leaked_lock_holders():
     """
     out = []
     for name in ("rig", "verify"):
-        if not Cell.shared_lock_held(_shared.workspace().locks, name) \
+        if not Cell.shared_lock_held(fae.experiment.exp().workspace.locks, name) \
                 or host.loop_parents() or _verify_holders_alive():
             continue
-        p = Cell.shared_lock(_shared.workspace().locks, name)
+        p = Cell.shared_lock(fae.experiment.exp().workspace.locks, name)
         for pid in _fd_holders(p):
             if _pid_alive(pid) and not _is_driver_pid(pid):
                 out.append((p.name, pid))
@@ -217,7 +217,7 @@ def find_zombies():
     live = host.loop_parents()
     zs = []
     for lock, pid in _leaked_lock_holders():
-        who = Cell.shared_lock_holder(_shared.workspace().locks, lock[:-len("-lock")])
+        who = Cell.shared_lock_holder(fae.experiment.exp().workspace.locks, lock[:-len("-lock")])
         zs.append(("lockholder", f"{pid}:{lock}", who or "?",
                    f"holds {lock} with no process entitled to it"))
     prefixes = _prefixes()
@@ -282,21 +282,21 @@ def find_zombies():
     for ws in _workspace_entries():
         if not ws.is_dir():
             continue
-        c = _shared.current().cell(ws.name, workspaces=ws.parent)
+        c = fae.experiment.exp().cell(ws.name, workspaces=ws.parent)
         if c.heartbeat() is not None and host.heartbeat(ws, c) is None:
             zs.append(("heartbeat", str(ws), ws.name, "corpse file"))
     # No stale-lock class: a lock is held by fd, so the kernel frees it when
     # its holder dies. What can outlive a holder is INFRA, and an arm
     # slot's last-holder sidecar is the cheapest place to notice it.
     present = None                      # infra that exists, read once
-    q = _shared.workspace().queues
+    q = fae.experiment.exp().workspace.queues
     for d in [s for lock in q.slot_pools() for s in q.slot_files(lock)]:
         owner = (q.slot_note(d) or ("",))[0]
         if not owner or owner in live or q.slot_held(d):
             continue
         if present is None:
             present = _containers_all() | set(host.sh(["kind", "get", "clusters"]).split())
-        named = [(k, i) for k, i in _shared.workspace().named_cell(owner).provisions() if i in present]
+        named = [(k, i) for k, i in fae.experiment.exp().workspace.named_cell(owner).provisions() if i in present]
         if not named:
             # The sidecar outlived everything it named: nothing left to reap,
             # and keeping the note would re-report the same phantom every tick.
@@ -342,7 +342,7 @@ def reap_zombies(zs):
                     done.append(f"skipped heartbeat {ident} — beating again")
                     continue
                 ws = Path(ident)
-                if not _shared.current().cell(ws.name, workspaces=ws.parent).clear_heartbeat():
+                if not fae.experiment.exp().cell(ws.name, workspaces=ws.parent).clear_heartbeat():
                     done.append(f"skipped heartbeat {ident} — its cell is held")
                     continue
             elif kind == "process":
@@ -375,14 +375,14 @@ def reap_sweep():
     concurrent docker and kind sweeps racing on the same targets are host
     contention of their own."""
     cooldown = int(os.environ.get("ZOMBIE_REAP_COOLDOWN_S", 120))
-    stamp = _shared.workspace().conduct / ".zombie-reap.done"
-    lock = _shared.workspace().conduct / ".zombie-reap.lock"
+    stamp = fae.experiment.exp().workspace.conduct / ".zombie-reap.done"
+    lock = fae.experiment.exp().workspace.conduct / ".zombie-reap.lock"
     try:
         if time.time() - stamp.stat().st_mtime < cooldown:
             return []
     except OSError:
         pass
-    _shared.workspace().conduct.mkdir(parents=True, exist_ok=True)
+    fae.experiment.exp().workspace.conduct.mkdir(parents=True, exist_ok=True)
     try:
         lock.mkdir()
     except FileExistsError:
@@ -410,13 +410,13 @@ def janitor_lines():
     NEVER deletes anything — deletion happens only after the operator reviews
     and explicitly confirms (SAFE DATA DELETION rule)."""
     out = []
-    for root in (_shared.workspace().path, _shared.current().smoke_workspaces):
+    for root in (fae.experiment.exp().workspace.path, fae.experiment.exp().smoke_workspaces):
         tbd = root / ".to_be_deleted"
         if not tbd.is_dir():
             continue
         for entry in sorted(p for p in tbd.iterdir() if p.is_dir()):
             age_h = (time.time() - entry.stat().st_mtime) / 3600
             if age_h > 24:
-                out.append(f"  janitor: {entry.relative_to(_shared.current().root)} is {age_h:.0f}h old "
+                out.append(f"  janitor: {entry.relative_to(fae.experiment.exp().root)} is {age_h:.0f}h old "
                            f"— review + confirm with operator before deleting")
     return out

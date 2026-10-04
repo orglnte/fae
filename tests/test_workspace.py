@@ -7,7 +7,8 @@ from pathlib import Path
 
 from _ctx import runs
 
-from fae.experiment import Experiment, Workspace
+import fae.experiment
+from fae.experiment._experiment import Experiment, Workspace
 
 
 class TestTheCells(unittest.TestCase):
@@ -53,13 +54,13 @@ class TestTheCells(unittest.TestCase):
 
 class TestTheExperiment(unittest.TestCase):
     def test_its_definition_is_the_one_this_process_runs(self):
-        self.assertIs(Experiment().definition, runs.shared.definition())
+        self.assertIs(Experiment().definition, runs.experiment.exp().definition)
 
     def test_the_drivers_experiment_is_on_the_drivers_workspace(self):
-        e = runs.shared.current()
-        self.assertEqual(e.workspace.path, runs.shared.workspace().path)
-        self.assertEqual(e.workspace.locks, runs.shared.workspace().locks)
-        self.assertEqual(e.workspace.transitions, runs.shared.workspace().transitions)
+        e = runs.experiment.exp()
+        self.assertEqual(e.workspace.path, runs.experiment.exp().workspace.path)
+        self.assertEqual(e.workspace.locks, runs.experiment.exp().workspace.locks)
+        self.assertEqual(e.workspace.transitions, runs.experiment.exp().workspace.transitions)
 
 
 if __name__ == "__main__":

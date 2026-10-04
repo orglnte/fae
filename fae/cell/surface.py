@@ -18,6 +18,7 @@ import os
 import shutil
 import stat
 from pathlib import Path
+import fae.experiment
 
 MANIFEST = ".skeleton_manifest"
 # Written by the rig into artifacts/ (.git, the root .gitignore) or left by
@@ -31,8 +32,7 @@ def authorable(vid):
     its [authoring] surface. A variant that is not one of the experiment's,
     or one that declares no surface, raises: a default would let one
     experiment's layout decide what another's agents may write."""
-    from fae import shared as _shared
-    s = _shared.definition().variant(vid)
+    s = fae.experiment.exp().definition.variant(vid)
     if s is None:
         raise RuntimeError(f"no variant {vid!r}: it has no authorable surface")
     if s.AUTHORING_SURFACE is None:

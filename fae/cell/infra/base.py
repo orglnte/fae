@@ -18,6 +18,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import fae.experiment
 from fae import paths as _paths
 
 
@@ -249,9 +250,8 @@ class Infra:
 
     def image(self):
         """The image this cell is verified in, built when missing."""
-        from fae import shared as _shared
         from .. import image as _image
-        return _image.for_variant(self.variant, _shared.definition(), self.conf, self.log)
+        return _image.for_variant(self.variant, fae.experiment.exp().definition, self.conf, self.log)
 
     def network(self):
         """The cell's docker network, the engine's: every container of the

@@ -16,10 +16,9 @@ import time
 import ujson as json
 from datetime import datetime, timezone
 
+import fae.experiment
 from fae.cell.cell import ATTEMPT_BUDGET, Cell
 from fae.cell.fsm import WAIT_PHASES
-from fae import experiment as _experiment
-from fae import shared as _shared
 from fae.cell import faults
 from fae import host
 from fae.conduct import Conduct
@@ -77,10 +76,10 @@ def _pending_kind(cid, live_loops):
       running      its cell is live — admission skips it
       done         already terminal: admission retires the spec
     """
-    ws = _shared.workspace().path / cid
+    ws = fae.experiment.exp().workspace.path / cid
     if not ws.is_dir():
         return "fresh"
-    c = _shared.current().cell(cid)
+    c = fae.experiment.exp().cell(cid)
     if c.flagged:
         return "flagged"
     if c.pause_reason:
@@ -103,7 +102,7 @@ def queued_summary():
     and `prepared` are work nobody has started; the rest are queued for a
     reason the operator can act on.
     """
-    qs = _shared.workspace().queues
+    qs = fae.experiment.exp().workspace.queues
     rows, total = [], 0
     kinds = collections.Counter()
     live_loops = set(host.loop_parents())
@@ -186,7 +185,7 @@ def render(flat=False, running_only=False):
         # Two tables (operator request 2026-07-25): everything WORKING in one
         # table up top; everything else in one table ordered label > agent.
         # Derived from the definition, not a copy of its mapping.
-        variants = _shared.definition().variants
+        variants = fae.experiment.exp().definition.variants
         label_of = {vid: cls.LABEL for vid, cls in variants.items()}
 
         def vshort(agent, version):
@@ -205,7 +204,7 @@ def render(flat=False, running_only=False):
             # environment. loop_parents' own docstring says that text carries
             # agent credentials and must not be printed, and run_cell_pids
             # deliberately avoids -E for exactly that reason.)
-            hb = host.heartbeat(_shared.workspace().path / s["cid"])
+            hb = host.heartbeat(fae.experiment.exp().workspace.path / s["cid"])
             phase = hb.get("phase") if hb else ""
             if s["state"] == "RUNNING" or (s["state"] == "WAITING" and phase not in ("", None)):
                 running_raw.append((s["cid"], vshort(s["agent"], s["agent_model"]),
@@ -284,7 +283,7 @@ def render(flat=False, running_only=False):
             out.append(f"mem: {_mp['used_gb']:.1f}/{_mp['total_gb']:.1f}GB used "
                        f"({_mp['avail_pct']}% avail), pressure={_mp['label']}  ·  "
                        f"swap {_mp['swap_used_mb']:.0f}/{_mp['swap_total_mb']:.0f}MB")
-        out.append(_shared.workspace().queues.weekly_line())
+        out.append(fae.experiment.exp().workspace.queues.weekly_line())
     return "\n".join(out)
 
 
@@ -333,7 +332,7 @@ def monitor(args):
     limit/5xx fault, burning no budget, so a usage wall self-heals when the
     window rolls. What still needs a human is an AUTH wall, which never lifts
     on its own — that is what this reports."""
-    _shared.workspace().conduct.mkdir(parents=True, exist_ok=True)
+    fae.experiment.exp().workspace.conduct.mkdir(parents=True, exist_ok=True)
     while True:
         try:
             states, _, _ = host.all_states()
@@ -374,7 +373,7 @@ def monitor(args):
 def queue_list(args):
     """The work list per agent lane: pending (in admission order, parked
     lanes marked), running, and with --done the terminal specs."""
-    qs = _shared.workspace().queues
+    qs = fae.experiment.exp().workspace.queues
     agents = set(args.agents or [])
     pending = [(a, p, parked) for a, p, parked in qs.pending_specs()
                if not agents or a in agents]
@@ -405,7 +404,7 @@ def results_validate(args, quiet=False):
     verdicts. `quiet` prints a one-line summary instead of the per-cell
     table; the TAINTED count always prints, since each needs an operator
     decision and nothing is auto-requeued."""
-    _print_validation(_shared.current().validate(getattr(args, "selector", None) or "all"),
+    _print_validation(fae.experiment.exp().validate(getattr(args, "selector", None) or "all"),
                       quiet)
 
 
@@ -476,7 +475,7 @@ def results_score(args):
             sys.stdout.write("\r" + " " * 100 + "\r")
         print(f"  ERROR scoring {cid}: {line}")
 
-    n_ok, errors = _shared.current().score(selector, on_validated=validated, on_cell=bar,
+    n_ok, errors = fae.experiment.exp().score(selector, on_validated=validated, on_cell=bar,
                                                on_failed=failed)
     if bar_on:
         bar(seen["n"], seen["n"], "done")
@@ -491,10 +490,10 @@ def results_score(args):
 
 def results_aggregate(args):
     """The scoreboard from the cells' score.json (fae/experiment/scoring/aggregate.py)."""
-    _shared.current().aggregate(
+    fae.experiment.exp().aggregate(
         variant=getattr(args, "variant", None), where=getattr(args, "where", None) or (),
         impl=getattr(args, "impl", None), allow_stale=getattr(args, "allow_stale", False),
-        **{s: getattr(args, s, False) for s in _experiment.Experiment.AGGREGATE_SWITCHES})
+        **{s: getattr(args, s, False) for s in fae.experiment._experiment.Experiment.AGGREGATE_SWITCHES})
 
 
 # --- the run report ---------------------------------------------------------

@@ -22,9 +22,9 @@ import ujson as json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import fae.experiment
 from fae.cell.cell import Cell
 from fae import experiment as _experiment
-from fae import shared as _shared
 from fae import mutex
 from fae.queues import hhmm
 from fae import host
@@ -42,8 +42,8 @@ CONDUCT_LIFTED = ("arm-stuck", "verify-wedged", "silent-hang", "phase-stalled-")
 
 
 def _default_ws():
-    d = _shared.current().root / "workspaces.nosync"
-    return d if d.is_dir() else _shared.current().root / "workspaces"
+    d = fae.experiment.exp().root / "workspaces.nosync"
+    return d if d.is_dir() else fae.experiment.exp().root / "workspaces"
 
 
 def _ws_is_default():
@@ -63,8 +63,8 @@ def _spec_of(st):
 
 def _known_agents():
     """Every agent with a lane (live or parked) or a workspace."""
-    known = {_shared.workspace().queues.lane_agent(d) for d in _shared.workspace().queues.lane_dirs(include_parked=True)}
-    known |= {d.name.split("_", 1)[0] for d in _shared.workspace().path.iterdir()
+    known = {fae.experiment.exp().workspace.queues.lane_agent(d) for d in fae.experiment.exp().workspace.queues.lane_dirs(include_parked=True)}
+    known |= {d.name.split("_", 1)[0] for d in fae.experiment.exp().workspace.path.iterdir()
               if d.is_dir() and _experiment.parse_cell_id(d.name)}
     return known
 
@@ -108,8 +108,8 @@ class Conduct:
     """The scheduler and supervisor of one experiment root."""
 
     def __init__(self):
-        self.pidfile = _shared.workspace().conduct / "conduct.pid"
-        self.respawn_book = _shared.workspace().conduct / "reconcile.respawns.json"
+        self.pidfile = fae.experiment.exp().workspace.conduct / "conduct.pid"
+        self.respawn_book = fae.experiment.exp().workspace.conduct / "reconcile.respawns.json"
         self.alerts = supervise.Alerts()
 
     def pid(self):
@@ -158,12 +158,12 @@ class Conduct:
         if pid and pid != os.getpid():
             print(f"  the run (pid {pid}) acts on it at its next pass", flush=True)
             return
-        qs = _shared.workspace().queues
+        qs = fae.experiment.exp().workspace.queues
         for p, r in qs.requests():
             cid, verb = r.get("cid", ""), r.get("verb")
             if verb == "pause":
                 reason = r.get("reason", "manual")
-                if _shared.current().cell(cid).request_pause(reason, r.get("who", "operator")):
+                if fae.experiment.exp().cell(cid).request_pause(reason, r.get("who", "operator")):
                     print(f"  {cid}: paused [{reason}] — its loop stops at its next safe "
                           f"point; workspace preserved")
                 else:
@@ -175,10 +175,10 @@ class Conduct:
     def stop_cell(self, cid, cancel=False):
         """The run's half of `cell stop`: the cell's queued specs out of the
         backlog (backed up), then the cell halted (Cell.stop)."""
-        n = _shared.workspace().queues.shelve_cell(cid, "cancelled" if cancel else "stopped")
+        n = fae.experiment.exp().workspace.queues.shelve_cell(cid, "cancelled" if cancel else "stopped")
         if n:
             print(f"  {n} spec(s) out of the backlog (restore from .queues/backups/)")
-        outcome = _shared.workspace().named_cell(cid).stop(cancel=cancel)
+        outcome = fae.experiment.exp().workspace.named_cell(cid).stop(cancel=cancel)
         if outcome != "absent":
             print(f"  {cid}: loop {outcome}")
         if cancel:
@@ -194,8 +194,8 @@ class Conduct:
         """How many times this cell was repaired; `bump` counts one more."""
         if not bump:
             return self._respawn_book().get(cid, 0)
-        _shared.workspace().conduct.mkdir(parents=True, exist_ok=True)
-        with mutex.fs_lock(_shared.workspace().conduct / "respawn-book.lock"):
+        fae.experiment.exp().workspace.conduct.mkdir(parents=True, exist_ok=True)
+        with mutex.fs_lock(fae.experiment.exp().workspace.conduct / "respawn-book.lock"):
             book = self._respawn_book()
             book[cid] = book.get(cid, 0) + 1
             self.respawn_book.write_text(json.dumps(book))
@@ -203,8 +203,8 @@ class Conduct:
 
     def reset_respawn_budgets(self, cids):
         """Forget each cell's repair count; returns how many had one."""
-        _shared.workspace().conduct.mkdir(parents=True, exist_ok=True)
-        with mutex.fs_lock(_shared.workspace().conduct / "respawn-book.lock"):
+        fae.experiment.exp().workspace.conduct.mkdir(parents=True, exist_ok=True)
+        with mutex.fs_lock(fae.experiment.exp().workspace.conduct / "respawn-book.lock"):
             book = self._respawn_book()
             n = sum(book.pop(c, None) is not None for c in cids)
             if n:
@@ -221,7 +221,7 @@ class Conduct:
     def is_claimed(cid):
         """Is this cell's spec claimed — is the run already responsible for
         restarting it?"""
-        return _shared.workspace().queues.is_claimed(cid.split("_", 1)[0], cid)
+        return fae.experiment.exp().workspace.queues.is_claimed(cid.split("_", 1)[0], cid)
 
     def refusal_while_up(self, verb, ignore):
         """A manual start runs without slots; while the run admits cells with
@@ -243,7 +243,7 @@ class Conduct:
             # a dry run must not write: the flag disables supervision of the
             # cell until a human resumes it
             if not dry:
-                _shared.current().cell(cid).flag()
+                fae.experiment.exp().cell(cid).flag()
             records.rec_log(f"{cid} FLAGGED: {n} respawns reached — human needed, not "
                             f"touching again" + (" [dry-run: flag NOT written]" if dry else ""))
             return False
@@ -258,7 +258,7 @@ class Conduct:
             records.rec_log(f"{cid} {refusal}")
             print(refusal)
             return False
-        cell = _shared.current().cell(cid, st["task"], st["variant"], st["rep"], agent=st["agent"])
+        cell = fae.experiment.exp().cell(cid, st["task"], st["variant"], st["rep"], agent=st["agent"])
         if not cell.ready_image():
             records.rec_log(f"{cid} respawn FAILED: its agent image could not be built")
             return False
@@ -278,7 +278,7 @@ class Conduct:
         (or running) the loop — what supervision would do, what is zombie, what
         admission would do next. Mutates nothing: supervision runs dry, zombies
         are listed not reaped, queue lines are read but never popped."""
-        qs = _shared.workspace().queues
+        qs = fae.experiment.exp().workspace.queues
         print("— SUPERVISION (dry run) " + "—" * 36)
         supervise.supervise_pass(self.alerts, dry=True)
         zs = zombies.find_zombies()
@@ -310,16 +310,16 @@ class Conduct:
                 skipped = 0
                 for p in paths:
                     cid = qs.spec_cid(p)
-                    ws = _shared.workspace().path / cid
+                    ws = fae.experiment.exp().workspace.path / cid
                     if ws.is_dir():
-                        if _shared.current().cell(cid).flagged:
+                        if fae.experiment.exp().cell(cid).flagged:
                             skipped += 1
                             continue
                         st = host.cell_state(ws, {}, set())
                         if st and st["state"] == "DONE":
                             skipped += 1
                             continue
-                    if _shared.current().cell(cid).pause_reason or live.get(cid):
+                    if fae.experiment.exp().cell(cid).pause_reason or live.get(cid):
                         skipped += 1
                         continue
                     note = f"next: {cid} — would admit"
@@ -372,18 +372,18 @@ class Conduct:
         convergence, not respawns: a crashed cell's spec is still claimed in
         running/, and the next pass restarts it. One controller, one spawner.
         """
-        qs = _shared.workspace().queues
+        qs = fae.experiment.exp().workspace.queues
         n = args.limit
         if not _ws_is_default():
             # The backlog lives in the GLOBAL .queues: a scheduler running against
             # an alternative root would drain the scored queue into it. The test
             # root is spawn-by-hand only.
-            print(f"the run refuses: WORKSPACES_DIR={_shared.workspace().path} is not the scored root "
+            print(f"the run refuses: WORKSPACES_DIR={fae.experiment.exp().workspace.path} is not the scored root "
                   f"({_default_ws()}); the backlog is global and would be drained "
                   f"into the wrong tree. Spawn validation cells by hand.",
                   file=sys.stderr)
             return 2
-        _shared.workspace().conduct.mkdir(parents=True, exist_ok=True)
+        fae.experiment.exp().workspace.conduct.mkdir(parents=True, exist_ok=True)
         pidfile = self.pidfile
         if pidfile.exists():
             try:
@@ -398,7 +398,7 @@ class Conduct:
         pidfile.write_text(f"{os.getpid()} cap={n}")
         # Tee the narration to tmp/conduct-<PID>.log: if this instance dies from
         # outside, the per-pid file records what it did and when output stopped.
-        _logdir = Path(os.environ.get("CONDUCT_LOG_DIR", _shared.current().root / "tmp"))
+        _logdir = Path(os.environ.get("CONDUCT_LOG_DIR", fae.experiment.exp().root / "tmp"))
         _logdir.mkdir(parents=True, exist_ok=True)
         _logf = (_logdir / f"conduct-{os.getpid()}.log").open("a")
 
@@ -492,7 +492,7 @@ class Conduct:
                             extra = ""
                             if st == "DONE·green":
                                 try:
-                                    L = _shared.current().cell(cid).read_ledger()
+                                    L = fae.experiment.exp().cell(cid).read_ledger()
                                     extra = (f" (attempt {L.get('green_at', '?')}"
                                              f"/{L.get('att', '?')}, "
                                              f"gate {L.get('gate', 0)}/{L.get('gate_n', 6)})")
@@ -505,7 +505,7 @@ class Conduct:
                         elif st.startswith("PAUSED"):
                             # only the driver's own stand-downs: an operator pause
                             # flips whole lanes at once and already narrates itself
-                            r = _shared.current().cell(cid).pause_request()
+                            r = fae.experiment.exp().cell(cid).pause_request()
                             if r and r.reason and r.who == "driver":
                                 print(f"  [{hhmm()}] STOOD-DOWN {cid} ({st}) — "
                                       f"{r.detail}", flush=True)
@@ -535,14 +535,14 @@ class Conduct:
                     if cu and cu <= now_t:
                         qs.clear_cooldown(m)
                         lifted = 0
-                        for c2 in _shared.workspace().select(m):
-                            if _shared.current().cell(c2).pause_reason == "limit-wall":
-                                _shared.current().cell(c2).unpause(); lifted += 1
+                        for c2 in fae.experiment.exp().workspace.select(m):
+                            if fae.experiment.exp().cell(c2).pause_reason == "limit-wall":
+                                fae.experiment.exp().cell(c2).unpause(); lifted += 1
                         print(f"  [{hhmm()}] lane {m}: limit cooldown expired — "
                               f"{lifted} lock(s) lifted, retrying", flush=True)
                 self._lift_standdowns(agents, now_t)
                 qs.weekly_budget_apply(qs.weekly_cap_observe(
-                    Cell.all_agent_logs(_shared.workspace().path), now=now_t), now_t)
+                    Cell.all_agent_logs(fae.experiment.exp().workspace.path), now=now_t), now_t)
                 agents = [qs.lane_agent(d) for d in qs.lane_dirs()]   # a hold changes the lanes
                 pending = {m: len(qs.lane_specs(m)) for m in agents}
                 order = [m for m in agents if pending.get(m) and m not in frozen
@@ -651,7 +651,7 @@ class Conduct:
 
         Cells report PAUSED·drain. Same per-cell locks as `cell pause`, same
         cooperative exit — no separate mechanism and no separate state."""
-        qs = _shared.workspace().queues
+        qs = fae.experiment.exp().workspace.queues
         scope = list(args.scope)
         blanket = _experiment.is_blanket(scope)
         agents = [] if blanket else scope
@@ -666,14 +666,14 @@ class Conduct:
                 sys.exit(f"unknown agent(s): {', '.join(bad)} — experiment pause "
                          f"takes AGENT names or `all` (lanes present: "
                          f"{', '.join(sorted(known)) or 'none'})")
-        cids = _shared.workspace().select(*(agents or ["all"]))
+        cids = fae.experiment.exp().workspace.select(*(agents or ["all"]))
         if args.dry_run:
             parents = {c: p for c, p in host.loop_parents().items() if p > 1}
             if agents:
                 parents = {c: p for c, p in parents.items()
                            if c.split("_", 1)[0] in set(agents)}
             for cid in sorted(parents):
-                st = host.cell_state(_shared.workspace().path / cid, host.loop_pids(), host.containers())
+                st = host.cell_state(fae.experiment.exp().workspace.path / cid, host.loop_pids(), host.containers())
                 print(f"would pause {cid} ({st['state']}·{st['why']})" if st
                       else f"would pause {cid}")
             if agents:
@@ -686,7 +686,7 @@ class Conduct:
             else:
                 if self.pidfile.exists():
                     print("would stop conduct (TERM)")
-                ws = _shared.workspace()
+                ws = fae.experiment.exp().workspace
                 queued = sorted(set(ws.queued_cells("all")) - set(ws.cells()))
                 if queued:
                     print(f"would leave {len(queued)} queued spec(s) in place — "
@@ -743,7 +743,7 @@ class Conduct:
             pids, boxes = host.loop_pids(), host.containers()
             lbl = []
             for c in sorted(parents):
-                st = host.cell_state(_shared.workspace().path / c, pids, boxes)
+                st = host.cell_state(fae.experiment.exp().workspace.path / c, pids, boxes)
                 lbl.append(f"{c}[{st['why'] or st['state'] if st else '?'}]")
             print(f"waiting: {len(parents)} loop(s) still up: {', '.join(lbl)}", flush=True)
             time.sleep(args.interval)
@@ -773,7 +773,7 @@ class Conduct:
         pauses and cancelled cells are skipped, exactly the old `resume all`
         guard (the 2026-07-24 resurrection incident). Naming agents lifts
         roster/manual for those agents."""
-        qs = _shared.workspace().queues
+        qs = fae.experiment.exp().workspace.queues
         scope = list(args.scope)
         blanket = _experiment.is_blanket(scope)
         if not blanket:
@@ -798,12 +798,12 @@ class Conduct:
                                                   # calls made resume-all crawl
         requeued, lifted = 0, 0
         budget_resets = []
-        for cid in _shared.workspace().select(*(["all"] if blanket else scope)):
-            ws = _shared.workspace().path / cid
+        for cid in fae.experiment.exp().workspace.select(*(["all"] if blanket else scope)):
+            ws = fae.experiment.exp().workspace.path / cid
             st = host.cell_state(ws, pids, boxes)
             if st is None:
                 continue
-            reason = _shared.current().cell(cid).pause_reason
+            reason = fae.experiment.exp().cell(cid).pause_reason
             if reason == "killed":
                 continue      # cancel is terminal; only `cell resume CID` names it back
             if reason == "contract":
@@ -812,8 +812,8 @@ class Conduct:
                 continue      # standing operator decisions survive a blanket resume
             acted = []
             if reason:
-                _shared.current().cell(cid).unpause(); acted.append("pause lifted"); lifted += 1
-            if _shared.current().cell(cid).unflag():
+                fae.experiment.exp().cell(cid).unpause(); acted.append("pause lifted"); lifted += 1
+            if fae.experiment.exp().cell(cid).unflag():
                 acted.append("flag cleared")
             # the flag means 'a human must look'; a bulk resume IS that human —
             # budget resets are collected here and written under ONE lock below
@@ -848,7 +848,7 @@ class Conduct:
         RUNNING, and the backlog is not run state. RESUMABLE: cells read
         PAUSED·stopped and come back via experiment resume. The terminal verdict
         lives elsewhere (`cell stop --cancel`). Confirms before acting."""
-        qs = _shared.workspace().queues
+        qs = fae.experiment.exp().workspace.queues
         scope = list(args.scope)
         blanket = _experiment.is_blanket(scope)
         agents = None if blanket else scope
@@ -872,7 +872,7 @@ class Conduct:
         # supervision sweep requeues them into the operator stop within minutes —
         # the same gap stop_cells closes, forgotten here (audit finding 4).
         # Existing locks keep their reasons (request_pause never overwrites).
-        self.request_pause([c for c in _shared.workspace().select("all") if _in_scope(c)], "stopped")
+        self.request_pause([c for c in fae.experiment.exp().workspace.select("all") if _in_scope(c)], "stopped")
         # Scoped stops leave conduct running: the lane's cells stop and the other
         # lanes keep being served.
         if blanket and self.stop_conductor():
@@ -882,9 +882,9 @@ class Conduct:
         # anonymous volume and the cell's kind cluster behind whenever the EXIT
         # trap did not complete, and the arm slot with them.
         for cid in loops:
-            _shared.workspace().named_cell(cid).take_down("stopped", log=records.rec_log)
-        _held = sorted(c for c in _shared.workspace().select("all")
-                       if _in_scope(c) and _shared.current().cell(c).pause_reason)
+            fae.experiment.exp().workspace.named_cell(cid).take_down("stopped", log=records.rec_log)
+        _held = sorted(c for c in fae.experiment.exp().workspace.select("all")
+                       if _in_scope(c) and fae.experiment.exp().cell(c).pause_reason)
         if _held:
             # pause locks are operator decisions, not run state: stopping the fleet
             # must not silently un-pause a roster somebody parked on purpose
@@ -899,7 +899,7 @@ class Conduct:
     @staticmethod
     def request_pause(cids, reason, who="operator"):
         """Pause each cell (Cell.request_pause); the cids it asked."""
-        return [cid for cid in cids if _shared.current().cell(cid).request_pause(reason, who)]
+        return [cid for cid in cids if fae.experiment.exp().cell(cid).request_pause(reason, who)]
 
     def stop_conductor(self):
         """TERM a live conduct and clear its pidfile. Returns True if one was
@@ -938,10 +938,10 @@ class Conduct:
         until it exists. Docker itself and the arm tools are NOT installed: that
         is a machine-level change, and it is reported instead.
         """
-        ok, why = mutex.fs_enforces_flock(_shared.workspace().locks)
+        ok, why = mutex.fs_enforces_flock(fae.experiment.exp().workspace.locks)
         if not ok:
             print(f"run: STOP — filesystem locking is not enforced on\n"
-                  f"  {_shared.workspace().locks}\n"
+                  f"  {fae.experiment.exp().workspace.locks}\n"
                   f"  detected: {why}\n"
                   f"  Every arm cap, work slot and verify lock in this rig is a "
                   f"flock(2) on a file in that directory. Without enforcement each "
@@ -950,22 +950,22 @@ class Conduct:
                   f"  Fix: put workspaces.nosync on a local disk. A network mount, "
                   f"a synced folder, or some virtiofs/9p shares are the usual "
                   f"causes.\n"
-                  f"  Probe it yourself: python3 fae/mutex.py fscheck {_shared.workspace().locks}",
+                  f"  Probe it yourself: python3 fae/mutex.py fscheck {fae.experiment.exp().workspace.locks}",
                   flush=True)
             return False
         if subprocess.run(["docker", "info"], capture_output=True).returncode != 0:
             print("run: STOP — the docker daemon is not reachable. Start "
                   "Docker, then run `experiment run` again.", flush=True)
             return False
-        local, fstype = mutex.fs_is_local(_shared.workspace().path)
+        local, fstype = mutex.fs_is_local(fae.experiment.exp().workspace.path)
         if local is False:
-            print(f"run: WARNING — {_shared.workspace().path} is on {fstype}, not a local disk. Cells and "
+            print(f"run: WARNING — {fae.experiment.exp().workspace.path} is on {fstype}, not a local disk. Cells and "
                   f"conduct append to the same ledgers; appends interleave safely only on a "
                   f"local disk.", flush=True)
         # the agent image every spawn uses: the base (built when missing, its
         # clients current) and the experiment's layer over it
         from fae.cell.agent_image import AgentImage
-        if not AgentImage(_shared.current().root, _shared.definition()).ready(
+        if not AgentImage(fae.experiment.exp().root, fae.experiment.exp().definition).ready(
                 log=lambda t: print(f"run: {t}", flush=True)):
             print("run: STOP — the agent image could not be built. "
                   "Every spawn would die at preflight.", flush=True)
@@ -1045,15 +1045,15 @@ class Conduct:
         in .conduct/cell.<cid>.err, then confirm it did not die on the spot: a
         refusal (sealed, lock held, no credentials, an infra fault) is
         immediate, and is reported rather than taken for a start."""
-        _shared.workspace().conduct.mkdir(parents=True, exist_ok=True)
+        fae.experiment.exp().workspace.conduct.mkdir(parents=True, exist_ok=True)
         # Opened "w": one file per cid, never unlinked, so a crash hours later
         # still has somewhere to land.
-        errf = _shared.workspace().conduct / f"cell.{cid}.err"
+        errf = fae.experiment.exp().workspace.conduct / f"cell.{cid}.err"
         with errf.open("w") as e:
             e.write(f"=== {datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ} "
                     f"{what} {' '.join(str(a) for a in argv)}\n")
             e.flush()
-            p = subprocess.Popen(argv, cwd=_shared.current().root, env=env, stdout=subprocess.DEVNULL,
+            p = subprocess.Popen(argv, cwd=fae.experiment.exp().root, env=env, stdout=subprocess.DEVNULL,
                                  stderr=e, start_new_session=True, pass_fds=tuple(pass_fds))
         time.sleep(self.SPAWN_PROBE_S)
         if p.poll() is None:
@@ -1069,7 +1069,7 @@ class Conduct:
 
     @staticmethod
     def _cell(cid, spec, agent):
-        return _shared.current().cell(cid, spec.get("task", "T1"), spec["variant"], spec["rep"], agent=agent)
+        return fae.experiment.exp().cell(cid, spec.get("task", "T1"), spec["variant"], spec["rep"], agent=agent)
 
     def _next_admissible(self, agent, boxes):
         """The lane's first spec that may start now, with the ones it skipped
@@ -1077,21 +1077,21 @@ class Conduct:
 
         Nothing is moved while deciding — a spec only leaves the queue when it is
         claimed, so an interrupted decision costs nothing."""
-        qs = _shared.workspace().queues
+        qs = fae.experiment.exp().workspace.queues
         for p in qs.lane_specs(agent):
             cid = qs.spec_cid(p)
-            ws = _shared.workspace().path / cid
+            ws = fae.experiment.exp().workspace.path / cid
             if ws.is_dir():
                 # A flagged cell is quarantined from admission too: repair stops
                 # bringing it back, and a pending spec would otherwise respawn it
                 # right past the flag. The operator's resume clears the flag.
-                if _shared.current().cell(cid).flagged:
+                if fae.experiment.exp().cell(cid).flagged:
                     continue
                 st = host.cell_state(ws, {}, boxes)
                 if st and st["state"] == "DONE":
                     qs.finish(agent, p)
                     continue
-            if _shared.current().cell(cid).pause_reason or host.loop_parents().get(cid):
+            if fae.experiment.exp().cell(cid).pause_reason or host.loop_parents().get(cid):
                 continue
             return p, cid
         return None, "none-admissible"
@@ -1106,10 +1106,10 @@ class Conduct:
         for cid, _pid in host.loop_parents().items():
             if self.is_claimed(cid):
                 continue
-            st = host.cell_state(_shared.workspace().path / cid, {}, set())
+            st = host.cell_state(fae.experiment.exp().workspace.path / cid, {}, set())
             if not st:
                 continue
-            _shared.workspace().queues.adopt(cid.split("_", 1)[0], cid, _spec_of(st))
+            fae.experiment.exp().workspace.queues.adopt(cid.split("_", 1)[0], cid, _spec_of(st))
             n += 1
         if n:
             print(f"run: adopted {n} live cell(s) started outside this run",
@@ -1117,8 +1117,8 @@ class Conduct:
 
     def _lift_standdowns(self, agents, now_t):
         for m in agents:
-            for cid in _shared.workspace().select(m):
-                c = _shared.current().cell(cid)
+            for cid in fae.experiment.exp().workspace.select(m):
+                c = fae.experiment.exp().cell(cid)
                 r = c.pause_request()
                 if not r or not r.reason:
                     continue
@@ -1131,12 +1131,12 @@ class Conduct:
                     continue
                 n = self.respawn_count(cid)
                 if n >= MAX_RESPAWNS:
-                    _shared.current().cell(cid).flag()
+                    fae.experiment.exp().cell(cid).flag()
                     print(f"  [{hhmm()}] FLAGGED  {cid}: {n} stand-downs "
                           f"({reason}) — human needed, spec held in the queue "
                           f"until you resume it", flush=True)
                     continue
-                _shared.current().cell(cid).unpause()
+                fae.experiment.exp().cell(cid).unpause()
                 self.respawn_count(cid, bump=True)
                 self.alerts.forget(cid)
                 print(f"  [{hhmm()}] lifted {cid}: {reason} stand-down "
@@ -1149,18 +1149,18 @@ class Conduct:
         This is the whole repair path — a claimed spec sits in running/ until it
         reaches a verdict, so a conduct that dies mid-attempt (or a cell killed by
         a hang sweep) is recovered by the next pass with no journal to replay."""
-        qs = _shared.workspace().queues
+        qs = fae.experiment.exp().workspace.queues
         live = host.loop_parents()
         boxes = host.containers()
         for p in qs.running_specs():
             agent, cid = p.parent.name, qs.spec_cid(p)
             if live.get(cid):
                 continue
-            st = host.cell_state(_shared.workspace().path / cid, {}, boxes)
+            st = host.cell_state(fae.experiment.exp().workspace.path / cid, {}, boxes)
             if st and st["state"] == "DONE":
                 qs.finish(agent, p)
                 continue
-            if _shared.current().cell(cid).pause_reason:
+            if fae.experiment.exp().cell(cid).pause_reason:
                 # operator (or a wall stand-down) owns this cell: hand the spec
                 # back so the lane can serve the rest of its backlog
                 qs.release(agent, p)
@@ -1170,7 +1170,7 @@ class Conduct:
                                               # only walls again
             n = self.respawn_count(cid)
             if n >= MAX_RESPAWNS:
-                _shared.current().cell(cid).flag()   # a cell with no workspace keeps no flag: the
+                fae.experiment.exp().cell(cid).flag()   # a cell with no workspace keeps no flag: the
                                      # spec going back to the queue is the record
                 qs.release(agent, p)
                 print(f"  [{hhmm()}] FLAGGED  {cid}: {n} repairs — human needed, "

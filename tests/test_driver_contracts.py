@@ -14,9 +14,9 @@ from pathlib import Path
 
 from _ctx import ROOT
 
+import fae.experiment
 from fae import cell
-from fae import shared as _shared  # noqa: E402
-SHAPES = _shared.definition().gate.arrangements
+SHAPES = fae.experiment.exp().definition.gate.arrangements
 
 T = cell.T
 CELL_SRC = (Path(ROOT) / "fae" / "cell" / "cell.py").read_text()

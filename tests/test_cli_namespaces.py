@@ -11,7 +11,8 @@ from unittest import mock
 
 from _ctx import ROOT
 
-from fae.experiment import Experiment
+import fae.experiment
+from fae.experiment._experiment import Experiment
 
 try:
     from typer.testing import CliRunner

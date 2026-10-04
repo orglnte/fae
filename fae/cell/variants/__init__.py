@@ -18,6 +18,7 @@ from pathlib import Path
 
 from ..infra.base import HookFailure, NoopInfra, liveness_declared  # noqa: F401
 from .base import HARNESS, ROOT, Variant  # noqa: F401
+import fae.experiment
 # --- registry + CLI -----------------------------------------------------------
 
 NOOP_ENV = "FAE_VARIANT_NOOP"
@@ -25,8 +26,7 @@ NOOP_ENV = "FAE_VARIANT_NOOP"
 
 def registry():
     """id -> class, from the experiment's variant files."""
-    from fae import shared as _shared
-    return _shared.definition().variants
+    return fae.experiment.exp().definition.variants
 
 
 def for_cell(cell):

@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from _ctx import runs
+import fae.experiment
 
 
 def _variant(vid, label=""):
@@ -26,7 +27,7 @@ class TestTheVariantLabels(unittest.TestCase):
              mock.patch.object(runs.zombies, "find_zombies", return_value=[]), \
              mock.patch.object(runs.render, "queued_summary", return_value=[]), \
              mock.patch.object(runs.queues_module.Queues, "weekly_line", return_value=""), \
-             mock.patch.object(runs.shared, "definition") as d:
+             mock.patch.object(fae.experiment._experiment.Experiment, "definition", new_callable=mock.PropertyMock) as d:
             d.return_value.variants = variants
             return runs.render.render()
 

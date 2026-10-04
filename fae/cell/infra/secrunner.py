@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..image import CONTAINER_USER, RUN_PREFIX
+import fae.experiment
 
 MEMORY = "2g"
 PIDS = 512
@@ -221,9 +222,8 @@ RUN_PIDS = 128
 
 def run_image_name(variant_cls):
     """The tag name of an image built from the variant's [verify.run] image_dir."""
-    from fae import shared as _shared
     from .. import image as _image
-    return _image.dir_tag_name(_shared.definition(), variant_cls.RUN["image_dir"])
+    return _image.dir_tag_name(fae.experiment.exp().definition, variant_cls.RUN["image_dir"])
 
 
 def run_image(variant_cls):

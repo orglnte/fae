@@ -52,6 +52,7 @@ from .verify import (RUN_OUT, Ctx, Verdict, _mutex_module as _load_mutex, run_ve
 
 _mutex = _load_mutex()
 
+import fae.experiment  # noqa: E402
 from fae import paths as _paths  # noqa: E402
 from fae import plane as _plane  # noqa: E402
 from fae.queues import Queues  # noqa: E402
@@ -1290,8 +1291,7 @@ class Cell:
     @property
     def gate_def(self):
         """The experiment's gate: the arrangements every attempt must pass."""
-        from fae import shared as _shared
-        return _shared.definition().gate
+        return fae.experiment.exp().definition.gate
 
     @property
     def gate_shapes(self):
@@ -1405,7 +1405,6 @@ class Cell:
             raise Sealed(f"{self.cid} is sealed; a verify that writes into the "
                          f"workspace would overwrite the recorded result. "
                          f"Pass out_dir=... to add evidence instead.")
-        from fae import shared as _shared
         out = Path(out_dir or self.ws)
         run_out = out / RUN_OUT
         run_out.mkdir(parents=True, exist_ok=True)
@@ -1413,7 +1412,7 @@ class Cell:
                   workspace=str(self.ws), artifacts=str(self.artifacts), out=str(run_out),
                   cid=self.cid, task=self.task, variant=self.variant,
                   arrangement=shape, expected_fp=self.expected_fp)
-        definition = _shared.definition()
+        definition = fae.experiment.exp().definition
         self._archive_interrupted(out)
         self._mark_inflight(out, shape)
         # an infra already dead voids fast, before a deploy and a load
@@ -1535,8 +1534,7 @@ class Cell:
     def _missing_outputs(self, run_out, v, started):
         """The experiment's REQUIRED_OUTPUTS a verify that ran did not write:
         absent from its own directory, or left there by an earlier verify."""
-        from fae import shared as _shared
-        cls = _shared.definition().verifier_class()
+        cls = fae.experiment.exp().definition.verifier_class()
         if v.stage in cls.NOT_RUN_STAGES:
             return []
         missing = []
@@ -1555,11 +1553,10 @@ class Cell:
         recorded (only the allowed kinds, under this cell's id), then copy the
         verifier's declared outputs from its own directory up into `out`,
         where every reader expects them. A symlink is never followed."""
-        from fae import shared as _shared
         for stamp, event, fields in take_events(run_out):
             if record_events:
                 ledger.append(self.ws, event, self.cid, *fields, stamp=stamp)
-        cls = _shared.definition().verifier_class()
+        cls = fae.experiment.exp().definition.verifier_class()
         for name in dict.fromkeys((*cls.FILES, *cls.FEEDBACK_LOGS, *cls.REQUIRED_OUTPUTS)):
             if name in self.HOST_OWNED or "/" in name:
                 continue
@@ -1616,8 +1613,7 @@ class Cell:
                       files=v.files)
 
     def _archive(self, out, m, end, verdict, files=()):
-        from fae import shared as _shared
-        cls = _shared.definition().verifier_class()
+        cls = fae.experiment.exp().definition.verifier_class()
         names = list(dict.fromkeys((*(files or cls.FILES), *cls.FEEDBACK_LOGS,
                                     *cls.REQUIRED_OUTPUTS, "metrics.json")))
         base = out / "arrangements"
@@ -1792,9 +1788,8 @@ class Cell:
         return _variants.registry().get(self.variant)
 
     def _agent_images(self):
-        from fae import shared as _shared
         from .agent_image import AgentImage
-        return AgentImage(self.root, _shared.definition(), self.conf)
+        return AgentImage(self.root, fae.experiment.exp().definition, self.conf)
 
     def agent_image(self):
         """The image this cell's agents run in: its variant's layer over the base."""
@@ -1817,12 +1812,11 @@ class Cell:
         """[(kind, ident)] what a run of this cell provisions, named as each
         provisioner names it: its variant's infra, then the engine's verify
         container and cell network, then the verifier's own."""
-        from fae import shared as _shared
         from . import image as _image
         cls = self.variant_cls
         out = list(cls.INFRA.identities(self.cid)) if cls is not None else []
         verify = [("container", _image.verify_container(self.cid)), ("network", _image.cell_network(self.cid))]
-        for pair in _shared.definition().verifier_class().identities(self.cid):
+        for pair in fae.experiment.exp().definition.verifier_class().identities(self.cid):
             if pair not in verify:
                 verify.append(pair)
         return out + verify
@@ -2274,8 +2268,7 @@ class Cell:
         shutil.rmtree(dest, ignore_errors=True)
         dest.mkdir()
         staged = []
-        from fae import shared as _shared
-        for name in _shared.definition().verifier_class().FEEDBACK_LOGS:
+        for name in fae.experiment.exp().definition.verifier_class().FEEDBACK_LOGS:
             src = src_root / name
             try:
                 if src.is_dir():

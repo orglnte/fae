@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from _ctx import runs
+import fae.experiment
 
 ENGINE = Path(runs.experiment.__file__).resolve().parent.parent
 
@@ -35,7 +36,7 @@ class TestNoDriverOnTheResultsPath(unittest.TestCase):
             self.assertEqual(bad, [], path.name)
 
     def test_the_experiment_results_methods_import_no_scheduler_or_cli(self):
-        E = runs.experiment.Experiment
+        E = runs.experiment._experiment.Experiment
         for name in ("validate_cell", "finished", "validate", "score", "aggregate",
                      "run_report", "_workspace_of"):
             src = inspect.getsource(getattr(E, name))
@@ -49,7 +50,7 @@ class TestNoDriverOnTheResultsPath(unittest.TestCase):
 class TestScoreScoresWhatValidateFound(unittest.TestCase):
 
     def _score(self, validated, rcs):
-        exp = runs.shared.current()
+        exp = runs.experiment.exp()
         ws = SimpleNamespace(cell=lambda cid: SimpleNamespace(cid=cid))
         calls = []
         from fae.experiment.scoring import score_cell
@@ -83,8 +84,8 @@ class TestFinished(unittest.TestCase):
     def _finished(self, state, why, has_ledger=True, cid="sonnet_high_beta_apidocs_T1_r1"):
         cell = mock.Mock(cid=cid, has_ledger=has_ledger)
         cell.status.return_value = {"state": state, "why": why}
-        ws = runs.shared.current().workspace
-        return runs.shared.current().finished(cell, ws)
+        ws = runs.experiment.exp().workspace
+        return runs.experiment.exp().finished(cell, ws)
 
     def test_outcomes_count(self):
         for why in ("green", "failed", "revoked"):
@@ -103,7 +104,7 @@ class TestValidationPrinting(unittest.TestCase):
         import contextlib
         import io
         buf = io.StringIO()
-        with mock.patch.object(runs.shared.current(), "validate", return_value=results), \
+        with mock.patch.object(runs.experiment.exp(), "validate", return_value=results), \
              contextlib.redirect_stdout(buf):
             runs.render.results_validate(SimpleNamespace(selector=None), quiet=quiet)
         return buf.getvalue()

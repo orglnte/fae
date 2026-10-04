@@ -10,6 +10,7 @@ from pathlib import Path
 
 from _ctx import ROOT
 
+import fae.experiment
 from fae.cell import config as C
 
 TOML = C._toml(str(ROOT))
@@ -20,8 +21,7 @@ class TestAgentCliSelection(unittest.TestCase):
     fae.toml only says where each one's credentials are."""
 
     def definition(self):
-        from fae import shared
-        return shared.definition()
+        return fae.experiment.exp().definition
 
     def test_each_agent_is_its_declared_cli_and_model(self):
         for key, cli in (("gemini", "agy"), ("dsv4f", "opencode"),

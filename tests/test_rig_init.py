@@ -10,9 +10,8 @@ from unittest import mock
 
 from _ctx import ROOT, runs
 
+import fae.experiment
 from fae.cell import config as _config
-from fae import experiment as _experiment
-from fae import shared as _shared
 
 try:
     import tomllib
@@ -22,7 +21,7 @@ except ModuleNotFoundError:
 
 class TestTheRenderedDefaults(unittest.TestCase):
     def setUp(self):
-        self.text = _config.render_default_toml(_shared.definition())
+        self.text = _config.render_default_toml(fae.experiment.exp().definition)
         self.doc = tomllib.loads(self.text)
 
     def test_every_engine_section_is_there_with_its_default(self):
@@ -49,7 +48,7 @@ class TestTheRenderedDefaults(unittest.TestCase):
 
 class TestTheRenderedExperimentDir(unittest.TestCase):
     def test_the_file_points_at_the_directory_it_was_written_for(self):
-        doc = tomllib.loads(_config.render_default_toml(_shared.definition(), "shout"))
+        doc = tomllib.loads(_config.render_default_toml(fae.experiment.exp().definition, "shout"))
         self.assertEqual(doc["paths"]["experiment_dir"], "shout")
 
 
@@ -59,19 +58,19 @@ class TestTheVerb(unittest.TestCase):
                 mock.patch.dict(os.environ):
             # a process runs one experiment: in the verb's own process nothing
             # is loaded before init, here the suite's definition stands in
-            _experiment.Experiment(Path(d)).init(experiment="calc")
+            fae.experiment._experiment.Experiment(Path(d)).init(experiment="calc")
             doc = tomllib.loads((Path(d) / _config.TOML).read_text())
             self.assertEqual(doc["paths"]["experiment_dir"], "calc")
             self.assertEqual(os.environ["EXPERIMENT_DIR"], "calc")
 
     def test_it_writes_once_and_refuses_to_overwrite(self):
         with tempfile.TemporaryDirectory() as d:
-            _experiment.Experiment(Path(d)).init()
+            fae.experiment._experiment.Experiment(Path(d)).init()
             target = Path(d) / _config.TOML
             self.assertTrue(target.is_file())
             target.write_text("# edited\n")
             with self.assertRaises(SystemExit):
-                _experiment.Experiment(Path(d)).init()
+                fae.experiment._experiment.Experiment(Path(d)).init()
             self.assertEqual(target.read_text(), "# edited\n")
 
     def test_the_cli_has_the_verb(self):
