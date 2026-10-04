@@ -7,7 +7,7 @@ agents the same task, the same verifier and the same attempt budget, changes
 only the surface they author against and what they are told about it, and
 records what happens.
 
-This document is the design as it stands. [`AGENTS.md`](AGENTS.md) states
+This document is the design as it stands. [`AGENTS.md`](../AGENTS.md) states
 the invariants the code must keep, [`RUNBOOK.md`](RUNBOOK.md) is the operator
 runbook, and [`HOWTO.md`](HOWTO.md) builds an experiment from nothing.
 
