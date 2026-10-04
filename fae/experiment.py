@@ -35,12 +35,14 @@ The definition's `__init__.py` declares, all optional:
                             experiment's own operator commands, run as
                             `cli.py experiment verb NAME [ARGS...]`; each
                             parses its own arguments
-    taint_rules          rules(ws, workspaces, metrics, it_text, v_text,
+    taint_rules          rules(cell, workspace, metrics, it_text, v_text,
                             rc_text, verdict) -> (taints, warns, fields):
                             what a rig fault looks like in this experiment's
-                            evidence (fae/driver/validate.py runs the engine's
-                            own rules beside it)
-    report_text(ws)      -> the verifier's per-attempt reports, concatenated,
+                            evidence, read through the Cell; `workspace` (a
+                            Workspace) holds its sibling cells
+                            (fae/driver/validate.py runs the engine's own
+                            rules beside it)
+    report_text(cell)    -> the verifier's per-attempt reports, concatenated,
                             for the taint rules ("" by default)
     POOLED_MODELS        {model id: scoreboard row label} for the results table
     report_summary(cells, metrics_of, delta, metrics) -> {key: value} the
@@ -186,9 +188,9 @@ class Definition:
     def taint_rules(self):
         return getattr(self.module, "taint_rules", None)
 
-    def report_text(self, ws):
+    def report_text(self, cell):
         fn = getattr(self.module, "report_text", None)
-        return fn(ws) if fn else ""
+        return fn(cell) if fn else ""
 
     @property
     def pooled_models(self):

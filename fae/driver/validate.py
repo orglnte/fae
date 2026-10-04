@@ -33,7 +33,7 @@ def _validate_cell(ws):
     records the rule set's verdict. Raises Busy while the cell is held."""
     taints, warns = [], []
     cell = _experiment.current().cell(Path(ws).name, workspaces=Path(ws).parent)
-    rc_text = _experiment.definition().report_text(ws)
+    rc_text = _experiment.definition().report_text(cell)
     v_text = cell.evidence_text("verify.log")
     it_text = cell.ledger_text()
     metrics = cell.read_metrics()
@@ -81,7 +81,7 @@ def _validate_cell(ws):
     # the experiment's rules, and the fields it records beside the verdict
     rules = _experiment.definition().taint_rules
     verdict = cell.read_ledger()["verdict"]
-    xt, xw, fields = rules(ws, _experiment.workspace().path, metrics, it_text, v_text, rc_text, verdict) \
+    xt, xw, fields = rules(cell, _experiment.workspace(), metrics, it_text, v_text, rc_text, verdict) \
         if rules else ([], [], {})
     taints += xt
     warns += xw

@@ -55,7 +55,7 @@ class TestTheReadersUseIt(unittest.TestCase):
         ws = _ws({"load_total": "28114", "load_errors": "3"})
         seen = {}
 
-        def rules(ws, root, m, *rest):
+        def rules(cell, workspace, m, *rest):
             seen.update(m)
             return [], [], {}
 
