@@ -776,19 +776,6 @@ def results_score(
                              sort_significant=sort_significant))
 
 
-@results_app.command("run-report")
-def results_run_report(
-    since: Optional[str] = typer.Option(None, "--since",
-                                        help="ISO 8601 or epoch seconds; default = the "
-                                             "current run's start (conduct.pid mtime)"),
-):
-    """What THIS run produced: completed cells by variant (green rate + mean
-    iterations-to-green) and the cells still working."""
-    since_ts = render.parse_since(since) if since is not None else conduct.Conduct().started_at()
-    done, live = fae.experiment.exp().run_report(since_ts)
-    print(render.run_report_text(done, live, since_ts))
-
-
 @results_app.command("validate")
 def results_validate(selector: Optional[str] = typer.Argument(None, help=SEL)):
     """Post-DONE trust check: VALID or TAINTED, with reasons."""

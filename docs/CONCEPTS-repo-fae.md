@@ -49,7 +49,6 @@ would not expect, and names that collide, are in
 | Validation | Whether a finished cell's verdict can be believed: VALID or TAINTED | taint, trust check | `experiment/scoring/validate.py`, `Experiment.validate_cell` | separating rig faults from data |
 | Score | One finished cell's record: attempts to green, authored surface, timings | score.json | `score_cell.py`, `Experiment.score` | the per-cell datum |
 | Scoreboard | The table over all scored cells, by variant and by factor | aggregate, results | `aggregate.py`, `Experiment.aggregate` | comparison |
-| Run report | What a workspace's cells produced since a moment | run-report | `run_report.py`, `Experiment.run_report` | progress |
 | **Readiness** | | | | |
 | Check | Whether this root's experiment is ready to run | — | `Experiment.check`, `check_exp.py` | catching faults before cells |
 | Smoke | Each variant's reference answer run through the whole pipeline with no agent | reference, `ref` | `Experiment.smoke` | the rig judges a known answer green |
@@ -60,7 +59,7 @@ would not expect, and names that collide, are in
 
 1. **Experiment.** Purpose: one place to act on what this root compares.
    State: the definition (loaded once per process) and a workspace.
-   Actions: prepare, check, smoke, validate, score, aggregate, run report.
+   Actions: prepare, check, smoke, validate, score, aggregate.
    Principle: the operator runs a verb on the experiment and it acts on its
    own workspace unless another is named.
 2. **Variant.** Purpose: make two compared conditions differ exactly where

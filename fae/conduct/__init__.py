@@ -132,13 +132,6 @@ class Conduct:
         except (OSError, ValueError):
             return "run: DOWN (stale pidfile)"
 
-    def started_at(self):
-        """Epoch of the current run's start (conduct.pid's mtime), or None."""
-        try:
-            return self.pidfile.stat().st_mtime
-        except OSError:
-            return None
-
     # --- the leftovers of dead cells, as the run finds them ------------------
 
     @staticmethod

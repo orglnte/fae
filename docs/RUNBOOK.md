@@ -51,7 +51,7 @@ python3 cli.py experiment smoke      # one reference cell per way of being judge
 python3 cli.py cell spawn|pause|resume|stop|tail|log|seal|reverify …   # ONE cell
 python3 cli.py experiment run|pause|resume|stop|diagnose|reconcile|queue-add …
 python3 cli.py experiment status                              # read-only table
-python3 cli.py results score|validate|aggregate|run-report …
+python3 cli.py results score|validate|aggregate …
 python3 cli.py experiment init|check|infra|smoke|prepare|verb …   # the experiment this root runs; verb: its own commands
 python3 cli.py rig trace-reset|tool …                    # the harness itself
 python3 cli.py rig tool <name> [args]                    # one instrument standalone: the engine's, a contrib block's, the experiment's
@@ -166,7 +166,7 @@ fae/experiment/     the experiment: Definition, Workspace, Experiment and
                      its actions; config.py the root's configuration;
                      check_exp.py its readiness check;
                      scoring/ its results (validate, score_cell, aggregate,
-                     run_report, surface_filter, SCHEMA.md)
+                     surface_filter, SCHEMA.md)
 fae/cell/           the Python cell driver: attempt loop, the Variant
                      interface + registry, verify, the ledger (the
                      one parser), the contract base, contrib/ and infra/ blocks

@@ -38,7 +38,7 @@ class TestNoDriverOnTheResultsPath(unittest.TestCase):
     def test_the_experiment_results_methods_import_no_scheduler_or_cli(self):
         E = runs.experiment._experiment.Experiment
         for name in ("validate_cell", "finished", "validate", "score", "aggregate",
-                     "run_report", "_workspace_of"):
+                     "_workspace_of"):
             src = inspect.getsource(getattr(E, name))
             self.assertNotIn("fae.conduct", src, name)
             self.assertNotIn("fae.cli", src, name)
