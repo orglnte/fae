@@ -434,19 +434,12 @@ class Experiment:
     operator's verbs on it as a whole. The scheduling (admitting cells,
     supervising them) is the Conduct's; one cell's verbs are its Cell's."""
 
-    SMOKE_DIR = "ws-test.nosync"
-    REFERENCE_DIR = "smoke-workspaces.nosync"
+    SMOKE_DIR = "ws-smoke.nosync"
 
     def __init__(self, root=None, workspace=None):
         from fae import paths
         self.root = Path(root or paths.root())
         self.workspace = workspace or Workspace(self.root)
-
-    @property
-    def reference_workspaces(self):
-        """Where the SMOKE=1 cells an experiment's own verb runs live
-        (fae/cell/config.py roots them here), never among scored cells."""
-        return self.root / self.REFERENCE_DIR
 
     def cell(self, cid, task=None, variant=None, rep=1, agent=None, reference=False,
              workspaces=None):
@@ -526,6 +519,8 @@ class Experiment:
 
     @property
     def smoke_workspaces(self):
+        """Where every smoke cell lives: `experiment smoke`'s and the SMOKE=1
+        cells an experiment's own verbs run; never among scored cells."""
         return self.root / self.SMOKE_DIR
 
     def smoke_variants(self):
@@ -593,7 +588,7 @@ class Experiment:
         <empty>`: no agent, one attempt, the gate. Exercises the bring-ups, the
         contract, the probes and the sampler exactly as a scored cell would.
 
-        Cells are tagged ref_high_smoke_* and live in ws-test.nosync, so
+        Cells are tagged ref_high_smoke_* and live in smoke_workspaces, so
         nothing under the scored tree is touched. Without `variants`, one
         variant per distinct way of being judged (smoke_variants). One
         canonical arrangement per variant by default (a pipeline check);

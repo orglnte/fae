@@ -312,7 +312,8 @@ def _build(root, env, toml, definition=None):
     v["VERIFY_LOCK_DIR"] = env.get("VERIFY_LOCK_DIR") or str(_plane.locks(root) / "verify-lock")
 
     if smoke:
-        v["WORKSPACES_DIR"] = env.get("SMOKE_WORKSPACES_DIR") or f"{root}/smoke-workspaces.nosync"
+        from fae.experiment import Experiment
+        v["WORKSPACES_DIR"] = env.get("SMOKE_WORKSPACES_DIR") or f"{root}/{Experiment.SMOKE_DIR}"
     else:
         v["WORKSPACES_DIR"] = env.get("WORKSPACES_DIR") or f"{root}/workspaces.nosync"
     v["FP_EXTRA_FILES"] = _fp_extra_files(root, definition.fingerprint_trees(v))

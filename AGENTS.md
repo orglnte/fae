@@ -101,7 +101,7 @@ like in an experiment's evidence is its `taint_rules`, run by
 A **cell** is one `(agent, variant, task, rep)` run, identified by
 a `cell_id` and owning one workspace under `<root>/workspaces.nosync/<cell_id>/`
 — or under another WORKSPACE ROOT named by `WORKSPACES_DIR`
-(`ws-test.nosync` holds harness-validation and smoke cells). Only cell
+(`ws-smoke.nosync` holds every smoke cell). Only cell
 PLACEMENT follows that root: the scheduling plane under
 `<root>/workspaces.nosync/` (`fae/plane.py`: `.queues/` the queue, slots and
 agents' books, `.conduct/` the scheduler's own state, `.locks/` the verify,
