@@ -25,11 +25,11 @@ would not expect, and names that collide, are in
 | Task | The skeleton every variant starts from, and its prompt | — | `Definition`, `prepare.py` | the problem held constant |
 | Agent | A tag naming a client, a model and an effort | model, lane (its queue) | `agents.toml`, `load_agents`, `AgentImage` | who authors |
 | Infra | What exists around a variant's program, for the cell and per arrangement | substrate | `Infra`, `DefaultInfra`, `secrunner`, `dind`, `kind` | provisioning; isolation |
-| Gate | The arrangements one attempt must all pass | shape gate | `Gate` | what green means, structurally |
+| Gate | The arrangements one attempt must all pass | shape gate | `Gate`, `cell/contrib/` (external) | what green means, structurally |
 | Fingerprint | The hash of everything a verdict depends on | verify surface | `rig.fp`, `Cell.expected_fp` | provenance |
 | **The cell** | | | | |
 | Cell | One agent, variant, task and rep, run to a verdict in its own folder | workspace (its folder) | `Cell` (`fae/cell/`) | the unit of measurement |
-| Attempt | One author–restore–judge round within the budget | iteration (`ITER`) | `Cell`, `ledger.py` | the primary measure |
+| Attempt | One author–restore–judge round within the budget | iteration (`ITER`) | `Cell`, `ledger.py`, `verify.py` | the primary measure |
 | Authoring surface | What the agent may write; everything else is restored before judging | authorable surface, skeleton manifest | `Surface` | a fair judged tree |
 | Checkpoint | The tree of every attempt, kept beside the agent's own repo | — | `Checkpoints` | provenance; clean retries |
 | Verdict | The outcome of one arrangement: pass or fail, the stage, charged or refunded | void, refund, uncharged | `Verdict`, `VerifyResult` | rig faults vs authoring failures |
