@@ -138,7 +138,7 @@ def verifier_class():
 
 Everything here is optional and has an engine default except
 `verifier_class` (a cell cannot verify without one). The full list is the
-docstring of `fae/experiment.py`; the ones you will meet later are
+docstring of `fae/experiment/`; the ones you will meet later are
 `CONFIG` (machine-local keys your experiment needs from `fae.toml`),
 `taint_rules` and `verbs`. The variants are not declared here: they are
 the files in `variants/`.
@@ -685,7 +685,7 @@ turns a directory of scored cells into the results table.
 `python3 cli.py experiment check --static` checks a definition and its
 variant files against all of the below, without docker.
 
-**Definition** (`<EXPERIMENT_DIR>/__init__.py`, read by `fae/experiment.py`):
+**Definition** (`<EXPERIMENT_DIR>/__init__.py`, read by `fae/experiment/`):
 
 | Name | Required | Default |
 |---|---|---|
@@ -744,7 +744,7 @@ unknown keys refused):
 (`cell` | `reverify` | `exp1`).
 
 **Cell id**: `<agent>_<effort>[_smoke]_<variant>_<task>_r<rep>`, encoded in
-one place (`fae/experiment.py`: `cell_id`, `parse_cell_id`).
+one place (`fae/experiment/`: `cell_id`, `parse_cell_id`).
 
 ---
 

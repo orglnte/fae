@@ -64,7 +64,7 @@ context, the `.tla` model, and the cell package the fingerprint guards. The
 verifier container mounts the root and the engine's tree at their own paths
 and puts both on its `PYTHONPATH`.
 
-The engine never imports the experiment by name. `fae/experiment.py`
+The engine never imports the experiment by name. `fae/experiment/`
 loads `<EXPERIMENT_DIR>/__init__.py` BY PATH as the package `experiment`
 (one process, one experiment — a second definition is refused; tests call
 `unload()`), and every reader goes through the `Definition` it returns: the
@@ -111,7 +111,7 @@ shared by every workspace root, and each root's
 (10) attempts; each attempt is author → restore-and-judge → verify. The cell
 ends green, failed, or revoked.
 
-`cell_id` is encoded in ONE place, `fae/experiment.py`'s `cell_id()`;
+`cell_id` is encoded in ONE place, `fae/experiment/`'s `cell_id()`;
 the driver's entry point and the prepare import it — two implementations
 kept in sync by hand drift, and a drifted id writes to one workspace and is
 read from another. `parse_cell_id` is positional
@@ -677,7 +677,7 @@ every prior agent's memory — cross-run leakage invisible in the results.
   that was merely inspected desyncs the replay and cascades.
 - **FP-guarded files** — every file of the experiment tree, the trees the
   experiment declares through `fingerprint_trees`, and every `.py` of the
-  engine's own `fae/cell/` package and `fae/experiment.py` (found from the
+  engine's own `fae/cell/` package and `fae/experiment/` (found from the
   engine, never under the root) — are hashed, content and path, into the fingerprint
   (`fae/cell/rig.py:fp()`) that pins a cell; a mismatch between a cell's
   start and any of its verifies voids that attempt. Edit them only with no

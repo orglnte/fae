@@ -159,7 +159,7 @@ cli.py               operator CLI (noun groups); the only entry point
 fae/driver/          the orchestrator's library: conduct/ (admission,
                      supervision, the host's view, the reaper), check,
                      validate, score, render
-fae/experiment.py    the experiment: Definition, Workspace, Experiment
+fae/experiment/     the experiment: Definition, Workspace, Experiment; check_exp.py its readiness check
 fae/cell/           the Python cell driver: attempt loop, the Variant
                      interface + registry, verify, config, the ledger (the
                      one parser), the contract base, contrib/ and infra/ blocks

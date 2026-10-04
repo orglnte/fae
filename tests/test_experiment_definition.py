@@ -1,4 +1,4 @@
-"""fae/experiment.py — the experiment definition the engine loads by
+"""fae/experiment/ — the experiment definition the engine loads by
 path, and the engine's only way of knowing the experiment: no engine module
 imports the `experiment` package by name."""
 import os

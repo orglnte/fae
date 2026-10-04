@@ -10,7 +10,7 @@ from unittest import mock
 
 from _ctx import runs
 
-ENGINE = Path(runs.experiment.__file__).resolve().parent
+ENGINE = Path(runs.experiment.__file__).resolve().parent.parent
 
 
 def _imports(path):

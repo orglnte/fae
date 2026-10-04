@@ -1,4 +1,4 @@
-"""The Workspace (fae/experiment.py): the cells' folders of a root and the
+"""The Workspace (fae/experiment/): the cells' folders of a root and the
 scheduling plane beside them. Which folders are cells is the cell-id
 grammar's question; the plane is the root's whatever the workspace path."""
 import tempfile

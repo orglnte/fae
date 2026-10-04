@@ -526,6 +526,21 @@ class Experiment:
         cells an experiment's own verbs run; never among scored cells."""
         return self.root / self.SMOKE_DIR
 
+    def check(self, walk=False, static=False, smoke=False, tla_trace=False, variants="",
+              task="T1"):
+        """Whether this experiment is ready to run (check_exp): 0 when no step
+        failed, 1 otherwise. `walk` pauses before each step; `static` needs no
+        docker; `smoke` and `tla_trace` add their steps."""
+        from fae.experiment import check_exp
+        return check_exp.check(self.root, walk=walk, static=static, smoke=smoke,
+                               tla_trace=tla_trace, variants=variants, task=task)
+
+    def infra(self):
+        """Every active variant's preflight and verify image, then a sweep of
+        stale infra (check_exp.infra): how many variants were refused."""
+        from fae.experiment import check_exp
+        return check_exp.infra()
+
     def smoke_variants(self):
         """One active variant per distinct way of being judged: variants that
         differ only in what the agent reads share a reference, a run, an infra
@@ -600,7 +615,7 @@ class Experiment:
         """
         import tempfile
         import time
-        from fae.driver import check
+        from fae.experiment import check_exp
         from fae.conduct import Conduct
         chosen = [v for v in (variants.split(",") if variants else self.smoke_variants())
                   if not only or only in v]
@@ -611,7 +626,7 @@ class Experiment:
               f"(cells tagged ref_high_smoke_*, in {smoke_ws.name}) ===")
         # each variant's own preflight, so a missing daemon, tool or image is
         # named before any infra is spent
-        if check.probe_variants(chosen):
+        if check_exp.probe_variants(chosen):
             sys.exit("SMOKE ABORTED: a variant refused this host — see hooks.log lines above")
         env = dict(os.environ, WORKSPACES_DIR=str(smoke_ws), AGENT="ref",
                    SMOKE="1", REFERENCE="1",

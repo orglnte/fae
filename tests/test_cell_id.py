@@ -120,7 +120,7 @@ class TestParseCellId(unittest.TestCase):
         """The loud guard chosen instead of changing cid derivation."""
         import os
         from unittest import mock
-        from fae.driver import check
+        from fae.experiment import check_exp as check
         ctx = check.Ctx(root=runs.ROOT, static=True)
         with mock.patch.dict(os.environ, {"EFFORT": "medium"}):
             found = check._invariants(ctx)

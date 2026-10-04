@@ -29,7 +29,7 @@ def invoke(fn_name, argv, mod):
     """Run one cli command with <mod>.<fn_name> mocked; return its call.
 
     `mod` names the module that owns fn_name: `cli` for the verbs on cells and
-    specs it holds itself, a fae/driver/ submodule for the rest."""
+    specs it holds itself, the module that owns the verb for the rest."""
     with mock.patch.object(mod, fn_name) as m:
         result = runner.invoke(cli.app, argv)
     if result.exit_code != 0:
@@ -204,7 +204,7 @@ class TestQueueCommands(unittest.TestCase):
 
 class TestExperimentCommands(unittest.TestCase):
     """The verbs on the experiment as a whole are its Experiment's
-    (fae/experiment.py); `experiment infra` is check's."""
+    (fae/experiment/), `experiment check` and `experiment infra` included."""
 
     def test_init_carries_the_experiment_directory(self):
         args, _ = invoke("init", ["experiment", "init"], mod=Experiment)
@@ -213,10 +213,23 @@ class TestExperimentCommands(unittest.TestCase):
         self.assertEqual(args, ("shout",))
 
     def test_infra_takes_no_arguments(self):
-        """check.infra ignores its namespace entirely; an earlier cli
-        signature accepted an argument it silently discarded."""
-        (ns,), _ = invoke("infra", ["experiment", "infra"], mod=cli.check)
-        self.assertEqual(vars(ns), {})
+        with mock.patch.object(Experiment, "infra", return_value=0) as m:
+            result = runner.invoke(cli.app, ["experiment", "infra"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(m.call_args, mock.call())
+
+    def test_infra_exits_1_on_a_refused_variant(self):
+        with mock.patch.object(Experiment, "infra", return_value=2):
+            result = runner.invoke(cli.app, ["experiment", "infra"])
+        self.assertNotEqual(result.exit_code, 0)
+
+    def test_check_carries_every_option(self):
+        with mock.patch.object(Experiment, "check", return_value=0) as m:
+            result = runner.invoke(cli.app, ["experiment", "check", "--static", "--tla-trace",
+                                             "--variants", "alpha", "--task", "T2"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(m.call_args.kwargs, dict(walk=False, static=True, smoke=False,
+                                                  tla_trace=True, variants="alpha", task="T2"))
 
     def test_smoke_carries_every_option(self):
         _, kw = invoke("smoke", ["experiment", "smoke"], mod=Experiment)

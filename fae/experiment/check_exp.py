@@ -1,4 +1,5 @@
-"""`cli.py experiment check`: whether the experiment this root runs is ready,
+"""Experiment.check (`cli.py experiment check`): whether the experiment a root
+runs is ready,
 in the order an author builds it, each step with why it matters and how to
 fix what it finds.
 
@@ -69,16 +70,16 @@ def probe_variants(variants=None):
     return bad
 
 
-def infra(args):
-    """`experiment infra`: can this host carry each variant? Every active
-    variant's preflight and verify image (probe_variants), then a sweep of
-    stale infra. Nothing per cell is created. Exit 1 if any is refused."""
+def infra():
+    """Experiment.infra (`experiment infra`): can this host carry each
+    variant? Every active variant's preflight and verify image
+    (probe_variants), then a sweep of stale infra. Nothing per cell is
+    created. Returns how many variants were refused."""
     bad = probe_variants()
     from fae.cell import variants as _tr
     for infra_cls in {cls.INFRA for cls in _tr.registry().values()}:
         infra_cls.sweep()
-    if bad:
-        sys.exit(f"infra: {bad} variant(s) refused — see hooks.log lines above")
+    return bad
 
 
 # --- the transitions replay against the model ------------------------------
@@ -535,10 +536,11 @@ def _summary(steps, status, out):
     return 0
 
 
-def main(args):
-    if args.walk and not sys.stdin.isatty():
+def check(root, walk=False, static=False, smoke=False, tla_trace=False, variants="", task="T1"):
+    """The readiness check on `root`: 0 when no step failed, 1 otherwise."""
+    if walk and not sys.stdin.isatty():
         sys.exit("check: --walk asks before each step and needs a terminal; "
                  "run without --walk for the checklist")
-    ctx = Ctx(root=_experiment.current().root, variants=tuple(v for v in (args.variants or "").split(",") if v),
-              task=args.task, static=args.static)
-    sys.exit(run(ctx, walk=args.walk, smoke=args.smoke, tla_trace=getattr(args, "tla_trace", False)))
+    ctx = Ctx(root=root, variants=tuple(v for v in (variants or "").split(",") if v),
+              task=task, static=static)
+    return run(ctx, walk=walk, smoke=smoke, tla_trace=tla_trace)

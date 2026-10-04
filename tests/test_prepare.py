@@ -277,7 +277,7 @@ class TestOneImplementation(unittest.TestCase):
         self.assertIn("_prepare.prepare(", body[:body.index("\n    def ")])
 
     def test_experiment_prepare_asks_each_cell_to_prepare_itself(self):
-        src = (ROOT / "fae" / "experiment.py").read_text()
+        src = (ROOT / "fae" / "experiment" / "__init__.py").read_text()
         body = src[src.index("    def prepare(self"):src.index("    def init(self")]
         self.assertIn(".prepare(fresh=fresh)", body)
         self.assertNotIn("_prepare.prepare(", body)
