@@ -52,21 +52,18 @@ USED = ["load_shape", "k6", "law", "trace", "resource_sampler"]
 class TestNoPythonChildProcesses(unittest.TestCase):
 
     def _no_venv_line(self, l):
-        # The cell's OWN venv is infra, not an instrument child: rig.py
-        # builds it (sys.executable -m venv) and runs its interpreter to
-        # pip-install the SDK and check the imports, the way the shell
-        # venv_template did. Those lines name an interpreter legitimately.
+        # A line about a venv names an interpreter legitimately: a venv's
+        # interpreter is infra, not an instrument child.
         return not any(t in l for t in ("venv", "template", "pybin"))
 
     def test_the_package_never_spawns_an_interpreter(self):
-        # rig.py builds the cell's own venv (an infra step, not an
-        # instrument); verify.py names the interpreter only to compose the
+        # verify.py names the interpreter only to compose the
         # sidecar's cache-probe command string, which the sidecar spawns.
         # Cell.process_argv is the cell process's own command line: what
         # starts a cell, never a child of a running one.
         import ast
         for f in sorted(PKG.glob("*.py")):
-            if f.name in ("rig.py", "verify.py"):
+            if f.name == "verify.py":
                 continue
             src = f.read_text()
             for n in ast.walk(ast.parse(src)):
@@ -79,8 +76,8 @@ class TestNoPythonChildProcesses(unittest.TestCase):
         for f in sorted(PKG.glob("*.py")):
             # Interpreters the package may name that are not harness children:
             # the experiment venv (EXP_VENV_PY) the infra probe imports the
-            # SDK through, the scripted testagent's OWN container, the
-            # cell's own venv build (rig.py), and the verify container's own
+            # SDK through, the scripted testagent's OWN container, a venv's
+            # interpreter, and the verify container's own
             # interpreter (CHILD_ARGV: the one child, inside the image).
             body = "\n".join(l for l in f.read_text().splitlines()
                              if "EXP_VENV_PY" not in l and "testagent.py" not in l
@@ -365,10 +362,10 @@ class TestTheVerifySurfaceIsFingerprinted(unittest.TestCase):
 
     def fp(self):
         from fae.experiment import config as cfgmod
-        from fae.cell import rig
+        from fae.cell.cell import Cell
         # load_config exports FP_EXTRA_FILES; the config cache is per process,
         # so the file list is read once and the hash is what moves.
-        return rig.fp(ROOT, cfgmod.load(ROOT).values)
+        return Cell.fingerprint(ROOT, cfgmod.load(ROOT).values)
 
     def test_every_module_of_the_package_is_covered(self):
         from fae.experiment import config as cfgmod
@@ -393,7 +390,7 @@ class TestTheVerifySurfaceIsFingerprinted(unittest.TestCase):
         # On a COPY of the guarded tree: the checkout is what live cells are
         # fingerprinted against, and a probe written there is a fleet-wide void.
         import shutil, tempfile
-        from fae.cell import rig
+        from fae.cell.cell import Cell
         root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, root, True)
         shutil.copytree(ROOT / "tests" / "fixture_experiment", root / "experiment",
@@ -401,10 +398,10 @@ class TestTheVerifySurfaceIsFingerprinted(unittest.TestCase):
         shutil.copytree(ROOT / "fae" / "cell", root / "fae" / "cell")
         cell = root / "fae" / "cell"
         env = {"FP_EXTRA_FILES": " ".join(sorted(str(f) for f in cell.rglob("*.py")))}
-        before = rig.fp(root, env)
+        before = Cell.fingerprint(root, env)
         target = cell / "checkpoints.py"
         target.write_text(target.read_text() + "\n# fingerprint probe\n")
-        self.assertNotEqual(rig.fp(root, env), before)
+        self.assertNotEqual(Cell.fingerprint(root, env), before)
 
     def test_the_cell_pins_it_once_not_once_per_arrangement(self):
         # Pinning inside each arrangement would miss a change made between

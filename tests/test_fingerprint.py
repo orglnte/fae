@@ -1,4 +1,4 @@
-"""fae/cell/rig.py:fp() — the fingerprint that pins a cell: well formed,
+"""Cell.fingerprint() — the fingerprint that pins a cell: well formed,
 deterministic, moved by every guarded byte, fatal on a missing guarded file."""
 import os
 import tempfile
@@ -8,11 +8,11 @@ from pathlib import Path
 from _ctx import ROOT
 
 from fae.experiment import config as _config  # noqa: E402
-from fae.cell import rig  # noqa: E402
+from fae.cell.cell import Cell  # noqa: E402
 
 
 class TestTheFingerprint(unittest.TestCase):
-    """fp: 64-hex, deterministic, sensitive to every guarded byte, FATAL on
+    """fingerprint: 64-hex, deterministic, sensitive to every guarded byte, FATAL on
     a missing FP_EXTRA_FILES entry (a silently skipped file would quietly
     shrink the guarded surface)."""
 
@@ -21,7 +21,7 @@ class TestTheFingerprint(unittest.TestCase):
         cls.extras = _config.load(ROOT).values.get("FP_EXTRA_FILES", "")
 
     def fp(self, extra=""):
-        return rig.fp(ROOT, {"FP_EXTRA_FILES": f"{self.extras} {extra}".strip(),
+        return Cell.fingerprint(ROOT, {"FP_EXTRA_FILES": f"{self.extras} {extra}".strip(),
                              "EXPERIMENT_DIR": os.environ["EXPERIMENT_DIR"]})
 
     def test_deterministic_and_well_formed(self):

@@ -25,7 +25,7 @@ would not expect, and names that collide, are in
 | Task | The skeleton every variant starts from, and its prompt | — | `Definition`, `prepare.py` | the problem held constant |
 | Agent | A tag naming a client, a model and an effort | model, lane (its queue) | `agents.toml`, `load_agents`, `AgentImage` | who authors |
 | Gate | The arrangements one attempt must all pass | shape gate | `Gate`, `cell/contrib/` (external) | what green means, structurally |
-| Fingerprint | The hash of everything a verdict depends on | verify surface | `rig.fp`, `Cell.expected_fp` | provenance |
+| Fingerprint | The hash of everything a verdict depends on | verify surface | `Cell.fingerprint`, `Cell.expected_fp` | provenance |
 | **The cell** | | | | |
 | Cell | One agent, variant, task and rep, run to a verdict in its own folder | workspace (its folder) | `Cell` (`fae/cell/`) | the unit of measurement |
 | Attempt | One author–restore–judge round within the budget | iteration (`ITER`) | `Cell`, `ledger.py`, `verify.py` | the primary measure |

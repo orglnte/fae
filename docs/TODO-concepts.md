@@ -87,9 +87,8 @@ with several meanings.
    `archive.NOT_CHARGED`).
 4. **Lock / arm.** A variant file's `[infra] lock` is a cap on live infra;
    the same thing is `Cell.arm`, `arm-<lock>.slots/` and `ARM_SLOTS_<LOCK>`.
-5. **Rig.** Four meanings: the measuring apparatus (a "rig fault" is
-   refunded), `fae/cell/rig.py` (store, fingerprint and load utilities),
-   `rig-lock` (the verifier's exclusive lock), and the verify container's
+5. **Rig.** Three meanings: the measuring apparatus (a "rig fault" is
+   refunded), `rig-lock` (the verifier's exclusive lock), and the verify container's
    holdings ("the verify container holds the rig").
 6. **Workspace.** The `Workspace` object (a root of cell folders and the
    scheduling plane beside them) and a cell's own folder (`ws`).

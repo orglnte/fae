@@ -62,10 +62,10 @@ class TestConfigAndCacheAreNativeNow(unittest.TestCase):
 
 class TestTheFingerprintNamesNoRetiredFile(unittest.TestCase):
 
-    def test_rig_fp_hashes_what_exists(self):
-        src = (HARNESS / "cell" / "rig.py").read_text()
-        body = src[src.index("def fp("):]
-        body = body[:body.index("\ndef ")]
+    def test_the_fingerprint_hashes_what_exists(self):
+        src = (HARNESS / "cell" / "cell.py").read_text()
+        body = src[src.index("def fingerprint("):]
+        body = body[:body.index("\n    def ")]
         for kept in ('"EXPERIMENT_DIR"', '"FP_EXTRA_FILES"'):
             self.assertIn(kept, body, kept)
         for gone in ('"lib.sh"', '"cache_probe.sh"', "run_exp_artifact"):
