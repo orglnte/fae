@@ -1,12 +1,12 @@
 """A variant: one complete set of what the agent is given and how its work
-is judged, as its file declares it (fae/cell/variants/files.py builds a
+is judged, as its file declares it (fae/experiment/variants/files.py builds a
 subclass per file). Data only; what exists around its program is its
 infra class's (fae/cell/infra/base.py)."""
 from __future__ import annotations
 
 from fae import paths as _paths
 
-from ..infra.base import DefaultInfra
+from fae.cell.infra.base import DefaultInfra
 
 HARNESS = _paths.ENGINE
 ROOT = _paths.ROOT

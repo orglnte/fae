@@ -13,7 +13,7 @@ import fae.experiment
 from fae import paths as _paths
 from fae.cell import image as _image
 from fae.cell.infra import base
-from fae.cell.variants.base import Variant
+from fae.experiment.variants.base import Variant
 
 
 class Imaged(base.Infra):
@@ -80,7 +80,7 @@ class TestTheToolContainer(unittest.TestCase):
         d = mock.Mock()
         d.verifier_class.return_value.PREFIXES = {}
         with mock.patch.object(fae.experiment._experiment.Experiment, "definition", new_callable=mock.PropertyMock, return_value=d), \
-                mock.patch("fae.cell.variants.registry", return_value={}):
+                mock.patch("fae.experiment.variants.registry", return_value={}):
             self.assertIn(("container", "fae-tool-"), zombies._prefixes())
 
 

@@ -48,7 +48,7 @@ def probe_variants(variants=None):
     """Every variant's own preflight (its infra's ok(): the daemon, the tools)
     and the image its cells are verified in, built here when missing —
     printed one per line; the count refused."""
-    from fae.cell import variants as _tr
+    from fae.experiment import variants as _tr
     bad = 0
     for vid in sorted(variants or fae.experiment.exp().definition.active):
         cell = _tr._ShimCell(f"infra-probe-{vid}", "/nonexistent", fae.experiment.exp().root)
@@ -77,7 +77,7 @@ def infra():
     (probe_variants), then a sweep of stale infra. Nothing per cell is
     created. Returns how many variants were refused."""
     bad = probe_variants()
-    from fae.cell import variants as _tr
+    from fae.experiment import variants as _tr
     for infra_cls in {cls.INFRA for cls in _tr.registry().values()}:
         infra_cls.sweep()
     return bad
@@ -225,7 +225,7 @@ def _config(ctx):
 
 def _definition(ctx):
     from fae.cell.verify import Verifier
-    from fae.cell.variants.files import DIR
+    from fae.experiment.variants.files import DIR
     d = ctx.definition()
     out = []
     try:
@@ -256,7 +256,7 @@ def _definition(ctx):
 
 def _variants(ctx):
     from fae.cell.surface import authorable
-    from fae.cell.variants import liveness_declared
+    from fae.experiment.variants import liveness_declared
     d = ctx.definition()
     out = []
     for vid in ctx.selected():
@@ -325,7 +325,7 @@ def _invariants(ctx):
     from fae.experiment import config as _config
     from fae.cell import rig as _rig, verify as _verify
     from fae.cell.cell import Cell
-    from fae.cell.variants import files as _files
+    from fae.experiment.variants import files as _files
     from fae import host
     out = []
     missing = [f"{mod.__name__}.{name}"

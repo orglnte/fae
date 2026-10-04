@@ -64,7 +64,7 @@ def _cluster_map():
 def _infra_of(variant, cid):
     """[(kind, ident)] a cell of this variant provisions, named by its
     variant. Unnamed infra is found by scanning instead (`_strays`)."""
-    from fae.cell import variants as _tr
+    from fae.experiment import variants as _tr
     cls = _tr.registry().get(variant)
     return list(cls.INFRA.identities(cid)) if cls is not None else []
 
@@ -88,7 +88,7 @@ def _pid_alive(pid):
 def _strays(live):
     """Infra only a scan can find, from every variant: [(kind, ident,
     owner cid)] whose owner has no live loop (Variant.stray)."""
-    from fae.cell import variants as _tr
+    from fae.experiment import variants as _tr
     out = []
     for infra in {cls.INFRA for cls in _tr.registry().values()}:
         for item in infra.stray(live, fae.experiment.exp().workspace.path):
@@ -101,7 +101,7 @@ def _prefixes():
     """[(kind, prefix)] a reaper scans by: the engine's agent container,
     each infra class's PREFIXES and the verifier's."""
     from fae.cell import image as _image
-    from fae.cell import variants as _tr
+    from fae.experiment import variants as _tr
     out = [("container", host.agent_container("")),
            ("container", _image.VERIFY_PREFIX), ("container", _image.TOOL_PREFIX),
            ("container", _image.RUN_PREFIX),

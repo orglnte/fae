@@ -171,11 +171,11 @@ class TestTheSurfaceMustBeDeclared(unittest.TestCase):
         return mock.patch.object(fae.experiment._experiment.Definition, "variant", lambda self, vid: cls)
 
     def test_the_base_variant_declares_none(self):
-        from fae.cell.variants.base import Variant
+        from fae.experiment.variants.base import Variant
         self.assertIsNone(Variant.AUTHORING_SURFACE)
 
     def test_an_undeclared_surface_is_refused_naming_the_variant(self):
-        from fae.cell.variants.base import Variant
+        from fae.experiment.variants.base import Variant
 
         class Undeclared(Variant):
             ID = "beta_apidocs"

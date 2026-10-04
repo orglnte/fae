@@ -20,7 +20,7 @@ from fae.cell import image as _image  # noqa: E402
 from fae.cell import verify  # noqa: E402
 from fae.cell.verify import Ctx, Verdict, run_verifier, verify_argv  # noqa: E402
 from fae.cell.infra.base import NoopInfra  # noqa: E402
-from fae.cell.variants.base import Variant  # noqa: E402
+from fae.experiment.variants.base import Variant  # noqa: E402
 
 
 def _definition(root, verifier_body):

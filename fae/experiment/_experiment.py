@@ -88,7 +88,7 @@ class Definition:
     def variants(self):
         """{id: class}, read from the variant files on first use."""
         if self._subjects is None:
-            from fae.cell.variants import files
+            from fae.experiment.variants import files
             self._subjects = files.load(self.path)
         return self._subjects
 

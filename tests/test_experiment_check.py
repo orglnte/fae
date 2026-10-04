@@ -11,7 +11,7 @@ from unittest import mock
 from _ctx import ROOT, at_workspace  # noqa: F401  (sys.path, EXPERIMENT_DIR = the fixture)
 
 import fae.experiment
-from fae.cell.variants.base import Variant
+from fae.experiment.variants.base import Variant
 from fae.experiment import check_exp as check
 
 
@@ -74,7 +74,7 @@ class TestEachFailureNamesItsFix(CheckCase):
         self.assertIn("  skip    definition", self.lines)
 
     def test_an_unreadable_variant_file(self):
-        from fae.cell.variants import files
+        from fae.experiment.variants import files
         with mock.patch.object(files, "load", side_effect=files.VariantFileError(
                 "variants/x.toml: unknown key(s) in [verify]: rn")):
             d = fae.experiment.exp().definition

@@ -1,12 +1,12 @@
 """The experiment's variants: the registry (read from the variant files,
-fae/cell/variants/files.py) and the infra a cell of one gets — its file's
+fae/experiment/variants/files.py) and the infra a cell of one gets — its file's
 `[infra] class` (fae/cell/infra/base.py), instantiated with the variant.
 
 Slots are NOT taken here: the Conduct takes the work slot and the lock slot
 (Queues.try_slots) and hands their fds to the cell process, which holds them for
 its whole life (Queues.adopt_slots), so provisioning never waits on a queue.
 
-`python3 -m fae.cell.variants <variant> setup|teardown|infra <cid> <ws>`
+`python3 -m fae.experiment.variants <variant> setup|teardown|infra <cid> <ws>`
 is the operator's hand entry; `cli.py experiment infra` calls the classes
 directly.
 """
@@ -16,7 +16,7 @@ import os
 import sys
 from pathlib import Path
 
-from ..infra.base import HookFailure, NoopInfra, liveness_declared  # noqa: F401
+from fae.cell.infra.base import HookFailure, NoopInfra, liveness_declared  # noqa: F401
 from .base import HARNESS, ROOT, Variant  # noqa: F401
 import fae.experiment
 # --- registry + CLI -----------------------------------------------------------
@@ -50,18 +50,12 @@ class _ShimCell:
         self.ws = Path(ws)
         self.root = Path(root)
         self.conf = _config.load(self.root)
-        self.variant = ""
-        try:
-            for line in (self.ws / "cell.env").read_text().splitlines():
-                k, _, v = line.partition("=")
-                if k == "VARIANT":
-                    self.variant = v.strip()
-        except OSError:
-            pass
+        from fae.cell.cell import Cell
+        self.variant = Cell(self.ws.name, workspaces=self.ws.parent, root=self.root).variant
 
 
 def main(argv=None):
-    """python3 -m fae.cell.variants <variant> setup|teardown|infra <cid> <ws>"""
+    """python3 -m fae.experiment.variants <variant> setup|teardown|infra <cid> <ws>"""
     a = list(argv if argv is not None else sys.argv[1:])
     if len(a) < 2:
         print(main.__doc__, file=sys.stderr)

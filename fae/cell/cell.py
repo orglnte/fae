@@ -42,7 +42,7 @@ from . import archive
 from fae.experiment import config as _config
 from . import faults
 from . import rig as _rig
-from . import variants as _variants
+from fae.experiment import variants as _variants
 from .checkpoints import Checkpoints
 from .surface import Surface, authorable
 from .fsm import (ENABLED, LOOP_CLEARED_BY, LOOP_UNCHANGED_BY, PHASE_TO_LOOP, WAIT_PHASES,
@@ -2356,7 +2356,7 @@ class Cell:
         outside the authorable surface never takes effect, no attempt is
         burned policing the boundary, and the build is judged on what it was
         allowed to change. Returns the restored relpaths joined by newlines."""
-        from .variants import files
+        from fae.experiment.variants import files
         cls = self.variant_cls
         sources = {**files.template_files(cls), **cls.INPUTS} if cls else {}
         return "\n".join(self.surface.heal(sources))

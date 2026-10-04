@@ -342,7 +342,7 @@ class TestClusterMapAsksTheCellsVariant(unittest.TestCase):
     """A cell owns the cluster its own variant names."""
 
     def test_the_cluster_is_named_by_the_cells_variant(self):
-        from fae.cell import variants as _tr
+        from fae.experiment import variants as _tr
         beta = _tr.registry()["beta_apidocs"]
         cid = "testpy_high_beta_apidocs_T1_r1"
         with tempfile.TemporaryDirectory() as d:
