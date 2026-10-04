@@ -48,7 +48,7 @@ _EXPERIMENT = Path(os.environ.get("FAE_TEST_EXPERIMENT") or _TREE / "tests" / "f
 os.environ["EXPERIMENT_DIR"] = str(_EXPERIMENT)
 
 import fae.experiment  # noqa: E402
-from fae.cli import render  # noqa: E402
+from fae.cli import _render as render  # noqa: E402
 from fae.experiment import check_exp as check  # noqa: E402
 from fae import conduct  # noqa: E402
 from fae.conduct import _host as host  # noqa: E402

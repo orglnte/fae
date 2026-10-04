@@ -1,5 +1,5 @@
 """The operator's command line: grouped Typer verbs, their printing in
-render.py.
+_render.py.
 
 DESIGN: this is a CLI LAYER, not the orchestrator. A command acting on the
 run calls the Conduct (fae/conduct/); one acting on cells selects
@@ -52,7 +52,7 @@ sys.path.insert(0, str(ROOT))
 import fae.experiment  # noqa: E402
 from fae import experiment as _experiment  # noqa: E402
 from fae.cell.cell import Busy  # noqa: E402
-from fae.cli import render  # noqa: E402
+from fae.cli import _render  # noqa: E402
 from fae import conduct  # noqa: E402
 
 
@@ -602,7 +602,7 @@ def queue_list(agents: Optional[list[str]] = typer.Argument(None, help="agent la
                done: bool = typer.Option(False, "--done", help="also list the terminal specs")):
     """The work list per agent lane: pending in admission order (a paused
     lane is marked), and what is running. Read-only."""
-    render.queue_list(_ns(agents=list(agents or []), done=done))
+    _render.queue_list(_ns(agents=list(agents or []), done=done))
 
 
 @queue_app.command("cancel")
@@ -731,11 +731,11 @@ def experiment_status(
     """The fleet table: every cell, its state and gate; --watch refreshes,
     --walls surfaces limit/AUTH walls."""
     if walls:
-        render.monitor(_ns(interval=watch or 60))
+        _render.monitor(_ns(interval=watch or 60))
     elif watch:
-        render.watch(_ns(interval=watch, flat=flat, running_only=running_only))
+        _render.watch(_ns(interval=watch, flat=flat, running_only=running_only))
     else:
-        render.status(_ns(flat=flat, running_only=running_only))
+        _render.status(_ns(flat=flat, running_only=running_only))
 
 
 # --- results ----------------------------------------------------------------
@@ -769,7 +769,7 @@ def results_score(
 ):
     """Validate and score the finished cells (the selector's, else all), then
     print the metrics table."""
-    render.results_score(_ns(selector=selector, all_cells=all_cells,
+    _render.results_score(_ns(selector=selector, all_cells=all_cells,
                              allow_stale=allow_stale, no_aggregate=no_aggregate,
                              variant=variant, where=list(where), impl=impl,
                              sort_discrepancy=sort_discrepancy,
@@ -779,7 +779,7 @@ def results_score(
 @results_app.command("validate")
 def results_validate(selector: Optional[str] = typer.Argument(None, help=SEL)):
     """Post-DONE trust check: VALID or TAINTED, with reasons."""
-    render.results_validate(_ns(selector=selector))
+    _render.results_validate(_ns(selector=selector))
 
 
 @results_app.command("aggregate")
@@ -810,7 +810,7 @@ def results_aggregate(
 ):
     """Print the scoreboard from existing score.json files, without rescoring
     (`results score` also runs this as its last step)."""
-    render.results_aggregate(_ns(variant=variant, where=list(where), impl=impl,
+    _render.results_aggregate(_ns(variant=variant, where=list(where), impl=impl,
                                  include_tainted=include_tainted,
                                  tainted_cells_details=tainted_cells_details,
                                  allow_stale=allow_stale, sort_discrepancy=sort_discrepancy,

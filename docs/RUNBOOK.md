@@ -157,7 +157,7 @@ docs/                RUNBOOK.md (this runbook), HOWTO.md, DESIGN-fae.md,
 AGENTS.md            rig contract: cells, ledger, locks, verdicts, delete rules,
                      and §0 the engine/experiment boundary
 cli.py               operator CLI (noun groups); the only entry point
-fae/cli/            the operator CLI's verbs; render.py, the console
+fae/cli/            the operator CLI's verbs; _render.py, the console
 fae/conduct/        the scheduler: admission, supervision, the reaper,
                      its reconcile log; _host.py the host's facts (process
                      table, containers, memory, the host-sleep book), the
