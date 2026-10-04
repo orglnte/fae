@@ -553,7 +553,7 @@ every prior agent's memory — cross-run leakage invisible in the results.
 
 - **The gate is the experiment's.** `GATE` names the arrangements every
   attempt must pass, whether the seeded one rotates with the attempt number,
-  and the sentence the retry prompt carries; the engine reads its arity
+  and the sentence the retry prompt carries; the engine reads its number of arrangements (`Gate.arrangements_nr`)
   wherever a gate is counted (`ledger.parse`'s `gate_n`, the fleet's GATE
   column). Only a smoke cell may set `SHAPE_GATE` ≠ `all` for the single
   seed arrangement; the config refuses it for any other cell.

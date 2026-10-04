@@ -122,7 +122,7 @@ class Gate:
     feedback_note: str = ""
 
     @property
-    def arity(self):
+    def arrangements_nr(self):
         return len(self.arrangements)
 
 
@@ -702,7 +702,7 @@ class Experiment:
         parsed = (workspace or self._workspace_of(cell)).parse(cell.cid)
         if not parsed or not cell.has_ledger:
             return None
-        st = cell.status(parsed, self.definition.gate.arity, None,
+        st = cell.status(parsed, self.definition.gate.arrangements_nr, None,
                          looping=lambda: False, queued=lambda: False)
         return st["why"] if st["state"] == "DONE" and st["why"] != "cancelled" else None
 
@@ -791,7 +791,7 @@ class Experiment:
         None: every sealed cell): (completed by variant, in progress)
         (fae/experiment/scoring/run_report.py)."""
         from fae.experiment.scoring import run_report as _report
-        return _report.collect(workspace or self.workspace, self.definition.gate.arity, since)
+        return _report.collect(workspace or self.workspace, self.definition.gate.arrangements_nr, since)
 
     # --- the transitions log, re-anchored -----------------------------------
 

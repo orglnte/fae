@@ -377,7 +377,7 @@ def reverify(args):
         except Busy:
             print(f"  skipped: {cid} is held by another process")
             continue
-        want = c.gate_def.arity
+        want = c.gate_def.arrangements_nr
         ok = all(r.green for r in results) and len(results) == want
         print(f"  {'UPHELD' if ok else 'DIFFERS'}: "
               f"{sum(r.green for r in results)}/{want} arrangement(s) green"
