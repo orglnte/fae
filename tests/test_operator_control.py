@@ -117,33 +117,33 @@ class TestSelectorIsAnchored(OperatorTestCase):
         self.assertEqual(runs.common.select_cells("apidoc"), [])
 
 
-class TestQueuedCids(OperatorTestCase):
+class TestQueuedOnly(OperatorTestCase):
     """Work that exists only as a queued spec was invisible to every operator
     verb, because select_cells enumerates workspaces."""
 
     def test_finds_specs_with_no_workspace(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2)])
-        self.assertEqual(runs.common.queued_cids("all"),
+        self.assertEqual(runs.common.workspace().queued_only("all"),
                          ["sonnet_high_alpha_apidocs_T1_r2"])
 
     def test_ignores_specs_that_already_have_a_workspace(self):
         """Those are select_cells' business; counting them twice would
         double-report the backlog."""
         self.queue("sonnet", [dict(task="T1", variant="beta_apidocs", rep=1)])
-        self.assertEqual(runs.common.queued_cids("all"), [])
+        self.assertEqual(runs.common.workspace().queued_only("all"), [])
 
     def test_selector_applies_and_is_anchored(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2)])
         self.queue("haiku", [dict(task="T1", variant="beta_howto", rep=3)])
-        self.assertEqual(len(runs.common.queued_cids("sonnet")), 1)
-        self.assertEqual(len(runs.common.queued_cids("haiku")), 1)
-        self.assertEqual(len(runs.common.queued_cids("T1")), 2)   # whole token
-        self.assertEqual(runs.common.queued_cids("son"), [])      # partial: no match
+        self.assertEqual(len(runs.common.workspace().queued_only("sonnet")), 1)
+        self.assertEqual(len(runs.common.workspace().queued_only("haiku")), 1)
+        self.assertEqual(len(runs.common.workspace().queued_only("T1")), 2)   # whole token
+        self.assertEqual(runs.common.workspace().queued_only("son"), [])      # partial: no match
 
     def test_unreadable_spec_file_is_survived(self):
         d = runs.queues.lane_dir("sonnet"); d.mkdir(parents=True)
         (d / "100000.sonnet_high_beta_apidocs_T1_r9.json").write_text("{not json\n")
-        self.assertEqual(runs.common.queued_cids("all"),
+        self.assertEqual(runs.common.workspace().queued_only("all"),
                          ["sonnet_high_beta_apidocs_T1_r9"])
 
 

@@ -345,6 +345,13 @@ class Workspace:
         """The cells any selector matches."""
         return [c for c in self.cells() if any(matches(c, s) for s in selectors)]
 
+    def queued_only(self, *selectors):
+        """The pending cells any selector matches that have no folder here
+        yet: what select() cannot see."""
+        have = set(self.cells())
+        return [c for c in self.queues.pending_cids(lambda c: any(matches(c, s) for s in selectors))
+                if c not in have]
+
     def cell(self, cid, task=None, variant=None, rep=1, agent=None, reference=False):
         """The cell `cid` on this workspace's plane. Named by what it runs
         (`variant`), it may not exist yet: what a start prepares."""

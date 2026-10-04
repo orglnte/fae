@@ -186,7 +186,7 @@ def stop_cells(args):
     cids = common.select_cells(*sels)
     # specs with no workspace are invisible to the selection; a stop that
     # ignored them would leave the cell to be admitted later
-    q_only = common.queued_cids(*sels)
+    q_only = common.workspace().queued_only(*sels)
     if not cids and not q_only:
         print(f"no cells match {' '.join(sels)!r}")
         return None

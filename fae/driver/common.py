@@ -260,13 +260,6 @@ def select_cells(*selectors):
     return workspace().select(*selectors)
 
 
-def queued_cids(*selectors):
-    """cids that exist only as a pending spec, with no workspace yet: what a
-    workspace selection cannot see."""
-    return [c for c in queues().pending_cids(lambda c: any(matches(c, s) for s in selectors))
-            if not (WS / c).is_dir()]
-
-
 def is_blanket(selectors):
     """A selection naming `all`: standing operator decisions (roster/manual
     pauses, a cancel) survive it, and yield only to a cell or agent named."""

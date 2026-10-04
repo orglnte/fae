@@ -710,7 +710,7 @@ class Conduct:
             else:
                 if self.pidfile.exists():
                     print("would stop conduct (TERM)")
-                queued = common.queued_cids("all")
+                queued = common.workspace().queued_only("all")
                 if queued:
                     print(f"would leave {len(queued)} queued spec(s) in place — "
                           f"conduct, the only thing that admits them, is stopped")
