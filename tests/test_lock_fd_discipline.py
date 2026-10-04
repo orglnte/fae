@@ -25,12 +25,8 @@ from _ctx import ROOT
 
 HARNESS = Path(ROOT) / "fae"
 PKG = HARNESS / "cell"
-DRIVER = Path(ROOT) / "driver"
-
-# Every source file the two scans below read: the harness (bash + Python),
-# fae/driver/ (the arm/slot/verify-lock acquire-and-release code) and cli.py.
-SCANNED_FILES = (list(HARNESS.rglob("*.sh")) + list(HARNESS.rglob("*.py"))
-                 + list(DRIVER.glob("*.py")) + [Path(ROOT) / "fae" / "cli.py"])
+# Every source file the two scans below read: the whole engine package.
+SCANNED_FILES = list(HARNESS.rglob("*.sh")) + list(HARNESS.rglob("*.py"))
 
 
 def read(rel):

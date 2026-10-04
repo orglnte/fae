@@ -23,12 +23,12 @@ from fae.cell.cell import Cell
 from _ctx import ROOT, runs, OrchTmpCase
 
 HARNESS = Path(ROOT) / "fae"
-DRIVER = HARNESS / "driver"
 CELL_PY = (HARNESS / "cell" / "cell.py").read_text()
 CLI_PY = (Path(ROOT) / "fae" / "cli.py").read_text()
-# fae/driver/ (where seal/reseal logic lives) + cli.py (the entry point) — the
-# seal/unseal invariant must hold on every front end that can act on a cell.
-OPERATOR_SURFACE = [CLI_PY] + [p.read_text() for p in DRIVER.glob("*.py")]
+# Every engine module outside the cell's own package: the seal/unseal
+# invariant must hold on every front end that can act on a cell.
+OPERATOR_SURFACE = [p.read_text() for p in sorted(HARNESS.rglob("*.py"))
+                    if HARNESS / "cell" not in p.parents]
 
 
 class TestTheSeal(unittest.TestCase):

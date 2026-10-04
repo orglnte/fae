@@ -26,9 +26,7 @@ from pathlib import Path
 from fae.cell.cell import Cell
 from fae import experiment as _experiment
 from fae.experiment import parse_cell_id
-from .records import awake_age
-
-from . import host
+from fae import host
 
 ZOMBIE_GRACE_S = int(os.environ.get("ZOMBIE_GRACE_S", 600))      # owned, recent
 
@@ -163,7 +161,7 @@ def _docker_age_s(name):
 
 def _iter_age_s(cid):
     mt = _experiment.current().cell(cid).mtimes()["ledger"]
-    return awake_age(mt / 1e9) if mt is not None else None
+    return host.awake_age(mt / 1e9) if mt is not None else None
 
 
 def _fd_holders(path):

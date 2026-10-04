@@ -215,7 +215,7 @@ class TestTheFoldedSteps(CheckCase):
         self.assertIn("the experiment's own check: a green with no mount", [f.text for f in bad])
 
     def test_leftovers_fail_with_the_repair_fix(self):
-        from fae.driver.conduct import zombies
+        from fae.conduct import zombies
         with mock.patch.object(zombies, "find_zombies", return_value=[]):
             self.assertTrue(all(f.ok for f in self.findings(check._leftovers)))
         with mock.patch.object(zombies, "find_zombies",

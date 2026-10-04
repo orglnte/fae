@@ -385,7 +385,7 @@ class TestExactlyOneCellRule(OperatorTestCase):
 
     def _spawn_one(self, image_ready=True, variant="beta_apidocs", run_up=False, ignore=False):
         from fae.cell import Cell
-        from fae.driver.conduct import Conduct
+        from fae.conduct import Conduct
         args = mock.Mock(agent="sonnet", variant=variant, rep="1", task="T1", budget=10,
                          fresh=False, dangerously_ignore_slots=ignore)
         out = io.StringIO()

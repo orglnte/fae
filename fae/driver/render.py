@@ -20,7 +20,7 @@ from fae.cell.cell import Cell
 from fae.cell.fsm import WAIT_PHASES
 from fae import experiment as _experiment
 from fae.cell import faults
-from fae.driver.conduct import Conduct
+from fae.conduct import Conduct
 
 
 # A wait reason that names a provider wall: LIMIT_HINTS gates monitor(), and

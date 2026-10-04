@@ -21,7 +21,7 @@ CLI_PY = (Path(ROOT) / "fae" / "cli.py").read_text()
 # where a cell is spawned, respawned or queued: the CLI's verbs, the run's
 # respawn, the Queues and the Cell's own start
 OPS_PY = "".join((Path(ROOT) / "fae" / f).read_text() for f in (
-    "cli.py", "driver/conduct/__init__.py", "queues.py", "cell/cell.py"))
+    "cli.py", "conduct/__init__.py", "queues.py", "cell/cell.py"))
 CELL_PY = (HARNESS / "cell" / "cell.py").read_text()
 PREPARE = (HARNESS / "cell" / "prepare.py").read_text()
 

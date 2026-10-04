@@ -26,7 +26,8 @@ from fae.cell.cell import Cell
 from fae import experiment as _experiment
 from fae import mutex
 from fae.queues import hhmm
-from . import host, records, supervise, zombies
+from fae import host
+from . import records, supervise, zombies
 
 # One live cell per agent, everywhere: admission enforces it and resume defers
 # respawns past it (--force overrides).
@@ -488,7 +489,7 @@ class Conduct:
               ". Ctrl-C detaches (cells keep running).", flush=True)
         try:
             while True:
-                records.host_sleep_observe()
+                host.host_sleep_observe()
                 self.act_on_requests()
                 # Supervision inside the ONE controller: repair requeues at the
                 # lane front and the admission below picks it up — conduct is the
@@ -1172,7 +1173,7 @@ class Conduct:
                     continue
                 if c.cancelled or c.flagged:
                     continue
-                if at is not None and records.awake_age(at, now_t) < STANDDOWN_COOL_S:
+                if at is not None and host.awake_age(at, now_t) < STANDDOWN_COOL_S:
                     continue
                 n = self.respawn_count(cid)
                 if n >= MAX_RESPAWNS:

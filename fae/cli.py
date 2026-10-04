@@ -2,7 +2,7 @@
 """Grouped Typer front-end for the driver — 
 
 DESIGN: this is a CLI LAYER, not the orchestrator. A command acting on the
-run calls the Conduct (fae/driver/conduct/); one acting on cells selects
+run calls the Conduct (fae/conduct/); one acting on cells selects
 them and asks each Cell; one on the work list asks the Queues. What stays here
 is selection and printing. The verbs on the experiment as a whole (init,
 smoke, prepare, verb; the rig's trace-reset) are its Experiment's
@@ -53,8 +53,9 @@ sys.path.insert(0, str(ROOT))
 
 from fae import experiment as _experiment  # noqa: E402
 from fae.cell.cell import Busy  # noqa: E402
-from fae.driver import check, conduct, render  # noqa: E402
-from fae.driver.conduct import Conduct  # noqa: E402
+from fae.driver import check, render  # noqa: E402
+from fae import conduct, host  # noqa: E402
+from fae.conduct import Conduct  # noqa: E402
 
 
 def _ns(**kw):

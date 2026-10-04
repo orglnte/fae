@@ -918,7 +918,7 @@ class TestArmSlotWinnersDoNotReap(unittest.TestCase):
             self.assertNotIn("reap", code)
 
     def test_the_mechanism_is_gone_from_runs(self):
-        for f in [runs.ROOT / "fae" / "cli.py"] + sorted((runs.ROOT / "driver").glob("*.py")):
+        for f in sorted((runs.ROOT / "fae").rglob("*.py")):
             self.assertNotIn("def _arm_reconcile", f.read_text(), f.name)
 
 
@@ -1019,7 +1019,7 @@ class TestConductLiftsItsOwnStandDowns(ConductCase):
     def test_a_walled_cell_is_exempt_from_arm_stuck(self):
         """The wall branch owns a cell in the limit phase; ARM-STUCK must
         not stand it down first (it would lose the lane cooldown)."""
-        src = (Path(ROOT) / "fae" / "driver" / "conduct" / "supervise.py").read_text()
+        src = (Path(ROOT) / "fae" / "conduct" / "supervise.py").read_text()
         head = src[:src.index("ARM-STUCK held")]
         self.assertIn('if _phase == "agent" or _phase in WAIT_PHASES:', head[-2500:])
         self.assertEqual(runs.supervise.WAIT_PHASES,
@@ -1187,7 +1187,7 @@ class TestMemoryPressureMonitor(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, \
              at_workspace(Path(d)), \
              mock.patch.object(runs.host, "mem_pressure", return_value=crit), \
-             mock.patch.object(runs.records, "host_sleep_observe", lambda *a, **k: None), \
+             mock.patch.object(runs.host, "host_sleep_observe", lambda *a, **k: None), \
              mock.patch.object(runs.host, "loop_pids", return_value={}), \
              mock.patch.object(runs.host, "containers", return_value=set()), \
              mock.patch.object(runs.host, "loop_parents", return_value={}), \

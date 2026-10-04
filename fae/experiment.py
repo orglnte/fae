@@ -601,7 +601,7 @@ class Experiment:
         import tempfile
         import time
         from fae.driver import check
-        from fae.driver.conduct import Conduct
+        from fae.conduct import Conduct
         chosen = [v for v in (variants.split(",") if variants else self.smoke_variants())
                   if not only or only in v]
         if not chosen:
@@ -786,7 +786,7 @@ class Experiment:
         Every variable the replay needs, or a cell caught mid-flight by a reset
         is seeded into a state it cannot legally leave.
         """
-        from fae.driver.conduct import Conduct
+        from fae.conduct import Conduct
         loops = Conduct.loop_parents()
         slot_holders, verify_holder = self.slot_holders(), self.verify_holder()
         out = []
