@@ -14,7 +14,7 @@ import csv
 from datetime import datetime, timezone
 
 from fae.cell import archive as _archive
-from fae import experiment as _experiment
+from fae import shared as _shared
 from fae.cell import faults
 
 # The rules this validator keeps are the engine's own: a provider wall
@@ -31,7 +31,7 @@ def validate_cell(cell, workspace):
     the file records the verdict of the rule set that wrote it. Raises Busy
     while the cell is held."""
     taints, warns = [], []
-    rc_text = _experiment.definition().report_text(cell)
+    rc_text = _shared.definition().report_text(cell)
     v_text = cell.evidence_text("verify.log")
     it_text = cell.ledger_text()
     metrics = cell.read_metrics()
@@ -82,7 +82,7 @@ def validate_cell(cell, workspace):
                      f"{'; '.join(res.get('cross_check_findings') or [])[:120]})")
     warns += archive_warns(cell.runs(), it_text)
     # the experiment's rules, and the fields it records beside the verdict
-    rules = _experiment.definition().taint_rules
+    rules = _shared.definition().taint_rules
     verdict = cell.read_ledger()["verdict"]
     xt, xw, fields = rules(cell, workspace, metrics, it_text, v_text, rc_text, verdict) \
         if rules else ([], [], {})

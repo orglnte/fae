@@ -255,7 +255,7 @@ another process holds it. Two kinds of write reach a running cell without it:
 the intent markers (`.paused`, `.cancelled`, `reconcile.flagged`), which the
 loop reads at its checkpoints, and supervision's `ALERT` lines, one append
 each. Everything outside the cell process builds its cells through the
-current Experiment (`fae.experiment.current().cell(cid)`), so they share its
+current Experiment (`fae.shared.current().cell(cid)`), so they share its
 plane.
 
 **Lock ordering is work slot ≺ variant lock**, globally consistent, so

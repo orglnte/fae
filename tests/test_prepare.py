@@ -53,7 +53,7 @@ class TestTheSeededSurface(PrepareTestCase):
         self.assertTrue((ws / "PROMPT.md").is_file())
 
     def test_a_later_template_directory_wins(self):
-        common, overlay = runs.experiment.definition().variant("beta_apidocs").TEMPLATE
+        common, overlay = runs.shared.definition().variant("beta_apidocs").TEMPLATE
         both = {p.relative_to(common) for p in common.rglob("*") if p.is_file()} & \
                {p.relative_to(overlay) for p in overlay.rglob("*") if p.is_file()}
         if not both:
@@ -64,7 +64,7 @@ class TestTheSeededSurface(PrepareTestCase):
                              (overlay / rel).read_bytes(), rel)
 
     def test_each_input_lands_at_its_workspace_path(self):
-        cls = runs.experiment.definition().variant("beta_apidocs")
+        cls = runs.shared.definition().variant("beta_apidocs")
         ws = self.seed()
         for rel, src in cls.INPUTS.items():
             self.assertEqual((ws / "artifacts" / rel).read_bytes(), src.read_bytes(), rel)
@@ -162,7 +162,7 @@ class TestWhatTheVariantHands(PrepareTestCase):
 
     def test_each_variant_gets_its_own_doc(self):
         ws = self.seed(variant="alpha_howto", cid="testpy_high_alpha_howto_T1_r1")
-        cls = runs.experiment.definition().variant("alpha_howto")
+        cls = runs.shared.definition().variant("alpha_howto")
         self.assertEqual((ws / "artifacts" / "docs" / "alpha.md").read_bytes(),
                          cls.INPUTS["docs/alpha.md"].read_bytes())
 
@@ -171,14 +171,14 @@ class TestWhatTheVariantHands(PrepareTestCase):
             self.seed(variant="beta_howto", cid="testpy_high_beta_howto_T1_r1")
 
     def test_a_missing_input_is_refused_not_skipped(self):
-        cls = runs.experiment.definition().variant("beta_apidocs")
+        cls = runs.shared.definition().variant("beta_apidocs")
         inputs = {**cls.INPUTS, "docs/beta.md": Path(self._tmp.name) / "gone.md"}
         with mock.patch.object(cls, "INPUTS", inputs):
             with self.assertRaisesRegex(FileNotFoundError, "docs/beta.md"):
                 self.seed()
 
     def test_an_input_the_template_also_provides_is_refused(self):
-        cls = runs.experiment.definition().variant("beta_apidocs")
+        cls = runs.shared.definition().variant("beta_apidocs")
         inputs = {**cls.INPUTS, "declaration.toml": cls.INPUTS["TODO.md"]}
         with mock.patch.object(cls, "INPUTS", inputs):
             with self.assertRaisesRegex(FileNotFoundError, "template also provides"):
@@ -191,7 +191,7 @@ class TestWhatTheVariantHands(PrepareTestCase):
         self.assertNotIn("REFERENCE=", env)
 
     def test_a_reference_cell_gets_the_known_answer(self):
-        cls = runs.experiment.definition().variant("beta_apidocs")
+        cls = runs.shared.definition().variant("beta_apidocs")
         ws = self.seed(reference=True, cid="testpy_high_beta_apidocs_T1_r2")
         for p in cls.REFERENCE.rglob("*"):
             if p.is_file():

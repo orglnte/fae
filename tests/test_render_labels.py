@@ -26,7 +26,7 @@ class TestTheVariantLabels(unittest.TestCase):
              mock.patch.object(runs.zombies, "find_zombies", return_value=[]), \
              mock.patch.object(runs.render, "queued_summary", return_value=[]), \
              mock.patch.object(runs.queues_module.Queues, "weekly_line", return_value=""), \
-             mock.patch.object(runs.experiment, "definition") as d:
+             mock.patch.object(runs.shared, "definition") as d:
             d.return_value.variants = variants
             return runs.render.render()
 

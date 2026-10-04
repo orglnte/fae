@@ -221,9 +221,9 @@ RUN_PIDS = 128
 
 def run_image_name(variant_cls):
     """The tag name of an image built from the variant's [verify.run] image_dir."""
-    from fae import experiment as _experiment
+    from fae import shared as _shared
     from .. import image as _image
-    return _image.dir_tag_name(_experiment.definition(), variant_cls.RUN["image_dir"])
+    return _image.dir_tag_name(_shared.definition(), variant_cls.RUN["image_dir"])
 
 
 def run_image(variant_cls):

@@ -1,7 +1,7 @@
 """Operator control must actually control: selectors, the exactly-1 cell
 verbs (pause/resume/stop), and the conduct bulk verbs (pause/resume/stop).
 
-Every test patches runs.experiment.workspace().path and the scheduling plane to a TemporaryDirectory. Nothing here
+Every test patches runs.shared.workspace().path and the scheduling plane to a TemporaryDirectory. Nothing here
 reads or writes the live workspace tree, and nothing starts a process.
 """
 import contextlib
@@ -74,27 +74,27 @@ class TestSelectorIsAnchored(OperatorTestCase):
     match its own higher reps. kill has no confirmation prompt."""
 
     def test_all_matches_everything(self):
-        self.assertEqual(sorted(runs.experiment.workspace().select("all")), sorted(CIDS))
+        self.assertEqual(sorted(runs.shared.workspace().select("all")), sorted(CIDS))
 
     def test_model_still_matches_its_cells(self):
-        got = runs.experiment.workspace().select("sonnet")
+        got = runs.shared.workspace().select("sonnet")
         self.assertEqual(len(got), 3)
         self.assertTrue(all(c.startswith("sonnet_") for c in got))
 
     def test_arm_token_run_still_matches(self):
-        self.assertEqual(runs.experiment.workspace().select("alpha"),
+        self.assertEqual(runs.shared.workspace().select("alpha"),
                          ["sonnet_high_alpha_howto_T1_r2"])
 
     def test_exact_cid_matches_only_itself(self):
         self.assertEqual(
-            runs.experiment.workspace().select("sonnet_high_beta_apidocs_T1_r1"),
+            runs.shared.workspace().select("sonnet_high_beta_apidocs_T1_r1"),
             ["sonnet_high_beta_apidocs_T1_r1"])
 
     def test_r1_does_NOT_match_r10(self):
         """THE REGRESSION: `..._r1` is a substring of `..._r10`, so killing
         rep 1 would have taken reps 10-19 with it. Reps past nine are real —
         4-6 were queued and trimmed."""
-        got = runs.experiment.workspace().select("sonnet_high_beta_apidocs_T1_r1")
+        got = runs.shared.workspace().select("sonnet_high_beta_apidocs_T1_r1")
         self.assertNotIn("sonnet_high_beta_apidocs_T1_r10", got)
 
     def test_a_whole_token_legitimately_matches_many(self):
@@ -102,19 +102,19 @@ class TestSelectorIsAnchored(OperatorTestCase):
         anchoring cannot change that. What made `kill T1` dangerous was the
         absence of a preview, which is why kill now has --dry-run. Recorded
         here so nobody "fixes" it into surprising behaviour."""
-        self.assertEqual(sorted(runs.experiment.workspace().select("T1")), sorted(CIDS))
+        self.assertEqual(sorted(runs.shared.workspace().select("T1")), sorted(CIDS))
 
     def test_rep_token_matches_only_that_rep(self):
         """`r1` selects rep 1 and NOT rep 10 — the substring bug that made a
         full cid unsafe against its own siblings."""
-        got = runs.experiment.workspace().select("r1")
+        got = runs.shared.workspace().select("r1")
         self.assertIn("sonnet_high_beta_apidocs_T1_r1", got)
         self.assertIn("haiku_high_beta_apidocs_T1_r1", got)
         self.assertNotIn("sonnet_high_beta_apidocs_T1_r10", got)
 
     def test_partial_token_does_not_match(self):
-        self.assertEqual(runs.experiment.workspace().select("son"), [])
-        self.assertEqual(runs.experiment.workspace().select("apidoc"), [])
+        self.assertEqual(runs.shared.workspace().select("son"), [])
+        self.assertEqual(runs.shared.workspace().select("apidoc"), [])
 
 
 class TestQueuedCells(OperatorTestCase):
@@ -123,26 +123,26 @@ class TestQueuedCells(OperatorTestCase):
 
     def test_finds_specs_with_no_workspace(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2)])
-        self.assertEqual(runs.experiment.workspace().queued_cells("all"),
+        self.assertEqual(runs.shared.workspace().queued_cells("all"),
                          ["sonnet_high_alpha_apidocs_T1_r2"])
 
     def test_includes_specs_that_already_have_a_workspace(self):
         self.queue("sonnet", [dict(task="T1", variant="beta_apidocs", rep=1)])
-        self.assertEqual(runs.experiment.workspace().queued_cells("all"),
+        self.assertEqual(runs.shared.workspace().queued_cells("all"),
                          ["sonnet_high_beta_apidocs_T1_r1"])
 
     def test_selector_applies_and_is_anchored(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2)])
         self.queue("haiku", [dict(task="T1", variant="beta_howto", rep=3)])
-        self.assertEqual(len(runs.experiment.workspace().queued_cells("sonnet")), 1)
-        self.assertEqual(len(runs.experiment.workspace().queued_cells("haiku")), 1)
-        self.assertEqual(len(runs.experiment.workspace().queued_cells("T1")), 2)   # whole token
-        self.assertEqual(runs.experiment.workspace().queued_cells("son"), [])      # partial: no match
+        self.assertEqual(len(runs.shared.workspace().queued_cells("sonnet")), 1)
+        self.assertEqual(len(runs.shared.workspace().queued_cells("haiku")), 1)
+        self.assertEqual(len(runs.shared.workspace().queued_cells("T1")), 2)   # whole token
+        self.assertEqual(runs.shared.workspace().queued_cells("son"), [])      # partial: no match
 
     def test_unreadable_spec_file_is_survived(self):
         d = runs.queues.lane_dir("sonnet"); d.mkdir(parents=True)
         (d / "100000.sonnet_high_beta_apidocs_T1_r9.json").write_text("{not json\n")
-        self.assertEqual(runs.experiment.workspace().queued_cells("all"),
+        self.assertEqual(runs.shared.workspace().queued_cells("all"),
                          ["sonnet_high_beta_apidocs_T1_r9"])
 
 
@@ -685,15 +685,15 @@ class TestWaitReasonReadsTheNewestSnapshot(unittest.TestCase):
     def test_a_higher_attempt_number_wins_over_lexical_order(self):
         self._snap("agent.attempt-6.wait-100614.log", "stale: resets 10:40am", 1000)
         self._snap("agent.attempt-10.wait-133400.log", "current: resets 3:40pm", 2000)
-        self.assertIn("current", runs.experiment.current().cell(self.ws.name, workspaces=self.ws.parent).wait_reason())
+        self.assertIn("current", runs.shared.current().cell(self.ws.name, workspaces=self.ws.parent).wait_reason())
 
     def test_a_suffix_that_wrapped_midnight_does_not_win(self):
         self._snap("agent.attempt-4.wait-220929.log", "stale: resets 12:40am", 1000)
         self._snap("agent.attempt-4.wait-100607.log", "current: resets 10:40am", 2000)
-        self.assertIn("current", runs.experiment.current().cell(self.ws.name, workspaces=self.ws.parent).wait_reason())
+        self.assertIn("current", runs.shared.current().cell(self.ws.name, workspaces=self.ws.parent).wait_reason())
 
     def test_no_snapshots_is_empty(self):
-        self.assertEqual(runs.experiment.current().cell(self.ws.name, workspaces=self.ws.parent).wait_reason(), "")
+        self.assertEqual(runs.shared.current().cell(self.ws.name, workspaces=self.ws.parent).wait_reason(), "")
 
 
 class TestLimitWall(OperatorTestCase):
@@ -729,7 +729,7 @@ class TestLimitWall(OperatorTestCase):
         cid = CIDS[0]
         self._claim(cid)
         self._sweep(cid)
-        self.assertEqual(runs.experiment.current().cell(cid).pause_reason, "limit-wall")
+        self.assertEqual(runs.shared.current().cell(cid).pause_reason, "limit-wall")
         self.assertEqual([runs.queues.spec_cid(p) for p in runs.queues.running_specs("sonnet")],
                          [cid], "the spec stays claimed for the lane's retry")
         until = runs.queues.cooldown_until("sonnet")
@@ -746,7 +746,7 @@ class TestLimitWall(OperatorTestCase):
     def test_dry_run_writes_nothing(self):
         cid = CIDS[0]
         self._sweep(cid, dry=True)
-        self.assertIsNone(runs.experiment.current().cell(cid).pause_reason)
+        self.assertIsNone(runs.shared.current().cell(cid).pause_reason)
         self.assertEqual(runs.queues.cooldown_until("sonnet"), 0)
         self.assertEqual(self.pending("sonnet"), [])
         self.assertEqual(runs.queues.running_specs("sonnet"), [])
@@ -758,7 +758,7 @@ class TestLimitWall(OperatorTestCase):
         for detail in ("API Error: Unable to connect to API (ConnectionRefused)",
                        "API Error: Connection closed mid-response. The response"):
             self._sweep(cid, detail=detail)
-            self.assertIsNone(runs.experiment.current().cell(cid).pause_reason, detail)
+            self.assertIsNone(runs.shared.current().cell(cid).pause_reason, detail)
             self.assertEqual(runs.queues.cooldown_until("sonnet"), 0, detail)
 
     def test_wall_inside_a_stuck_agent_cools_the_lane(self):
@@ -1346,27 +1346,27 @@ class TestResumeAnswersTheLedgerNotTheFile(OperatorTestCase):
         cid = CIDS[0]
         self._log(("Pause", cid, "reason=manual"))
         # no .paused file — the operator removed it by hand
-        runs.experiment.current().cell(cid).unpause()
+        runs.shared.current().cell(cid).unpause()
         self.assertEqual(len(self._resumes()), 1)
 
     def test_no_resume_when_the_ledger_never_paused(self):
         cid = CIDS[0]
         self._log(("Admit", cid, ""))
         (self.ws / cid / ".paused").write_text("raw file, never honored\n")
-        runs.experiment.current().cell(cid).unpause()
+        runs.shared.current().cell(cid).unpause()
         self.assertEqual(self._resumes(), [])
         self.assertFalse((self.ws / cid / ".paused").exists())
 
     def test_an_epoch_seeded_pause_counts(self):
         cid = CIDS[0]
         self._log(("EPOCH", cid, "outcome=none intent=paused loop=none"))
-        runs.experiment.current().cell(cid).unpause()
+        runs.shared.current().cell(cid).unpause()
         self.assertEqual(len(self._resumes()), 1)
 
     def test_a_ledger_resume_clears_the_pause(self):
         cid = CIDS[0]
         self._log(("Pause", cid, ""), ("Resume", cid, ""))
-        runs.experiment.current().cell(cid).unpause()
+        runs.shared.current().cell(cid).unpause()
         self.assertEqual(len(self._resumes()), 1)   # only the pre-existing one
 
 
@@ -1418,7 +1418,7 @@ class TestTheWeeklyWallCoolsTheLane(OperatorTestCase):
         long = ("Error: Individual quota reached. Please upgrade your "
                 "subscription to increase your limits. Resets in 126h54m56s.")
         (ws / "agent.attempt-3.wait-120000.log").write_text(long + "\n")
-        got = runs.experiment.current().cell(ws.name, workspaces=ws.parent).wait_reason()
+        got = runs.shared.current().cell(ws.name, workspaces=ws.parent).wait_reason()
         self.assertIn("126h54m56s", got)
         self.assertEqual(runs.supervise._parse_reset_hint(got), 126 * 3600 + 54 * 60 + 56)
 
@@ -1436,7 +1436,7 @@ class TestTheWeeklyWallCoolsTheLane(OperatorTestCase):
                                side_effect=lambda w, l, b:
                                st if Path(w).name == cid else None):
             runs.supervise.supervise_pass(runs.supervise.Alerts(), dry=False)
-        self.assertEqual(runs.experiment.current().cell(cid).pause_reason, "limit-wall")
+        self.assertEqual(runs.shared.current().cell(cid).pause_reason, "limit-wall")
         until = runs.queues.cooldown_until("sonnet")
         import time as _t
         self.assertGreater(until, _t.time())

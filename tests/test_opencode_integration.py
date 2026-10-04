@@ -20,8 +20,8 @@ class TestAgentCliSelection(unittest.TestCase):
     fae.toml only says where each one's credentials are."""
 
     def definition(self):
-        from fae import experiment
-        return experiment.definition()
+        from fae import shared
+        return shared.definition()
 
     def test_each_agent_is_its_declared_cli_and_model(self):
         for key, cli in (("gemini", "agy"), ("dsv4f", "opencode"),

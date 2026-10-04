@@ -60,7 +60,7 @@ class TestTheReadersUseIt(unittest.TestCase):
             return [], [], {}
 
         definition = mock.Mock(taint_rules=rules)
-        with mock.patch.object(runs.experiment, "definition", return_value=definition), \
+        with mock.patch.object(runs.shared, "definition", return_value=definition), \
              at_workspace(ws.parent, ws.parent):
             runs.validate_ws(ws)
         self.assertEqual((seen["load_total"], seen["load_errors"]), (28114, 3))

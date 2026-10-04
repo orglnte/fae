@@ -228,6 +228,7 @@ _KEY_ENV = (
 
 def _definition(root, env, toml):
     from fae import experiment as _experiment
+    from fae import shared as _shared
     return _experiment.for_config(experiment_dir(root, env, toml.get("paths", {})))
 
 
@@ -442,7 +443,8 @@ def stage_agent(conf, cli, dest, root):
         shutil.copy(paths.ENGINE / "testagent.py",
                     Path(dest) / "testagent.py")
         from fae import experiment as _experiment
-        for vid, cls in _experiment.definition().variants.items():
+        from fae import shared as _shared
+        for vid, cls in _shared.definition().variants.items():
             if cls.REFERENCE is not None and Path(cls.REFERENCE).is_dir():
                 shutil.copytree(cls.REFERENCE, Path(dest) / "reference" / vid)
         subprocess_chmod(dest)

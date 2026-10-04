@@ -10,7 +10,7 @@ from unittest import mock
 
 from _ctx import ROOT, at_workspace  # noqa: F401  (sys.path, EXPERIMENT_DIR = the fixture)
 
-from fae import experiment as _experiment
+from fae import shared as _shared
 from fae.cell.variants.base import Variant
 from fae.experiment import check_exp as check
 
@@ -33,7 +33,7 @@ class CheckCase(unittest.TestCase):
         return "\n".join(self.lines)
 
     def variant(self, arm):
-        return _experiment.definition().variant(arm)
+        return _shared.definition().variant(arm)
 
 
 class TestTheFixtureIsReady(CheckCase):
@@ -68,7 +68,7 @@ class TestEachFailureNamesItsFix(CheckCase):
         self.assertIn("fix: python3 cli.py experiment init --experiment", self.text())
 
     def test_a_definition_that_raises_is_shown_with_where_to_fix_it(self):
-        with mock.patch.object(check._experiment, "definition", side_effect=NameError("name 'GAET' is not defined")):
+        with mock.patch.object(check._shared, "definition", side_effect=NameError("name 'GAET' is not defined")):
             self.assertEqual(self.run_check(), 1)
         self.assertIn("raised NameError: name 'GAET' is not defined", self.text())
         self.assertIn("  skip    definition", self.lines)
@@ -77,7 +77,7 @@ class TestEachFailureNamesItsFix(CheckCase):
         from fae.cell.variants import files
         with mock.patch.object(files, "load", side_effect=files.VariantFileError(
                 "variants/x.toml: unknown key(s) in [verify]: rn")):
-            d = _experiment.definition()
+            d = _shared.definition()
             d._subjects = None
             self.addCleanup(setattr, d, "_subjects", None)
             self.assertEqual(self.run_check(), 1)
@@ -207,7 +207,7 @@ class TestTheFoldedSteps(CheckCase):
         self.assertTrue(any("fae.cell.verify.run_verifier" in f.text for f in bad))
 
     def test_the_experiments_own_checks_are_findings(self):
-        d = _experiment.definition()
+        d = _shared.definition()
         verbs = dict(d.verbs, selftest=lambda ws: ["a green with no mount"])
         with mock.patch.object(type(d), "verbs", new_callable=mock.PropertyMock, return_value=verbs):
             bad = [f for f in self.findings(check._invariants) if not f.ok]

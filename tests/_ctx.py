@@ -7,7 +7,7 @@ names — `runs.cell_id`, `runs.ROOT`, `runs.ledger`, ...) because that
 discipline is what makes mock.patch.object targets stable across a
 refactor. Rebuilding that surface here, once, is the one place a moved or
 renamed attribute gets fixed. Where a test runs is the current Experiment
-(fae.experiment.set_current): use_workspace / at_workspace / patch_plane
+(fae.shared.set_current): use_workspace / at_workspace / patch_plane
 swap it, and OrchTmpCase does it for every test that must not touch the
 live fleet.
 
@@ -54,6 +54,7 @@ from fae.conduct import records, supervise, zombies  # noqa: E402
 from fae import cli as _cli     # noqa: E402
 from fae import queues as _queues_module  # noqa: E402
 from fae import experiment as _experiment  # noqa: E402
+from fae import shared as _shared  # noqa: E402
 _experiment.load(_EXPERIMENT)
 exp1 = importlib.import_module("experiment.exp1") if (_EXPERIMENT / "exp1.py").is_file() else None
 from fae.experiment.scoring import validate as taint           # noqa: E402
@@ -74,7 +75,7 @@ class _QueuesNow:
     a test set is always the one used."""
 
     def __getattr__(self, name):
-        return getattr(_experiment.workspace().queues, name)
+        return getattr(_shared.workspace().queues, name)
 
 
 runs.queues = _QueuesNow()
@@ -88,6 +89,7 @@ runs.queues_module = _queues_module
 runs.render = render
 runs.check = check
 runs.experiment = _experiment
+runs.shared = _shared
 runs.host = host
 runs.records = records
 runs.Cell = _Cell
@@ -97,13 +99,13 @@ runs.taint = taint          # fae/experiment/scoring/validate.py: the engine's t
 
 def _validate_ws(ws):
     """Validate the cell in folder `ws` the way supervision does."""
-    exp = _experiment.current()
+    exp = _shared.current()
     return exp.validate_cell(exp.cell(Path(ws).name, workspaces=Path(ws).parent))
 
 
 runs.validate_ws = _validate_ws
 runs.zombies = zombies
-runs.ROOT = _experiment.current().root
+runs.ROOT = _shared.current().root
 runs.AUTH_HINTS = render.AUTH_HINTS
 runs.LIMIT_HINTS = render.LIMIT_HINTS
 runs.SEAL_EXIT = _Cell.SEAL_EXIT
@@ -129,22 +131,22 @@ def use_workspace(case, path=None, plane=None, root=None):
     experiment root `root` (each the current one when None) the current
     Experiment's for the life of the test `case`. Returns the Experiment."""
     x = _workspace_at(path, plane, root)
-    case.addCleanup(_experiment.set_current, _experiment.set_current(x))
+    case.addCleanup(_shared.set_current, _shared.set_current(x))
     return x
 
 
 @contextlib.contextmanager
 def at_workspace(path=None, plane=None, root=None):
     """use_workspace for a `with` block."""
-    prev = _experiment.set_current(_workspace_at(path, plane, root))
+    prev = _shared.set_current(_workspace_at(path, plane, root))
     try:
-        yield _experiment.current()
+        yield _shared.current()
     finally:
-        _experiment.set_current(prev)
+        _shared.set_current(prev)
 
 
 def _workspace_at(path, plane, root):
-    cur = _experiment.current()
+    cur = _shared.current()
     root = cur.root if root is None else Path(root)
     path = cur.workspace.path if path is None else path
     plane = cur.workspace.plane if plane is None else plane
@@ -159,7 +161,7 @@ def patch_plane(case, plane):
     case.queues, case.conduct, case.locks = plane / ".queues", plane / ".conduct", plane / ".locks"
     for d in (case.queues, case.conduct, case.locks):
         d.mkdir(parents=True, exist_ok=True)
-    use_workspace(case, _experiment.workspace().path, plane)
+    use_workspace(case, _shared.workspace().path, plane)
 
 
 class OrchTmpCase(unittest.TestCase):

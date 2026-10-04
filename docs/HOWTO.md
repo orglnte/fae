@@ -336,7 +336,7 @@ the variant's image; green iff every answer matches."""
 import time
 from pathlib import Path
 
-from fae.cell import experiment as _experiment
+from fae import shared as _shared
 from fae.cell.infra import secrunner
 from fae.cell.verify import Verdict, Verifier
 
@@ -367,7 +367,7 @@ class ShoutVerifier(Verifier):
     def verify(self, ctx):
         t0 = time.time()
         artifacts, out = Path(ctx.artifacts), Path(ctx.out)
-        variant = _experiment.current().variant(ctx.variant)
+        variant = _shared.definition().variant(ctx.variant)
 
         def done(ok, stage, why, passed=0):
             return Verdict(ok=ok, stage=stage, why=why,

@@ -12,6 +12,7 @@ from _ctx import ROOT, runs
 
 from fae.cell import config as _config
 from fae import experiment as _experiment
+from fae import shared as _shared
 
 try:
     import tomllib
@@ -21,7 +22,7 @@ except ModuleNotFoundError:
 
 class TestTheRenderedDefaults(unittest.TestCase):
     def setUp(self):
-        self.text = _config.render_default_toml(_experiment.definition())
+        self.text = _config.render_default_toml(_shared.definition())
         self.doc = tomllib.loads(self.text)
 
     def test_every_engine_section_is_there_with_its_default(self):
@@ -48,7 +49,7 @@ class TestTheRenderedDefaults(unittest.TestCase):
 
 class TestTheRenderedExperimentDir(unittest.TestCase):
     def test_the_file_points_at_the_directory_it_was_written_for(self):
-        doc = tomllib.loads(_config.render_default_toml(_experiment.definition(), "shout"))
+        doc = tomllib.loads(_config.render_default_toml(_shared.definition(), "shout"))
         self.assertEqual(doc["paths"]["experiment_dir"], "shout")
 
 
