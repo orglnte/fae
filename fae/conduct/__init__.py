@@ -491,8 +491,7 @@ class Conduct:
                             extra = ""
                             if st == "DONE·green":
                                 try:
-                                    L = _experiment.current().cell(cid).read_ledger(
-                                        gate_n=_experiment.definition().gate.arrangements_nr)
+                                    L = _experiment.current().cell(cid).read_ledger()
                                     extra = (f" (attempt {L.get('green_at', '?')}"
                                              f"/{L.get('att', '?')}, "
                                              f"gate {L.get('gate', 0)}/{L.get('gate_n', 6)})")

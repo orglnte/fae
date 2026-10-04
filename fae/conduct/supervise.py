@@ -466,7 +466,7 @@ def supervise_pass(alerts, dry=False, only=""):
             # Ending the process is the only way a flock is released, so this
             # goes through the same teardown path as any other induced death.
             if not terminal and st["state"] in ("RUNNING", "WAITING"):
-                _arm = _experiment.definition().lock_of(st["variant"])
+                _arm = _experiment.workspace().named_cell(cid, st["variant"]).arm
                 _slot = _arm_slot_of(_arm, cid) if _arm else None
                 if _slot is not None and cid not in alerts.arm:
                     # Stalled means NOT PROGRESSING, which is phase_age. The

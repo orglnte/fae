@@ -391,3 +391,21 @@ class TestGateArity(unittest.TestCase):
     def test_the_default_is_six(self):
         p = ledger.parse(ws_with(ev("ITER", "green", "attempt=1 shapes=all")))
         self.assertEqual((p["gate"], p["gate_n"]), (6, 6))
+
+
+class TestACellCountsItsOwnGate(unittest.TestCase):
+    """A cell reads its ledger over its experiment's gate, not a fixed size."""
+
+    def test_read_ledger_counts_the_gates_arrangements(self):
+        import tempfile
+        from unittest import mock
+        from fae.cell.cell import Cell
+        from fae.experiment import Gate
+        with tempfile.TemporaryDirectory() as tmp:
+            c = Cell("m_high_v_T1_r1", workspaces=tmp, root=tmp, locks=tmp)
+            c.ws.mkdir()
+            (c.ws / "iterations.log").write_text(ev("ITER", "green", "attempt=1 shapes=all"))
+            with mock.patch.object(Cell, "gate_def", new_callable=mock.PropertyMock,
+                                   return_value=Gate(("a", "b", "c"))):
+                L = c.read_ledger()
+        self.assertEqual((L["gate"], L["gate_n"]), (3, 3))

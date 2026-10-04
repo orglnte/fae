@@ -313,9 +313,10 @@ class Cell:
         """The cell was prepared: its ledger exists."""
         return (self.ws / "iterations.log").exists()
 
-    def read_ledger(self, gate_n=6):
-        """The ledger as it is now (fae/cell/ledger.py's parse)."""
-        return ledger.parse(self.ws, gate_n=gate_n)
+    def read_ledger(self, gate_n=None):
+        """The ledger as it is now (fae/cell/ledger.py's parse), its gate
+        progress counted over `gate_n` arrangements: by default the gate's."""
+        return ledger.parse(self.ws, gate_n=gate_n or self.gate_def.arrangements_nr)
 
     def history(self, parsed=None):
         """The last attempt's stage token, as status shows it; `parsed` is a
@@ -1811,6 +1812,20 @@ class Cell:
         if not self.runs_an_agent():
             return True
         return self._agent_images().ready(self.variant_cls, log=log)
+
+    def provisions(self):
+        """[(kind, ident)] what a run of this cell provisions, named as each
+        provisioner names it: its variant's infra, then the engine's verify
+        container and cell network, then the verifier's own."""
+        from fae import experiment as _experiment
+        from . import image as _image
+        cls = self.variant_cls
+        out = list(cls.INFRA.identities(self.cid)) if cls is not None else []
+        verify = [("container", _image.verify_container(self.cid)), ("network", _image.cell_network(self.cid))]
+        for pair in _experiment.definition().verifier_class().identities(self.cid):
+            if pair not in verify:
+                verify.append(pair)
+        return out + verify
 
     @property
     def arm(self):
