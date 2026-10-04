@@ -2,9 +2,9 @@
 fae/cell/variants/files.py) and the infra a cell of one gets — its file's
 `[infra] class` (fae/cell/infra/base.py), instantiated with the variant.
 
-Slots are NOT taken here: the driver holds the work slot and the lock slot on
-its own fds for the cell's whole life (Queues.acquire_slots), so provisioning
-never waits on a queue.
+Slots are NOT taken here: the Conduct takes the work slot and the lock slot
+(Queues.try_slots) and hands their fds to the cell process, which holds them for
+its whole life (Queues.adopt_slots), so provisioning never waits on a queue.
 
 `python3 -m fae.cell.variants <variant> setup|teardown|infra <cid> <ws>`
 is the operator's hand entry; `cli.py experiment infra` calls the classes
