@@ -783,7 +783,7 @@ def results_run_report(
 ):
     """What THIS run produced: completed cells by variant (green rate + mean
     iterations-to-green) and the cells still working."""
-    from fae.scoring import run_report
+    from fae.experiment.scoring import run_report
     run_report.cli(since)
 
 

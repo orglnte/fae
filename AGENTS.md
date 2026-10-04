@@ -95,7 +95,7 @@ resource scaled 0↔1: `load_shape`, `trace`, `k6`, `law`; §7) and the
 infra blocks under `fae/cell/infra/` (`dind`, `kind`, `secrunner`).
 An experiment composes them with its own parameters. What a rig fault looks
 like in an experiment's evidence is its `taint_rules`, run by
-`fae/scoring/validate.py` beside the engine's own rules.
+`fae/experiment/scoring/validate.py` beside the engine's own rules.
 
 ## 1. The unit of work is a cell
 
@@ -638,7 +638,7 @@ every prior agent's memory — cross-run leakage invisible in the results.
   `fae/cell`, a ledger opened outside it, or a write to `transitions.log`
   that is not Cell's append; an experiment's suite runs the same scan on its
   tree.
-- **Authored surface is defined once**, in `fae/scoring/surface_filter.py`,
+- **Authored surface is defined once**, in `fae/experiment/scoring/surface_filter.py`,
   and it is content-based, not name-based: a name list cannot catch a vendor
   tree an agent downloads at runtime, and binary bytes counted as lines swamp
   a group's mean.
@@ -679,14 +679,14 @@ every prior agent's memory — cross-run leakage invisible in the results.
   that was merely inspected desyncs the replay and cascades.
 - **FP-guarded files** — every file of the experiment tree, the trees the
   experiment declares through `fingerprint_trees`, and every `.py` of the
-  engine's own `fae/cell/` package and `fae/experiment/` (found from the
+  engine's own `fae/cell/` and `fae/experiment/` packages, its `scoring/` included (found from the
   engine, never under the root) — are hashed, content and path, into the fingerprint
   (`fae/cell/rig.py:fp()`) that pins a cell; a mismatch between a cell's
   start and any of its verifies voids that attempt. Edit them only with no
   cell running, apply multi-hunk patches whole, and run `cli.py experiment
   check` after. An empty experiment tree or a missing declared file is FATAL, never
   a silently smaller surface. `fae/mutex.py`, `cli.py`, `fae/cli/`,
-  `fae/conduct/`, `fae/host.py`, `fae/scoring/` and the root docs are not guarded.
+  `fae/conduct/`, `fae/host.py` and the root docs are not guarded.
 - **A drain is only a window because it stops CONDUCT.** Pausing covers
   cells that have a workspace; the scheduler is free to pop a spec that has
   none. `experiment pause all` stops the run first; `experiment pause M…` parks

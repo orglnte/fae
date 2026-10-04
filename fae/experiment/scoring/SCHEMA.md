@@ -1,7 +1,7 @@
 # What the scoring writes
 
-`fae/scoring/score_cell.py` writes one record per sealed cell,
-`<workspaces>/<cell_id>/score.json`; `fae/scoring/aggregate.py` reads every
+`fae/experiment/scoring/score_cell.py` writes one record per sealed cell,
+`<workspaces>/<cell_id>/score.json`; `fae/experiment/scoring/aggregate.py` reads every
 record and writes `<workspaces>/results.csv` (one row per cell) and
 `<workspaces>/results.json` (the rows plus a summary block). All three are
 outputs, gitignored, and re-runnable: a record older than any of its inputs

@@ -4,7 +4,7 @@ import unittest
 
 from _ctx import ROOT  # noqa: F401
 
-from fae.scoring import aggregate
+from fae.experiment.scoring import aggregate
 
 
 class TestTheRow(unittest.TestCase):

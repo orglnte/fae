@@ -7,7 +7,7 @@ Reads workspaces.nosync/*/score.json (produced by score_cell.py) and writes:
                             metrics per model and variant, the failure-class
                             distribution, and what the experiment adds.
 
-Stdlib only. Usage:  python3 fae/scoring/aggregate.py
+Stdlib only. Usage:  python3 fae/experiment/scoring/aggregate.py
 """
 from __future__ import annotations
 
@@ -598,7 +598,7 @@ def main() -> int:
         if len(stale) > 10:
             print(f"  ... and {len(stale) - 10} more", file=sys.stderr)
         print("\nFix: python3 cli.py results score      (re-scores, then aggregates)\n"
-              "Override: python3 fae/scoring/aggregate.py --allow-stale",
+              "Override: python3 fae/experiment/scoring/aggregate.py --allow-stale",
               file=sys.stderr)
         return 2
 

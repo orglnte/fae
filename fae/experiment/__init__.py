@@ -40,7 +40,7 @@ The definition's `__init__.py` declares, all optional:
                             what a rig fault looks like in this experiment's
                             evidence, read through the Cell; `workspace` (a
                             Workspace) holds its sibling cells
-                            (fae/scoring/validate.py runs the engine's own
+                            (fae/experiment/scoring/validate.py runs the engine's own
                             rules beside it)
     report_text(cell)    -> the verifier's per-attempt reports, concatenated,
                             for the taint rules ("" by default)
@@ -690,9 +690,9 @@ class Experiment:
 
     def validate_cell(self, cell):
         """Validate one DONE `cell` against the engine's and this experiment's
-        taint rules (fae/scoring/validate.py); the doc is also written as its
+        taint rules (fae/experiment/scoring/validate.py); the doc is also written as its
         validation.json. Raises Busy while the cell is held."""
-        from fae.scoring import validate as _validate
+        from fae.experiment.scoring import validate as _validate
         return _validate.validate_cell(cell, self._workspace_of(cell))
 
     def finished(self, cell, workspace=None):
@@ -711,7 +711,7 @@ class Experiment:
         default) that `selector` matches: [(cid, outcome, doc)], doc None for
         a cell another process holds."""
         from fae.cell.cell import Busy
-        from fae.scoring import validate as _validate
+        from fae.experiment.scoring import validate as _validate
         ws = workspace or self.workspace
         out = []
         for cid in ws.select(selector or "all"):
@@ -730,11 +730,11 @@ class Experiment:
               on_failed=None):
         """Validate, then score the finished cells of `workspace` that
         `selector` matches (all by default), each into its score.json
-        (fae/scoring/score_cell.py, in-process). `on_validated(results)` gets
+        (fae/experiment/scoring/score_cell.py, in-process). `on_validated(results)` gets
         validate()'s results before any cell is scored, `on_cell(i, n, cid)`
         runs before each cell, `on_failed(cid, line)` after each failure.
         Returns (scored, [(cid, one-line error)])."""
-        from fae.scoring import score_cell as _sc
+        from fae.experiment.scoring import score_cell as _sc
         ws = workspace or self.workspace
         validated = self.validate(selector or "all", ws)
         if on_validated:
@@ -767,14 +767,14 @@ class Experiment:
     def aggregate(self, workspace=None, variant=None, where=(), impl=None,
                   allow_stale=False, **switches):
         """Print the scoreboard of `workspace`'s scored cells
-        (fae/scoring/aggregate.py, a process of its own on that workspace).
+        (fae/experiment/scoring/aggregate.py, a process of its own on that workspace).
         `switches` are AGGREGATE_SWITCHES by name. Raises CalledProcessError
         when aggregate refuses (a stale score.json, without allow_stale)."""
         unknown = set(switches) - set(self.AGGREGATE_SWITCHES)
         if unknown:
             raise TypeError(f"unknown aggregate option(s): {', '.join(sorted(unknown))}")
         ws = workspace or self.workspace
-        argv = [sys.executable, "-m", "fae.scoring.aggregate"]
+        argv = [sys.executable, "-m", "fae.experiment.scoring.aggregate"]
         if allow_stale:
             argv.append("--allow-stale")
         if variant:

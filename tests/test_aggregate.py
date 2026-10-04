@@ -1,4 +1,4 @@
-"""fae/scoring/aggregate.py — the metrics that reach the paper. What each one
+"""fae/experiment/scoring/aggregate.py — the metrics that reach the paper. What each one
 averages over is a methodological choice, not an implementation detail."""
 import importlib.util as _ilu
 import json
@@ -10,7 +10,7 @@ from pathlib import Path
 
 from _ctx import ROOT, at_workspace
 
-_spec = _ilu.spec_from_file_location("aggregate", Path(ROOT) / "fae" / "scoring" / "aggregate.py")
+_spec = _ilu.spec_from_file_location("aggregate", Path(ROOT) / "fae" / "experiment" / "scoring" / "aggregate.py")
 aggregate = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(aggregate)
 
@@ -144,7 +144,7 @@ class TestTableColumns(unittest.TestCase):
         self.assertLess(hdrs.index("ITG mn/avg/mx"), hdrs.index("SLoC avg -mn/+mx"))
 
     def test_row_order_matches_the_header(self):
-        src = (Path(ROOT) / "fae" / "scoring" / "aggregate.py").read_text()
+        src = (Path(ROOT) / "fae" / "experiment" / "scoring" / "aggregate.py").read_text()
         row = next(l for l in src.splitlines() if "[str(n), e2e, grn, itg, agent_min, per_att, lines]" in l)
         hdrs = [h for h, _ in aggregate.table_columns(None)]
         self.assertLess(row.index("itg"), row.index("agent_min"))
@@ -163,7 +163,7 @@ class TestTableColumns(unittest.TestCase):
         self.assertNotIn("N: GRN%  Δpt", without)
 
     def test_auth_lines_label_is_gone(self):
-        src = (Path(ROOT) / "fae" / "scoring" / "aggregate.py").read_text()
+        src = (Path(ROOT) / "fae" / "experiment" / "scoring" / "aggregate.py").read_text()
         self.assertNotIn("AUTH_LINES", src)
 
     def test_the_loc_column_is_wide_enough_for_its_header_and_values(self):
@@ -255,7 +255,7 @@ class TestTheSummaryCarriesTheExperimentsEntries(unittest.TestCase):
         import re
         from fae import experiment as _experiment
         d = _experiment.definition()
-        src = (Path(ROOT) / "fae" / "scoring" / "aggregate.py").read_text()
+        src = (Path(ROOT) / "fae" / "experiment" / "scoring" / "aggregate.py").read_text()
         for word in set(d.ids) | {f for c in d.variants.values() for f in c.FACTORS.values()}:
             self.assertIsNone(re.search(rf"\b{re.escape(word)}\b", src), word)
 

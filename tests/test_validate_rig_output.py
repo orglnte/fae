@@ -9,7 +9,7 @@ from unittest import mock
 from _ctx import runs, at_workspace, use_workspace
 
 from fae.cell import ledger
-from fae.scoring.validate import rig_output_findings
+from fae.experiment.scoring.validate import rig_output_findings
 
 CID = "m_high_arm_cond_T1_r1"
 

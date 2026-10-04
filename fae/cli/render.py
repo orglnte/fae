@@ -489,7 +489,7 @@ def results_score(args):
 
 
 def results_aggregate(args):
-    """The scoreboard from the cells' score.json (fae/scoring/aggregate.py)."""
+    """The scoreboard from the cells' score.json (fae/experiment/scoring/aggregate.py)."""
     _experiment.current().aggregate(
         variant=getattr(args, "variant", None), where=getattr(args, "where", None) or (),
         impl=getattr(args, "impl", None), allow_stale=getattr(args, "allow_stale", False),
