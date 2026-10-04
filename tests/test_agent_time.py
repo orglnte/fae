@@ -112,7 +112,7 @@ class TestTheClientVersion(unittest.TestCase):
 
     def test_the_scorer_still_reads_a_line_that_carries_it(self):
         import importlib.util as _ilu
-        spec = _ilu.spec_from_file_location("sc", Path(ROOT) / "fae" / "scoring" / "score_cell.py")
+        spec = _ilu.spec_from_file_location("sc", Path(ROOT) / "fae" / "experiment" / "scoring" / "score_cell.py")
         sc = _ilu.module_from_spec(spec)
         spec.loader.exec_module(sc)
         log = Path(tempfile.mkdtemp()) / "iterations.log"

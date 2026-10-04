@@ -56,7 +56,7 @@ from fae import queues as _queues_module  # noqa: E402
 from fae import experiment as _experiment  # noqa: E402
 _experiment.load(_EXPERIMENT)
 exp1 = importlib.import_module("experiment.exp1") if (_EXPERIMENT / "exp1.py").is_file() else None
-from fae.scoring import validate as taint           # noqa: E402
+from fae.experiment.scoring import validate as taint           # noqa: E402
 from fae import mutex  # noqa: E402
 from fae.experiment import cell_id, parse_cell_id  # noqa: E402
 from fae.cell import ledger  # noqa: E402
@@ -92,7 +92,7 @@ runs.host = host
 runs.records = records
 runs.Cell = _Cell
 runs.supervise = supervise
-runs.taint = taint          # fae/scoring/validate.py: the engine's taint rules
+runs.taint = taint          # fae/experiment/scoring/validate.py: the engine's taint rules
 
 
 def _validate_ws(ws):

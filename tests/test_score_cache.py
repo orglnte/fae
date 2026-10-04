@@ -13,7 +13,7 @@ from unittest import mock
 
 from _ctx import ROOT
 
-_spec = _ilu.spec_from_file_location("sc", Path(ROOT) / "fae" / "scoring" / "score_cell.py")
+_spec = _ilu.spec_from_file_location("sc", Path(ROOT) / "fae" / "experiment" / "scoring" / "score_cell.py")
 sc = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(sc)
 

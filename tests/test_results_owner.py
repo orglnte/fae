@@ -26,7 +26,7 @@ class TestNoDriverOnTheResultsPath(unittest.TestCase):
 
     def test_the_scoring_modules_import_no_scheduler_or_cli(self):
         for name in ("validate.py", "score_cell.py", "aggregate.py"):
-            bad = [m for m in _imports(ENGINE / "scoring" / name)
+            bad = [m for m in _imports(ENGINE / "experiment" / "scoring" / name)
                    if m.startswith(("fae.conduct", "fae.cli"))]
             self.assertEqual(bad, [], name)
 
@@ -47,7 +47,7 @@ class TestScoreScoresWhatValidateFound(unittest.TestCase):
         exp = runs.experiment.current()
         ws = SimpleNamespace(cell=lambda cid: SimpleNamespace(cid=cid))
         calls = []
-        from fae.scoring import score_cell
+        from fae.experiment.scoring import score_cell
         with mock.patch.object(exp, "validate", return_value=validated), \
              mock.patch.object(score_cell, "score_one",
                                side_effect=lambda cid, cell: rcs[cid]):

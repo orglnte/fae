@@ -137,14 +137,14 @@ docker-backed tests skip instead of touching the host daemon.
 
 ```sh
 python3 cli.py results score          # all DONE cells; in-process, cached
-python3 fae/scoring/score_cell.py <cell>  # one cell, standalone
+python3 fae/experiment/scoring/score_cell.py <cell>  # one cell, standalone
 ```
 
 `score` validates first (VALID/TAINTED — TAINTED is raised to the operator,
 never auto-requeued), scores each cell into `<cell>/score.json` (per-cell
 `score-cache.json` makes warm sweeps incremental), then prints the aggregate
 table and writes `workspaces.nosync/results.csv` + `results.json`
-(schema: `fae/scoring/SCHEMA.md`).
+(schema: `fae/experiment/scoring/SCHEMA.md`).
 
 ---
 
@@ -162,17 +162,17 @@ fae/conduct/        the scheduler: admission, supervision, the reaper,
 fae/host.py         the host's facts: process table, containers, memory,
                      the host-sleep book
 fae/experiment/     the experiment: Definition, Workspace, Experiment and
-                     its results actions; check_exp.py its readiness check
+                     its actions; check_exp.py its readiness check;
+                     scoring/ its results (validate, score_cell, aggregate,
+                     run_report, surface_filter, SCHEMA.md)
 fae/cell/           the Python cell driver: attempt loop, the Variant
                      interface + registry, verify, config, the ledger (the
                      one parser), the contract base, contrib/ and infra/ blocks
-fae/                the engine package: cli/, conduct/, experiment/, cell/, scoring/,
+fae/                the engine package: cli/, conduct/, experiment/, cell/,
                      mutex.py (the one flock),
                      queues.py (the only code touching .queues/),
                      plane.py (where the scheduling plane lives),
                      agent-container/
-fae/scoring/             score_cell.py, aggregate.py, surface_filter.py,
-                     SCHEMA.md
 tests/               the engine's unittest suite (locks, queues, scoring), on
                      tests/fixture_experiment/
 .tla/                TLA+ model of the run lifecycle (fae/utils/tla_verify.py

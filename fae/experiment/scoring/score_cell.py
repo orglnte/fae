@@ -5,8 +5,8 @@ Computes the authored surface, iterations-to-green, the verify's results
 and the agent's time from the cell's own files. Stdlib only.
 
 Usage:
-    python3 fae/scoring/score_cell.py <cell_id>
-    python3 fae/scoring/score_cell.py opus_high_x_sealed_apidocs_T1_r1
+    python3 fae/experiment/scoring/score_cell.py <cell_id>
+    python3 fae/experiment/scoring/score_cell.py opus_high_x_sealed_apidocs_T1_r1
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import re
 import sys
 from pathlib import Path
 
-from fae.scoring import surface_filter
+from fae.experiment.scoring import surface_filter
 
 from fae import paths as _paths  # noqa: E402
 
@@ -169,7 +169,7 @@ def author_surface(artifacts_dir: Path, skeleton: dict, cache: dict | None = Non
                 fresh[rel] = ent
             else:
                 p = Path(full)
-                # ONE definition of authored surface (fae/scoring/surface_filter.py);
+                # ONE definition of authored surface (fae/experiment/scoring/surface_filter.py);
                 # content-based, so a vendor tree the agent downloads is still caught.
                 if not surface_filter.countable(p, artifacts_dir, rel):
                     fresh[rel] = {"sig": sig, "skip": True}

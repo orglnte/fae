@@ -1,4 +1,4 @@
-"""Experiment.aggregate(): the argv it hands to the fae/scoring/aggregate.py
+"""Experiment.aggregate(): the argv it hands to the fae/experiment/scoring/aggregate.py
 process must carry every option the CLI declared, or an option that parses
 fine on the command line silently never reaches the script that reads it;
 and the process must aggregate the workspace it was asked about."""

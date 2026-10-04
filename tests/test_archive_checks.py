@@ -8,7 +8,7 @@ from pathlib import Path
 from _ctx import ROOT  # noqa: F401  (sys.path)
 
 from fae.cell import archive
-from fae.scoring.validate import archive_warns
+from fae.experiment.scoring.validate import archive_warns
 
 
 def ws_with(*runs):

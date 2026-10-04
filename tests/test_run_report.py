@@ -5,7 +5,7 @@ import time
 import unittest
 
 from _ctx import runs, OrchTmpCase
-from fae.scoring import run_report
+from fae.experiment.scoring import run_report
 
 TS = "2026-07-30T09:00:00Z"
 
