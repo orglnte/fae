@@ -54,8 +54,7 @@ _experiment.load(_EXPERIMENT)
 exp1 = importlib.import_module("experiment.exp1") if (_EXPERIMENT / "exp1.py").is_file() else None
 from fae.driver import validate as taint            # noqa: E402
 from fae.driver.common import (                     # noqa: E402
-    ROOT as _COMMON_ROOT, AUTH_HINTS, LIMIT_HINTS, PAUSE_EXIT_RC,
-    cell_id, mutex, parse_cell_id,
+    ROOT as _COMMON_ROOT, cell_id, mutex, parse_cell_id,
 )
 from fae.cell import ledger  # noqa: E402
 
@@ -96,9 +95,8 @@ runs.supervise = supervise
 runs.taint = taint          # driver.validate's own name is "validate"
 runs.zombies = zombies
 runs.ROOT = _COMMON_ROOT
-runs.AUTH_HINTS = AUTH_HINTS
-runs.LIMIT_HINTS = LIMIT_HINTS
-runs.PAUSE_EXIT_RC = PAUSE_EXIT_RC
+runs.AUTH_HINTS = render.AUTH_HINTS
+runs.LIMIT_HINTS = render.LIMIT_HINTS
 runs.SEAL_EXIT = _Cell.SEAL_EXIT
 runs.cell_id = cell_id
 runs.ledger = ledger

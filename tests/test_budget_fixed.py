@@ -22,15 +22,16 @@ CLI_PY = (Path(ROOT) / "fae" / "cli.py").read_text()
 # respawn, the Queues and the Cell's own start
 OPS_PY = "".join((Path(ROOT) / "fae" / f).read_text() for f in (
     "cli.py", "driver/conduct/__init__.py", "queues.py", "cell/cell.py"))
-CONFIG_PY = (HARNESS / "cell" / "config.py").read_text()
+CELL_PY = (HARNESS / "cell" / "cell.py").read_text()
 PREPARE = (HARNESS / "cell" / "prepare.py").read_text()
 
 
 class TestTheConstant(unittest.TestCase):
 
-    def test_both_sides_agree(self):
-        self.assertEqual(runs.common.ATTEMPT_BUDGET, 10)
-        self.assertIn("ATTEMPT_BUDGET = 10", CONFIG_PY)
+    def test_one_constant(self):
+        from fae.cell import ATTEMPT_BUDGET
+        self.assertEqual(ATTEMPT_BUDGET, 10)
+        self.assertIn("ATTEMPT_BUDGET = 10", CELL_PY)
 
     def test_the_constant_wins_over_the_environment(self):
         # The behavioural claim: an inherited ATTEMPT_BUDGET cannot change it.

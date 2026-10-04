@@ -83,6 +83,9 @@ class Busy(RuntimeError):
     changing it."""
 
 
+# Attempts-to-green is the study's dependent variable: a per-cell budget would
+# make two cells incomparable, so it is one constant (prepare.py records it in
+# every cell.env).
 ATTEMPT_BUDGET = 10
 
 

@@ -22,6 +22,7 @@ import ujson as json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from fae.cell.cell import Cell
 from fae.driver import common
 from . import host, supervise, zombies
 
@@ -608,17 +609,17 @@ class Conduct:
                         admitted.add(cid)
                         print(f"  [{common.hhmm()}] admitted {cid} "
                               f"({len(host.loop_parents())}/{n} live)", flush=True)
-                    elif rc in (common.LOCK_EXIT_RC, common.PAUSE_EXIT_RC):
+                    elif rc in (Cell.LOCK_EXIT, Cell.PAUSE_EXIT):
                         # LOCK_EXIT: workspace already owned; PAUSE: a pause landed
                         # in the claim->spawn window. Cell-specific, not lane-wide:
                         # the claim stands and the next converge decides.
                         idle_sweep += 1
-                    elif rc in (common.INFRA_EXIT_RC, common.GENERIC_CRASH_EXIT_RC):
+                    elif rc in (Cell.INFRA_EXIT, Cell.CRASH_EXIT):
                         # the infra failed, or the driver crashed outright,
                         # under the driver at admission: keep the claim for
                         # converge, but count it toward the cap
                         self.respawn_count(cid, bump=True)
-                        kind = "infra HALT" if rc == common.INFRA_EXIT_RC else "crash"
+                        kind = "infra HALT" if rc == Cell.INFRA_EXIT else "crash"
                         print(f"  [{common.hhmm()}] {kind} at admission of {cid} "
                               f"— counted toward its {MAX_RESPAWNS} repairs", flush=True)
                         idle_sweep += 1
@@ -1213,14 +1214,14 @@ class Conduct:
                 self.respawn_count(cid, bump=True)
                 print(f"  [{common.hhmm()}] repaired {cid} (attempt {n + 1} of "
                       f"{MAX_RESPAWNS})", flush=True)
-            elif rc in (common.LOCK_EXIT_RC, common.PAUSE_EXIT_RC):
+            elif rc in (Cell.LOCK_EXIT, Cell.PAUSE_EXIT):
                 pass                       # owned or paused meanwhile: next pass
-            elif rc in (common.INFRA_EXIT_RC, common.GENERIC_CRASH_EXIT_RC):
+            elif rc in (Cell.INFRA_EXIT, Cell.CRASH_EXIT):
                 # the infra failed, or the driver crashed outright, under the
                 # fresh attempt: a repair that spends budget like any other, so a
                 # deterministic host-level fault cannot spin forever uncounted.
                 self.respawn_count(cid, bump=True)
-                kind = "infra HALT" if rc == common.INFRA_EXIT_RC else "crash"
+                kind = "infra HALT" if rc == Cell.INFRA_EXIT else "crash"
                 print(f"  [{common.hhmm()}] {kind} on repair of {cid} "
                       f"(repair {n + 1} of {MAX_RESPAWNS})", flush=True)
             elif rc in common.SYSTEMIC_EXITS:

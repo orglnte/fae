@@ -22,6 +22,13 @@ from fae.driver.common import faults
 from fae.driver.conduct import Conduct
 
 
+# A wait reason that names a provider wall: LIMIT_HINTS gates monitor(), and
+# AUTH_HINTS, a subset of it, marks the walls a human must clear.
+LIMIT_HINTS = ("limit", "quota", "not logged in", "overloaded",
+               "please run /login", "authentication")
+AUTH_HINTS = ("not logged in", "please run /login", "authentication")
+
+
 # --- tables -------------------------------------------------------------------
 
 def _dur(secs):
@@ -332,9 +339,9 @@ def monitor(args):
                 if not (s["state"] == "WAITING" and s["why"] == "limit"):
                     continue
                 reason = s["detail"].lower()
-                if not any(h in reason for h in common.LIMIT_HINTS):
+                if not any(h in reason for h in LIMIT_HINTS):
                     continue
-                kind = "AUTH" if any(h in reason for h in common.AUTH_HINTS) else "limit"
+                kind = "AUTH" if any(h in reason for h in AUTH_HINTS) else "limit"
                 when = parse_reset(s["detail"])
                 walls.append((kind, s["cid"], s["detail"], when))
             os.system("clear")

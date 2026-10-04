@@ -12,6 +12,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 
+from fae.cell.cell import ATTEMPT_BUDGET
 from fae.driver import common
 from fae.driver.conduct import Conduct
 
@@ -101,7 +102,7 @@ def report(since: str | None = None) -> str:
                if rows else "  (none)")
     out.append(f"  total: {tot_d} done ({tot_g} green, {tot_b} budget)")
     out.append(f"\n— IN PROGRESS ({len(live)}) —")
-    lrows = [(m, t, f"r{r}", f"{a}/{common.ATTEMPT_BUDGET}", ph)
+    lrows = [(m, t, f"r{r}", f"{a}/{ATTEMPT_BUDGET}", ph)
              for m, t, r, a, ph in sorted(live)]
     out.append(_fmt(lrows, ("AGENT", "VARIANT", "REP", "ATTEMPT", "PHASE"))
                if lrows else "  (none)")

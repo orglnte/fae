@@ -57,11 +57,6 @@ def experiment_dir():
 # resume defers respawns past it (--force overrides).
 PER_AGENT_CAP = int(os.environ.get("PER_AGENT_CAP", 1))
 
-# Attempts-to-green is the dependent variable, so the budget is a CONSTANT and
-# not a knob: two cells run at different budgets are not comparable, and a
-# "raise the budget and resume" path would be a standing exception to sealing.
-ATTEMPT_BUDGET = 10
-
 # THE filesystem mutex, THE provider-fault vocabulary: one module each,
 # imported (the driver decides "retry this attempt" and faults decides "cool
 # this lane" on one text).
@@ -96,17 +91,9 @@ def __getattr__(name):
     raise AttributeError(name)
 
 
-PAUSE_EXIT_RC = int(os.environ.get("PAUSE_EXIT", 44))
-INFRA_EXIT_RC = 45          # Cell.INFRA_EXIT: the driver halted on its infra
-LOCK_EXIT_RC = 43               # Cell.LOCK_EXIT: another loop owns the workspace, benign
-GENERIC_CRASH_EXIT_RC = 47      # Cell.CRASH_EXIT
 # driver exit codes that mean EVERY cell would fail the same way:
 #   1  _fp FATAL (unguarded verify surface); 2  AGENT_CMD empty; 42  HALT[agent] no creds
 SYSTEMIC_EXITS = frozenset({1, 2, 42})
-# LIMIT_HINTS is the OUTER gate in monitor(); AUTH_HINTS must stay a SUBSET of it.
-LIMIT_HINTS = ("limit", "quota", "not logged in", "overloaded",
-               "please run /login", "authentication")
-AUTH_HINTS = ("not logged in", "please run /login", "authentication")
 
 
 def sh(cmd, **kw):

@@ -24,11 +24,6 @@ except ModuleNotFoundError:                       # py<3.11
 
 from fae import plane as _plane  # noqa: E402
 
-# Attempts-to-green is the study's dependent variable. A per-cell budget makes
-# two cells incomparable, so this is one constant for the whole experiment,
-# mirrored in fae/driver/common.py; prepare.py records it into every cell.env.
-ATTEMPT_BUDGET = 10
-
 # The engine's own rig defaults; fae.toml [rig] overrides one with an
 # UPPERCASE key. The experiment's knobs (a store, a load shape) are its
 # CONFIG, read below.
@@ -269,6 +264,7 @@ def _build(root, env, toml, definition=None):
 
     v = dict(_ENGINE_DEFAULTS)
     v.update({k: str(val) for k, val in rig.items() if k.isupper()})
+    from .cell import ATTEMPT_BUDGET
     v["ATTEMPT_BUDGET"] = str(ATTEMPT_BUDGET)
     # The gate is the experiment's (its GATE); only a smoke cell, a pipeline
     # check that is never scored, may cut it to the seed arrangement.

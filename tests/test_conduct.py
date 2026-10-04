@@ -523,7 +523,7 @@ class TestAGenericCrashSpendsARepair(ConductCase):
     counted, not frozen."""
 
     def test_exit_47_is_counted_and_does_not_freeze_the_lane(self):
-        self.spawn_rc = runs.common.GENERIC_CRASH_EXIT_RC
+        self.spawn_rc = runs.Cell.CRASH_EXIT
         self.q("aaa", [self.spec(rep=1)])
         out = self.run_conduct()
         self.assertIn("crash at admission", out)
@@ -555,7 +555,7 @@ class TestSystemicFreeze(ConductCase):
         (44): cell-specific like 43, so the claim STANDS and the next
         converge decides — asserting only 'not frozen' passed even when 44
         fell through to the unknown-rc branch."""
-        self.spawn_rc = runs.PAUSE_EXIT_RC
+        self.spawn_rc = runs.Cell.PAUSE_EXIT
         self.q("aaa", [self.spec(rep=1)])
         out = self.run_conduct()
         self.assertNotIn("FROZEN", out)
