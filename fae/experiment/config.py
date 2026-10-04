@@ -28,7 +28,7 @@ from fae import plane as _plane  # noqa: E402
 # The engine's own rig defaults; fae.toml [rig] overrides one with an
 # UPPERCASE key. The experiment's knobs (a store, a load shape) are its
 # CONFIG, read below.
-_ENGINE_DEFAULTS = {
+ENGINE_DEFAULTS = {
     "HB_TICK": "30",
     # An agent container's CPU ceiling: agents run beside the one verify the
     # fleet measures at a time, and an uncapped one (its own tests, a build)
@@ -44,13 +44,6 @@ _ENGINE_DEFAULTS = {
 # The agent container's name, `<prefix><cell id>`: the engine's own label
 # (the sealed run, whatever the experiment), and what the fleet console,
 # the supervisor and the reaper recognise an agent by.
-AGENT_CONTAINER_PREFIX = "fae-agent-"
-
-
-def agent_container(cid):
-    return f"{AGENT_CONTAINER_PREFIX}{cid}"
-
-
 # The experiment definition the engine runs: task package, variants, verifier
 # surface. Relative to the repo root unless [paths] experiment_dir or the
 # environment says otherwise.
@@ -262,7 +255,7 @@ def _build(root, env, toml, definition=None):
     cli, model_id, agent_effort, agent_home = agent_for(agent, definition, toml)
     effort = env["EFFORT"] if "EFFORT" in env else (agent_effort if agent_effort is not None else "high")
 
-    v = dict(_ENGINE_DEFAULTS)
+    v = dict(ENGINE_DEFAULTS)
     v.update({k: str(val) for k, val in rig.items() if k.isupper()})
     from fae.cell.cell import ATTEMPT_BUDGET
     v["ATTEMPT_BUDGET"] = str(ATTEMPT_BUDGET)
@@ -329,70 +322,6 @@ def _build(root, env, toml, definition=None):
 def opencode_key_file(agent_home):
     """The opencode key path in the agent's credentials home."""
     return Path(agent_home) / "opencode.key"
-
-
-def agent_cpu_args(conf):
-    """The agent container's CPU ceiling and, when pinning is on, its cores."""
-    out = []
-    cpus = str(conf.get("AGENT_CPUS", _ENGINE_DEFAULTS["AGENT_CPUS"])).strip()
-    if cpus and cpus != "0":
-        out += [f"--cpus={cpus}"]
-    cpuset = str(conf.get("CPUSET_AGENT") or "").strip()
-    if cpuset:
-        out += [f"--cpuset-cpus={cpuset}"]
-    return out
-
-
-def build_agent_argv(conf, cid, art, home, prompt_file, docker_net="", kube_mount="",
-                     feedback="", image=None):
-    """The `docker run ...` argv for one agent invocation, built from the
-    config — no shell. The per-arm docker flags (network, kubeconfig mount) the
-    setup hook emitted are shlex-split in; the prompt is passed as one arg."""
-    import shlex
-    cli = conf.get("AGENT_CLI", "claude")
-    model = conf.get("AGENT_MODEL", "")
-    image = conf.get("AGENT_IMAGE") or image or "fae-agent:latest"
-    prompt = Path(prompt_file).read_text()
-    common = ["docker", "run", "--rm", "--name", agent_container(cid),
-              *agent_cpu_args(conf),
-              "-v", f"{art}:/workspace", "-w", "/workspace"]
-    add_dirs = ["--add-dir", "/workspace"]
-    if feedback:
-        common += ["-v", f"{feedback}:/feedback:ro"]
-        add_dirs += ["--add-dir", "/feedback"]
-    net = shlex.split(docker_net) + shlex.split(kube_mount)
-
-    if cli == "agy":
-        return (common + ["-v", f"{home}:/home/node/.gemini"] + net
-                + [image, "agy", "--sandbox", "--dangerously-skip-permissions",
-                   *add_dirs, "--model", model,
-                   "--print-timeout", "60m", "--print", prompt])
-    if cli == "opencode":
-        key = opencode_key_file(conf.get("AGENT_HOME", "")).read_text().strip()
-        return (common + ["-v", f"{home}:/home/node/.config/opencode",
-                          "-e", f"OPENCODE_API_KEY={key}"] + net
-                + [image, "opencode", "run", "--print-logs", "--log-level",
-                   "ERROR", "--model", model, prompt])
-    if cli == "testagent":
-        return (common + ["-v", f"{home}:/home/node/.testagent",
-                          "-e", "CELL_ID", "-e", "VARIANT", "-e", "TESTAGENT_PLAN", "-e", "SERVICE_PORT"] + net
-                + [image, "python3", "/home/node/.testagent/testagent.py", prompt])
-    # claude
-    oauth = Path(conf.get("AGENT_HOME", "")) / ".oauth_token"
-    tok = []
-    if oauth.is_file() and oauth.stat().st_size:
-        tok = ["-e", f"CLAUDE_CODE_OAUTH_TOKEN={oauth.read_text().strip()}"]
-    effort = conf.get("EFFORT", "")
-    stream = conf.get("STREAM_AGENT", "")
-    tail = ["claude", "-p", "--dangerously-skip-permissions", "--model", model]
-    if feedback:
-        tail += ["--add-dir", "/feedback"]
-    if effort:
-        tail += ["--effort", effort]
-    if stream:
-        tail += ["--output-format", "stream-json", "--verbose"]
-    return (common + ["-v", f"{home}:/home/node/.claude"] + tok + net
-            + [image, *tail, prompt])
 
 
 def _refuse(dest, suffix):
