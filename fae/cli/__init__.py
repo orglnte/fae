@@ -783,8 +783,9 @@ def results_run_report(
 ):
     """What THIS run produced: completed cells by variant (green rate + mean
     iterations-to-green) and the cells still working."""
-    from fae.experiment.scoring import run_report
-    run_report.cli(since)
+    since_ts = render.parse_since(since) if since is not None else conduct.Conduct().started_at()
+    done, live = _experiment.current().run_report(since_ts)
+    print(render.run_report_text(done, live, since_ts))
 
 
 @results_app.command("validate")
