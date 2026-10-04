@@ -265,7 +265,7 @@ def matches(cid, sel):
     return f"_{cid}_".find(f"_{sel}_") >= 0
 
 
-def is_blanket(selectors):
+def is_cell_selector_blanket(selectors):
     """A selection naming `all`: standing operator decisions (roster or manual
     pauses, a cancel) survive it, and yield only to a cell or agent named."""
     return any(s in ("all", "*") for s in selectors)

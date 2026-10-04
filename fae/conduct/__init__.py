@@ -653,7 +653,7 @@ class Conduct:
         cooperative exit — no separate mechanism and no separate state."""
         qs = fae.experiment.exp().workspace.queues
         scope = list(args.scope)
-        blanket = _experiment.is_blanket(scope)
+        blanket = _experiment.is_cell_selector_blanket(scope)
         agents = [] if blanket else scope
         admission_only = getattr(args, "admission_only", False)
         if blanket and admission_only:
@@ -775,7 +775,7 @@ class Conduct:
         roster/manual for those agents."""
         qs = fae.experiment.exp().workspace.queues
         scope = list(args.scope)
-        blanket = _experiment.is_blanket(scope)
+        blanket = _experiment.is_cell_selector_blanket(scope)
         if not blanket:
             known = _known_agents()
             bad = [m for m in scope if m not in known]
@@ -850,7 +850,7 @@ class Conduct:
         lives elsewhere (`cell stop --cancel`). Confirms before acting."""
         qs = fae.experiment.exp().workspace.queues
         scope = list(args.scope)
-        blanket = _experiment.is_blanket(scope)
+        blanket = _experiment.is_cell_selector_blanket(scope)
         agents = None if blanket else scope
         if agents:
             known = _known_agents()
