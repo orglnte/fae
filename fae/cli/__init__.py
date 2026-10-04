@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-"""Grouped Typer front-end for the driver — 
+"""The operator's command line: grouped Typer verbs, their printing in
+render.py.
 
 DESIGN: this is a CLI LAYER, not the orchestrator. A command acting on the
 run calls the Conduct (fae/conduct/); one acting on cells selects
@@ -44,20 +44,19 @@ from typing import Optional
 
 import typer
 
-ROOT = Path(__file__).resolve().parents[1]
-# When run directly (`python3 cli.py ...`) Python already puts this file's
-# directory on sys.path[0]; when path-loaded (tests exec this module by
-# file), it does not — so fae/driver/ needs this insert to be importable either way.
+ROOT = Path(__file__).resolve().parents[2]
+# Path-loaded by file (tests do), this package's checkout is not on sys.path:
+# the insert makes `fae` importable either way.
 sys.path.insert(0, str(ROOT))
 
 from fae import experiment as _experiment  # noqa: E402
 from fae.cell.cell import Busy  # noqa: E402
-from fae.driver import render  # noqa: E402
+from fae.cli import render  # noqa: E402
 from fae import conduct, host  # noqa: E402
 
 
 def _ns(**kw):
-    """The namespace fae/driver/*.py's functions read. Defaults mirror argparse's."""
+    """The namespace the verbs' functions read. Defaults mirror argparse's."""
     return SimpleNamespace(**kw)
 
 

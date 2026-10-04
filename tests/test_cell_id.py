@@ -137,7 +137,7 @@ class TestOneImplementation(unittest.TestCase):
             self.assertIn("from fae.experiment import cell_id", (runs.ROOT / rel).read_text(), rel)
 
     def test_no_hidden_subcommand_remains(self):
-        src = (runs.ROOT / "fae" / "cli.py").read_text()
+        src = (runs.ROOT / "fae" / "cli" / "__init__.py").read_text()
         self.assertNotIn('add_parser("_cell_id")', src)
         self.assertNotIn('add_parser("_seed_doc")', src)
         self.assertNotIn('command("_cell_id")', src)

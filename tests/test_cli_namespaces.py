@@ -1,4 +1,4 @@
-"""cli.py builds each fae/driver/*.py namespace by hand, so a misspelled field fails
+"""fae/cli builds each verb's namespace by hand, so a misspelled field fails
 only at invocation — and only on the branch that reads it. These tests invoke
 every mutating command with the target function mocked and assert the captured
 namespace carries exactly the fields the real function reads, with the values
@@ -18,7 +18,7 @@ try:
 except ImportError:                                    # pragma: no cover
     raise unittest.SkipTest("typer not installed")
 
-_spec = _ilu.spec_from_file_location("cli", Path(ROOT) / "fae" / "cli.py")
+_spec = _ilu.spec_from_file_location("cli", Path(ROOT) / "fae" / "cli" / "__init__.py")
 cli = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(cli)
 
@@ -173,7 +173,7 @@ class TestResultsScore(unittest.TestCase):
 
 
 class TestExperimentStatus(unittest.TestCase):
-    """status/watch/monitor live in fae/driver/render.py, not on a single verb
+    """status/watch/monitor live in fae/cli/render.py, not on a single verb
     name — the generic invoke() helper (which patches <mod>.<fn_name>
     directly) can't see the call, so these patch cli.render.status explicitly."""
 

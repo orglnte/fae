@@ -8,5 +8,5 @@ coverage>=7.16
 
 # Runtime deps the harness itself imports (declared here for a one-shot install
 # on a fresh checkout; move to a requirements.txt if the repo grows one):
-ujson       # every fae/driver/*.py — the ledger/queue JSON path
+ujson       # the engine's JSON reads and writes (conduct, cli, scoring, experiment)
 typer       # cli.py — the grouped operator front-end

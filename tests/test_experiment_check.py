@@ -184,7 +184,7 @@ class TestTheWalk(CheckCase):
 
 class TestTheCli(unittest.TestCase):
     def test_experiment_check_is_registered_and_rig_keeps_only_the_harness_verbs(self):
-        src = (Path(ROOT) / "fae" / "cli.py").read_text()
+        src = (Path(ROOT) / "fae" / "cli" / "__init__.py").read_text()
         self.assertIn('@experiment_app.command("check")', src)
         for verb in ("init", "check", "infra", "smoke", "prepare", "verb"):
             self.assertIn(f'@experiment_app.command("{verb}"', src)

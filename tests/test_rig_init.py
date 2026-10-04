@@ -74,7 +74,7 @@ class TestTheVerb(unittest.TestCase):
             self.assertEqual(target.read_text(), "# edited\n")
 
     def test_the_cli_has_the_verb(self):
-        src = (Path(ROOT) / "fae" / "cli.py").read_text()
+        src = (Path(ROOT) / "fae" / "cli" / "__init__.py").read_text()
         self.assertIn('@experiment_app.command("init")', src)
 
 

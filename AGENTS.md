@@ -46,8 +46,9 @@ one's rules live:
 
 ## 0. Two roots: the engine and the experiment
 
-This repo is the engine: the `fae/` package (`cli`, `driver/`, `cell/`,
-`scoring/`, `mutex`, `ledger`) behind a root `cli.py` shim, its suite
+This repo is the engine: the `fae/` package (`cli/`, `conduct/`,
+`experiment/`, `cell/`, `scoring/`, `host`, `queues`, `mutex`) behind a root
+`cli.py` shim, its suite
 `tests/` (run on `tests/fixture_experiment/`) and the TLA+ model `.tla/`.
 An experiment is its own repo beside it. Its
 `cli.py` imports this checkout — `$FAE_DIR`, else the sibling `../fae` —
@@ -253,7 +254,8 @@ re-verify, a ledger repair. Each takes the cell lock and raises `Busy` while
 another process holds it. Two kinds of write reach a running cell without it:
 the intent markers (`.paused`, `.cancelled`, `reconcile.flagged`), which the
 loop reads at its checkpoints, and supervision's `ALERT` lines, one append
-each. The driver builds its cells with `common.cell(cid)`, so they share its
+each. Everything outside the cell process builds its cells through the
+current Experiment (`fae.experiment.current().cell(cid)`), so they share its
 plane.
 
 **Lock ordering is work slot ≺ variant lock**, globally consistent, so
@@ -683,8 +685,8 @@ every prior agent's memory — cross-run leakage invisible in the results.
   start and any of its verifies voids that attempt. Edit them only with no
   cell running, apply multi-hunk patches whole, and run `cli.py experiment
   check` after. An empty experiment tree or a missing declared file is FATAL, never
-  a silently smaller surface. `fae/mutex.py`, `cli.py`, `fae/driver/*.py`
-  and the root docs are not guarded.
+  a silently smaller surface. `fae/mutex.py`, `cli.py`, `fae/cli/`,
+  `fae/conduct/`, `fae/host.py`, `fae/scoring/` and the root docs are not guarded.
 - **A drain is only a window because it stops CONDUCT.** Pausing covers
   cells that have a workspace; the scheduler is free to pop a spec that has
   none. `experiment pause all` stops the run first; `experiment pause M…` parks
