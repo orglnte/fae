@@ -1,10 +1,10 @@
 # Concepts to fix
 
 Concepts of [`CONCEPTS-repo-fae.md`](CONCEPTS-repo-fae.md) that do not yet
-behave or read as an operator would expect. A dark concept, in the sense of
-Jackson's essay *Dark Concepts* (essenceofsoftware.com), is one whose actual
-effect diverges from what its user expects, or that acts without telling
-them.
+behave or read as an operator would expect. A
+[dark concept](https://essenceofsoftware.com/posts/dark-concepts/) is one
+whose actual effect diverges from what its user expects, or that acts without
+telling them.
 
 ## 1. Dark concepts
 
