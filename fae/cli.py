@@ -279,10 +279,10 @@ def resume(args):
         # the per-agent cap holds on resume too, unless --force
         if not getattr(args, "force", False):
             live_m = sum(1 for x in Conduct.loop_parents() if x.startswith(agent + "_"))
-            if live_m >= common.PER_AGENT_CAP:
+            if live_m >= conduct.PER_AGENT_CAP:
                 touched += 1
                 acts.append(f"respawn DEFERRED — {agent} already has {live_m} live loop(s) "
-                            f"(cap {common.PER_AGENT_CAP}; --force overrides; resume again later)")
+                            f"(cap {conduct.PER_AGENT_CAP}; --force overrides; resume again later)")
                 print(f"  {cid}: {', '.join(acts)}")
                 continue
         if run.reset_respawn_budgets([cid]):

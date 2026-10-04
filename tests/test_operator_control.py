@@ -1111,7 +1111,7 @@ class TestConductPauseFullWindow(OperatorTestCase):
              mock.patch.object(runs.host, "loop_parents", return_value={}), \
              mock.patch.object(runs.host, "loop_pids", return_value={}), \
              mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.common, "sh", return_value=""), \
+             mock.patch.object(runs.host, "sh", return_value=""), \
              mock.patch.object(runs.conduct.Conduct, "request_pause") as rp:
             runs.conduct.Conduct().pause(mock.Mock(scope=["all"], admission_only=False,
                                          dry_run=False, interval=1))
@@ -1130,7 +1130,7 @@ class TestConductPauseFullWindow(OperatorTestCase):
              mock.patch.object(runs.host, "loop_parents", return_value={}), \
              mock.patch.object(runs.host, "loop_pids", return_value={}), \
              mock.patch.object(runs.host, "containers", return_value=set()), \
-             mock.patch.object(runs.common, "sh", side_effect=lambda *a, **k: seen.pop(0) if seen else ""), \
+             mock.patch.object(runs.host, "sh", side_effect=lambda *a, **k: seen.pop(0) if seen else ""), \
              mock.patch.object(runs.time, "sleep", lambda s: None), \
              mock.patch.object(runs.conduct.Conduct, "request_pause"):
             runs.conduct.Conduct().pause(mock.Mock(scope=["all"], admission_only=False,

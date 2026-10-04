@@ -46,7 +46,7 @@ _EXPERIMENT = Path(os.environ.get("FAE_TEST_EXPERIMENT") or _TREE / "tests" / "f
 os.environ["EXPERIMENT_DIR"] = str(_EXPERIMENT)
 
 from fae.driver import check, common, conduct, render, score  # noqa: E402
-from fae.driver.conduct import host, supervise, zombies  # noqa: E402
+from fae.driver.conduct import host, records, supervise, zombies  # noqa: E402
 from fae import cli as _cli     # noqa: E402
 from fae import queues as _queues_module  # noqa: E402
 from fae import experiment as _experiment  # noqa: E402
@@ -90,6 +90,7 @@ runs.check = check
 runs.experiment = _experiment
 runs.score = score
 runs.host = host
+runs.records = records
 runs.Cell = _Cell
 runs.supervise = supervise
 runs.taint = taint          # driver.validate's own name is "validate"
@@ -123,7 +124,6 @@ def plane_globals(plane):
         (runs.common, "CONDUCT"): plane / ".conduct",
         (runs.common, "LOCKS"): plane / ".locks",
         (runs.common, "TRANSITIONS_LOG"): plane / "transitions.log",
-        (runs.common, "RECONCILE_LOG"): plane / ".conduct" / "reconcile.log",
     }
 
 

@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 
 from _ctx import ROOT, OrchTmpCase, runs
+from fae.cell.fsm import LOOP_CLEARED_BY
 
 TLA_VERIFY = runs.check.tla_verify_path()
 SPEC = Path(ROOT) / ".tla" / "Runs.tla"
@@ -37,8 +38,8 @@ class TestTheLogReadersSeeANewCell(OrchTmpCase):
 
     def test_a_retired_cell_has_no_loop(self):
         self.write(_run(0)[:2] + [("2026-09-21T10:03:00Z", "Retire", "moved=/x")])
-        self.assertEqual(runs.common._last_transitions()[CID][0], "Retire")
-        self.assertIn("Retire", runs.common.LOOP_CLEARED_BY)
+        self.assertEqual(runs.host.last_transitions()[CID][0], "Retire")
+        self.assertIn("Retire", LOOP_CLEARED_BY)
 
 
 class TestTheCheckerIsTheEnvsElseFaes(unittest.TestCase):

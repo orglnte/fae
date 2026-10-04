@@ -25,7 +25,8 @@ from pathlib import Path
 
 from fae.cell.cell import Cell
 from fae.driver import common
-from fae.driver.common import parse_cell_id, awake_age
+from fae.experiment import parse_cell_id
+from .records import awake_age
 
 from . import host
 
@@ -85,7 +86,7 @@ def _verifier_infra(cid):
 def _containers_all():
     """Every container name, running or not. containers() is `docker ps` and
     its callers mean "running"; a STOPPED sidecar still owns its name."""
-    return set(common.sh(["docker", "ps", "-a", "--format", "{{.Names}}"]).split())
+    return set(host.sh(["docker", "ps", "-a", "--format", "{{.Names}}"]).split())
 
 
 def _pid_alive(pid):
@@ -115,7 +116,7 @@ def _prefixes():
     each infra class's PREFIXES and the verifier's."""
     from fae.cell import image as _image
     from fae.cell import variants as _tr
-    out = [("container", common.AGENT_CONTAINER_PREFIX),
+    out = [("container", host.agent_container("")),
            ("container", _image.VERIFY_PREFIX), ("container", _image.TOOL_PREFIX),
            ("container", _image.RUN_PREFIX),
            ("network", _image.NET_PREFIX)]
@@ -129,7 +130,7 @@ def _prefixes():
 
 
 def _docker_net_age_s(name):
-    out = common.sh(["docker", "network", "inspect", "-f", "{{.Created}}", name]).strip()
+    out = host.sh(["docker", "network", "inspect", "-f", "{{.Created}}", name]).strip()
     try:
         return time.time() - datetime.fromisoformat(out.replace("Z", "+00:00")).timestamp()
     except ValueError:
@@ -152,7 +153,7 @@ def _kill_process(pid):
 
 
 def _docker_age_s(name):
-    out = common.sh(["docker", "inspect", "-f", "{{.Created}}", name]).strip()
+    out = host.sh(["docker", "inspect", "-f", "{{.Created}}", name]).strip()
     try:
         return time.time() - datetime.fromisoformat(
             out.replace("Z", "+00:00")).timestamp()
@@ -169,7 +170,7 @@ def _fd_holders(path):
     """pids with `path` open. Not the flock holder — every driver opens all
     of its candidates — so this is only meaningful once the legitimate holder
     is known to be gone."""
-    out = common.sh(["lsof", "-t", "-n", str(path)])
+    out = host.sh(["lsof", "-t", "-n", str(path)])
     return [int(x) for x in out.split() if x.strip().isdigit()]
 # The processes entitled to hold the rig lock or the verify lock: a cell loop
 # (found by loop_parents(), default root only) and the out-of-loop commands
@@ -184,7 +185,7 @@ VERIFY_HOLDER_ARGV = r"cli\.py\s+(experiment\s+(verb|smoke)|cell\s+reverify)\b"
 
 
 def _verify_holders_alive():
-    return bool(common.sh(["pgrep", "-f", VERIFY_HOLDER_ARGV]).split())
+    return bool(host.sh(["pgrep", "-f", VERIFY_HOLDER_ARGV]).split())
 
 
 def _leaked_lock_holders():
@@ -220,7 +221,7 @@ def _is_driver_pid(pid):
     lives. loop_parents() sees only the default root, so a cell run by hand
     in a validation root (ws-test.nosync) is invisible to it; the lock it
     holds is not a leak."""
-    cmd = common.sh(["ps", "-o", "command=", "-p", str(pid)])
+    cmd = host.sh(["ps", "-o", "command=", "-p", str(pid)])
     return "fae.cell" in cmd or bool(re.search(VERIFY_HOLDER_ARGV, cmd))
 
 
@@ -257,7 +258,7 @@ def find_zombies():
             zs.append(("container", name, cid, "no live loop"))
     by_cluster = {v: k for k, v in _cluster_map().items()}
     cluster_prefixes = tuple(p for k, p in prefixes if k == "cluster")
-    for cl in common.sh(["kind", "get", "clusters"]).split():
+    for cl in host.sh(["kind", "get", "clusters"]).split():
         if not cluster_prefixes or not cl.startswith(cluster_prefixes):
             continue
         owner = by_cluster.get(cl)
@@ -272,7 +273,7 @@ def find_zombies():
                                   # clusters briefly — long grace covers them
         zs.append(("cluster", cl, owner or "?", "no live owner"))
     net_prefixes = tuple(p for k, p in prefixes if k == "network")
-    for net in (common.sh(["docker", "network", "ls", "--format", "{{.Name}}"]).split()
+    for net in (host.sh(["docker", "network", "ls", "--format", "{{.Name}}"]).split()
                 if net_prefixes else []):
         if not net.startswith(net_prefixes):
             continue
@@ -287,7 +288,7 @@ def find_zombies():
         zs.append(("network", net, cid, "no live loop"))
     for pid, cid in host.loop_pids().items():
         try:
-            ppid = int(common.sh(["ps", "-o", "ppid=", "-p", str(pid)]).strip() or 0)
+            ppid = int(host.sh(["ps", "-o", "ppid=", "-p", str(pid)]).strip() or 0)
         except ValueError:
             continue
         if ppid == 1:
@@ -308,7 +309,7 @@ def find_zombies():
         if not owner or owner in live or q.slot_held(d):
             continue
         if present is None:
-            present = _containers_all() | set(common.sh(["kind", "get", "clusters"]).split())
+            present = _containers_all() | set(host.sh(["kind", "get", "clusters"]).split())
         parsed = parse_cell_id(owner)
         named = [(k, i) for k, i in _infra_of(parsed[1] if parsed else "", owner)
                  + _verifier_infra(owner) if i in present]

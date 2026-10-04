@@ -358,16 +358,14 @@ class TestClaims(ConductCase):
         st = {"cid": cid, "state": "CRASHED", "why": "loop", "agent": "aaa",
               "variant": "beta_apidocs", "task": "T1",
               "rep": "7", "budget": 10}
-        with mock.patch.object(runs.common, "RECONCILE_LOG", self.conduct / "rec.log"):
-            runs.supervise._reclaim(st, dry=False)
+        runs.supervise._reclaim(st, dry=False)
         self.assertEqual(runs.queues.running_specs("aaa"), [])
         self.assertEqual(self.pending("aaa"), [])
 
     def _reclaim_log(self, cid):
         st = {"cid": cid, "state": "CRASHED", "why": "loop", "agent": "aaa"}
-        log = self.conduct / "rec.log"
-        with mock.patch.object(runs.common, "RECONCILE_LOG", log):
-            runs.supervise._reclaim(st, dry=False)
+        log = self.conduct / "reconcile.log"
+        runs.supervise._reclaim(st, dry=False)
         return log.read_text() if log.exists() else ""
 
     def test_a_crashed_cell_whose_spec_waits_in_its_lane_is_not_told_to_resume(self):
@@ -1181,7 +1179,7 @@ class TestMemoryPressureMonitor(unittest.TestCase):
     thrashing box invites an OOM kill, so it must be visible and logged."""
 
     def test_mem_pressure_reports_a_band_and_swap(self):
-        mp = runs.common.mem_pressure()
+        mp = runs.host.mem_pressure()
         self.assertIn("label", mp)
         self.assertIn(mp["level"], (0, 1, 2, 4))
         self.assertGreaterEqual(mp["swap_total_mb"], mp["swap_used_mb"])
@@ -1193,15 +1191,15 @@ class TestMemoryPressureMonitor(unittest.TestCase):
                 "swap_used_mb": 40000.0, "swap_total_mb": 41000.0}
         with tempfile.TemporaryDirectory() as d, \
              mock.patch.object(runs.common, "WS", Path(d)), \
-             mock.patch.object(runs.common, "mem_pressure", return_value=crit), \
-             mock.patch.object(runs.common, "host_sleep_observe", lambda *a, **k: None), \
+             mock.patch.object(runs.host, "mem_pressure", return_value=crit), \
+             mock.patch.object(runs.records, "host_sleep_observe", lambda *a, **k: None), \
              mock.patch.object(runs.host, "loop_pids", return_value={}), \
              mock.patch.object(runs.host, "containers", return_value=set()), \
              mock.patch.object(runs.host, "loop_parents", return_value={}), \
-             mock.patch.object(runs.common, "_last_transitions", return_value={}), \
+             mock.patch.object(runs.host, "last_transitions", return_value={}), \
              mock.patch.object(runs.supervise, "_agent_io", return_value={}), \
              mock.patch.object(runs.supervise, "_agent_io_book", return_value={}), \
-             mock.patch.object(runs.common, "_rec_log") as rec:
+             mock.patch.object(runs.records, "rec_log") as rec:
             alerts = runs.supervise.Alerts()
             runs.supervise.supervise_pass(alerts, dry=True)
             runs.supervise.supervise_pass(alerts, dry=True)   # second pass must NOT re-log
@@ -1214,7 +1212,7 @@ class TestMemoryPressureMonitor(unittest.TestCase):
         fake = {"label": "WARN", "level": 2, "avail_pct": 40,
                 "used_gb": 9.6, "total_gb": 16.0,
                 "swap_used_mb": 9000.0, "swap_total_mb": 10000.0}
-        with mock.patch.object(runs.common, "mem_pressure", return_value=fake), \
+        with mock.patch.object(runs.host, "mem_pressure", return_value=fake), \
              mock.patch.object(runs.host, "all_states", return_value=([], {}, set())), \
              mock.patch.object(runs.render, "queued_summary", return_value=[]), \
              mock.patch.object(runs.queues_module.Queues, "weekly_line", return_value=""), \

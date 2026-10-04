@@ -11,9 +11,17 @@ supplies what the host knows.
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 import time
 
+from fae.cell.fsm import LOOP_UNCHANGED_BY
 from fae.driver import common
+from .records import awake_age
+
+
+def sh(cmd, **kw):
+    return subprocess.run(cmd, capture_output=True, text=True, **kw).stdout
 
 
 def loop_pids():
@@ -24,7 +32,7 @@ def loop_pids():
     # Anchored to THIS invocation's workspace root, so an alternative root's
     # loops are not read as dead.
     pat = re.compile(re.escape(str(common.WS)) + r"/([^/ ]+)/run_cell\.log")
-    for line in common.sh(["ps", "-axww", "-o", "pid=,command="]).splitlines():
+    for line in sh(["ps", "-axww", "-o", "pid=,command="]).splitlines():
         if "tee -a " not in line:
             continue
         m = pat.search(line)
@@ -68,7 +76,7 @@ def loop_parents():
             hb = heartbeat(ws)
             if hb:
                 out[ws.name] = hb["pid"]
-    for line in common.sh(["ps", "-axww", "-E", "-o", "pid=,command="]).splitlines():
+    for line in sh(["ps", "-axww", "-E", "-o", "pid=,command="]).splitlines():
         m = re.match(r"\s*(\d+)\s+.*?-m fae\.cell"
                      r"\s+(\S+)\s+(\S+)\s+(\d+)", line)
         if not m:
@@ -86,7 +94,7 @@ def loop_parents():
 
 
 def containers():
-    return set(common.sh(["docker", "ps", "--format", "{{.Names}}"]).split())
+    return set(sh(["docker", "ps", "--format", "{{.Names}}"]).split())
 
 
 _PIDCACHE = {"t": 0.0, "v": set()}
@@ -105,7 +113,7 @@ def run_cell_pids():
     if now - _PIDCACHE["t"] > 2:
         _PIDCACHE["v"] = {
             int(l.split(None, 1)[0])
-            for l in common.sh(["ps", "-axww", "-o", "pid=,command="]).splitlines()
+            for l in sh(["ps", "-axww", "-o", "pid=,command="]).splitlines()
             if re.search(r"bash\s+\S*harness/run_cell\.sh\s"
                          r"|-m fae\.cell\s", l)}
         _PIDCACHE["t"] = now
@@ -119,7 +127,7 @@ def _cell(ws):
 def heartbeat(ws, cell=None):
     """The loop's declared liveness, its pid confirmed a live cell loop
     (Cell.live_heartbeat), ages excluding host sleep; None for a corpse."""
-    return (cell or _cell(ws)).live_heartbeat(run_cell_pids(), common.awake_age)
+    return (cell or _cell(ws)).live_heartbeat(run_cell_pids(), awake_age)
 
 
 def queued(cid):
@@ -156,3 +164,70 @@ def all_states(running_only=False):
         if s:
             out.append(s)
     return out, loops, boxes
+
+
+def agent_container(cid):
+    """The agent container's name (fae/cell/config.py names it)."""
+    from fae.cell import config as _cellconfig
+    return _cellconfig.agent_container(cid)
+
+
+def infra_containers(variant, cid):
+    """The containers a cell of this variant provisions, as its infra class names them."""
+    s = common.definition().variant(variant)
+    return [i for k, i in (s.INFRA.identities(cid) if s else []) if k == "container"]
+
+
+def mem_pressure():
+    """Host memory snapshot, read straight from the kernel — the numbers that
+    predict an OOM (Jetsam) kill under a heavy cell fleet.
+
+    Memory pressure is NOT swap depth: kern.memorystatus_vm_pressure_level is
+    the kernel's own pressure band (1 normal / 2 warning / 4 critical — the
+    signal Jetsam acts on), driven by how much physical memory is available
+    (kern.memorystatus_level, a percent), not by how many pages are in swap.
+    Both are reported; conduct watches the band every supervision pass and
+    status surfaces the usage. `label` is None off macOS, where these sysctls
+    do not exist."""
+    if sys.platform != "darwin":
+        return {"label": None, "level": 0, "avail_pct": 0, "used_gb": 0.0,
+                "total_gb": 0.0, "swap_used_mb": 0.0, "swap_total_mb": 0.0}
+    def _n(name, default=0):
+        # str() coerces a mocked/non-string sh() result so a test that patches
+        # runs.sh and calls supervise_pass never trips on the sysctl parse.
+        try:
+            return int(str(sh(["sysctl", "-n", name])).strip() or default)
+        except (ValueError, TypeError):
+            return default
+    level = _n("kern.memorystatus_vm_pressure_level", 1)
+    label = {1: "normal", 2: "WARN", 4: "CRITICAL"}.get(level, f"level={level}")
+    avail = _n("kern.memorystatus_level", 0)          # % of physical memory available
+    total_gb = _n("hw.memsize") / 2**30
+    used_gb = total_gb * (1 - avail / 100) if avail else 0.0
+    m = re.search(r"used = ([\d.]+)M.*free = ([\d.]+)M", str(sh(["sysctl", "-n", "vm.swapusage"])))
+    su = float(m.group(1)) if m else 0.0
+    sf = float(m.group(2)) if m else 0.0
+    return {"label": label, "level": level, "avail_pct": avail,
+            "used_gb": used_gb, "total_gb": total_gb,
+            "swap_used_mb": su, "swap_total_mb": su + sf}
+
+
+def last_transitions():
+    """cid -> (last LOOP-AFFECTING action, its timestamp), or {}.
+
+    Intent-only actions are skipped rather than recorded: pausing a cell whose
+    loop is already gone must not read as a cell that still has one.
+    """
+    last = {}
+    try:
+        for line in common.TRANSITIONS_LOG.read_text(errors="replace").splitlines():
+            f = line.split("\t")
+            if len(f) < 3 or not f[2] or f[1] in LOOP_UNCHANGED_BY:
+                continue
+            act = f[1]
+            if act == "EPOCH" and "loop=none" not in line:
+                act = "EPOCH-live"    # seeded mid-flight; the loop may be gone
+            last[f[2]] = (act, f[0])
+    except OSError:
+        pass
+    return last

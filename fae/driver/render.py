@@ -273,10 +273,10 @@ def render(flat=False, running_only=False):
         qsec = queued_summary()
         if qsec:
             out.extend(qsec)
-        live = sum(1 for n in boxes if n.startswith(common.AGENT_CONTAINER_PREFIX))
+        live = len(Conduct.agent_containers(boxes))
         conduct_s = Conduct().run_line()
         out.append(f"\n{live} containers, {n_loops} loops, {conduct_s}, {datetime.now(timezone.utc):%H:%M:%S}Z")
-        _mp = common.mem_pressure()
+        _mp = Conduct.mem_pressure()
         if _mp["label"]:
             out.append(f"mem: {_mp['used_gb']:.1f}/{_mp['total_gb']:.1f}GB used "
                        f"({_mp['avail_pct']}% avail), pressure={_mp['label']}  ·  "

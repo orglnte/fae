@@ -41,7 +41,7 @@ class TestThePythonOrchestratorKnob(unittest.TestCase):
 
     def test_loop_pids_matches_the_active_root(self):
         with mock.patch.object(runs.common, "WS", Path("/x/ws-test.nosync")), \
-             mock.patch.object(runs.common, "sh", return_value=(
+             mock.patch.object(runs.host, "sh", return_value=(
                 "77 tee -a /x/ws-test.nosync/opus_high_beta_apidocs_T1_r99/run_cell.log\n"
                 "78 tee -a /x/workspaces.nosync/opus_high_beta_apidocs_T1_r1/run_cell.log\n")):
             pids = runs.host.loop_pids()

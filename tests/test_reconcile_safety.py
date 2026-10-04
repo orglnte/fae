@@ -21,6 +21,7 @@ from unittest import mock
 from fae.cell.cell import Cell
 
 from _ctx import runs, ROOT, patch_plane
+from fae.cell.fsm import LOOP_CLEARED_BY
 
 TS = "2026-07-30T09:00:00Z"
 
@@ -360,7 +361,7 @@ class TestTheModelLearnsAboutKilledLoops(unittest.TestCase):
                   if re.search(rf"^{m}\(c\) ==(?:(?!^\w+\(c\) ==).)*?"
                                r"""loop' = \[loop EXCEPT !\[c\] = "none"\]""",
                                spec, re.M | re.S)}
-        missing = clears - runs.common.LOOP_CLEARED_BY - {"VerifyFail"}
+        missing = clears - LOOP_CLEARED_BY - {"VerifyFail"}
         self.assertFalse(missing,
                          f"spec clears the loop in {missing}, which the "
                          f"reconcile would then Crash a second time")
@@ -379,7 +380,7 @@ class TestTheModelLearnsAboutKilledLoops(unittest.TestCase):
             f"{TS}\tCrash\t{self.CID}\tloop-vanished\n"
             f"{TS}\tPause\t{self.CID}\treason=limit-wall\n"
             f"{TS}\tResume\t{self.CID}\t\n")
-        self.assertEqual(runs.common._last_transitions()[self.CID][0], "Crash")
+        self.assertEqual(runs.host.last_transitions()[self.CID][0], "Crash")
 
     def test_a_cell_that_is_starting_right_now_is_left_alone(self):
         # No pid yet, no container, no agent log — indistinguishable from a
@@ -391,10 +392,10 @@ class TestTheModelLearnsAboutKilledLoops(unittest.TestCase):
     def test_an_epoch_that_seeded_a_live_loop_is_not_a_clearing_event(self):
         self.log.write_text(
             f"{TS}\tEPOCH\t{self.CID}\toutcome=none intent=run loop=idle attempts=0\n")
-        self.assertEqual(runs.common._last_transitions()[self.CID][0], "EPOCH-live")
+        self.assertEqual(runs.host.last_transitions()[self.CID][0], "EPOCH-live")
         self.log.write_text(
             f"{TS}\tEPOCH\t{self.CID}\toutcome=none intent=run loop=none attempts=0\n")
-        self.assertEqual(runs.common._last_transitions()[self.CID][0], "EPOCH")
+        self.assertEqual(runs.host.last_transitions()[self.CID][0], "EPOCH")
 
     def test_a_cell_with_no_history_is_left_alone(self):
         self.assertFalse(self._reconcile(None))
@@ -599,7 +600,7 @@ class SweepCase(unittest.TestCase):
              mock.patch.object(runs.host, "loop_parents", return_value=live or {}), \
              mock.patch.object(runs.host, "containers", return_value=set(boxes)), \
              mock.patch.object(runs.ledger, "parse", return_value=doc), \
-             mock.patch.object(runs.common, "sh", return_value=ps), \
+             mock.patch.object(runs.host, "sh", return_value=ps), \
              mock.patch.object(runs.taint, "_validate_cell",
                                return_value={"verdict": "VALID", "taints": []},
                                side_effect=validate_error) as val, \
@@ -847,7 +848,7 @@ class TestAStaleArmSlotSidecarIsNotAZombieForever(unittest.TestCase):
 
     def _found(self, existing):
         with mock.patch.object(runs.zombies, "_containers_all", return_value=set(existing)), \
-             mock.patch.object(runs.common, "sh", return_value=""):
+             mock.patch.object(runs.host, "sh", return_value=""):
             return [z for z in runs.zombies.find_zombies() if z[0] == "container"]
 
     def test_a_note_naming_nothing_that_exists_is_dropped_and_reports_nothing(self):
@@ -999,7 +1000,7 @@ class TestLeakedLockHolders(unittest.TestCase):
 
     def _find(self, *, held, entitled_running, fd_pids, alive=True, loops=None):
         with mock.patch.object(runs.mutex, "probe_held", return_value=held), \
-             mock.patch.object(runs.common, "sh",
+             mock.patch.object(runs.host, "sh",
                                side_effect=lambda a, **k:
                                    ("999\n" if entitled_running else "")
                                    if a[0] == "pgrep" else ""), \
@@ -1017,7 +1018,7 @@ class TestLeakedLockHolders(unittest.TestCase):
                 return "python3 -m fae.cell T1 alpha reference 2 --stub /tmp/x\n"
             return ""
         with mock.patch.object(runs.mutex, "probe_held", return_value=True), \
-             mock.patch.object(runs.common, "sh", side_effect=ps), \
+             mock.patch.object(runs.host, "sh", side_effect=ps), \
              mock.patch.object(runs.zombies, "_fd_holders", return_value=[4242]), \
              mock.patch.object(runs.zombies, "_pid_alive", return_value=True), \
              mock.patch.object(runs.host, "loop_parents", return_value={}):
@@ -1040,7 +1041,7 @@ class TestLeakedLockHolders(unittest.TestCase):
                      "python3 cli.py cell reverify x --all",
                      "python3 cli.py experiment smoke --only alpha"):
             self.assertRegex(argv, runs.zombies.VERIFY_HOLDER_ARGV)
-            with mock.patch.object(runs.common, "sh", return_value=argv + "\n"):
+            with mock.patch.object(runs.host, "sh", return_value=argv + "\n"):
                 self.assertTrue(runs.zombies._is_driver_pid(4242), argv)
         for argv in ("python3 cli.py experiment status", "python3 cli.py experiment run",
                      "python3 cli.py rig reverify x",    # wrong group: not a real invocation

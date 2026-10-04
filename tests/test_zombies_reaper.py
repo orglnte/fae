@@ -45,12 +45,12 @@ class TestPidAlive(unittest.TestCase):
 class TestDockerAgeS(unittest.TestCase):
     def test_a_valid_timestamp_is_a_positive_age(self):
         past = zombies.datetime.now(zombies.timezone.utc)
-        with mock.patch.object(common, "sh", return_value=past.isoformat()):
+        with mock.patch.object(state, "sh", return_value=past.isoformat()):
             age = zombies._docker_age_s("fae-dind-x")
         self.assertGreaterEqual(age, 0)
 
     def test_an_unparseable_timestamp_is_none(self):
-        with mock.patch.object(common, "sh", return_value="garbage"):
+        with mock.patch.object(state, "sh", return_value="garbage"):
             self.assertIsNone(zombies._docker_age_s("fae-dind-x"))
 
 
@@ -71,17 +71,17 @@ class TestIterAgeS(unittest.TestCase):
 
 class TestFdHolders(unittest.TestCase):
     def test_digit_tokens_become_pids(self):
-        with mock.patch.object(common, "sh", return_value="111\n222\n"):
+        with mock.patch.object(state, "sh", return_value="111\n222\n"):
             self.assertEqual(zombies._fd_holders(Path("/x")), [111, 222])
 
     def test_no_holders_is_empty(self):
-        with mock.patch.object(common, "sh", return_value=""):
+        with mock.patch.object(state, "sh", return_value=""):
             self.assertEqual(zombies._fd_holders(Path("/x")), [])
 
 
 class TestContainersAll(unittest.TestCase):
     def test_docker_ps_dash_a_names_become_a_set(self):
-        with mock.patch.object(common, "sh", return_value="fae-agent-x\nfae-dind-x\n"):
+        with mock.patch.object(state, "sh", return_value="fae-agent-x\nfae-dind-x\n"):
             self.assertEqual(zombies._containers_all(),
                              {"fae-agent-x", "fae-dind-x"})
 
@@ -149,7 +149,7 @@ class FindZombiesCase(unittest.TestCase):
             mock.patch.object(zombies, "_leaked_lock_holders", return_value=[]),
             mock.patch.object(state, "loop_parents", return_value=set()),
             mock.patch.object(state, "containers", return_value=[]),
-            mock.patch.object(common, "sh", return_value=""),
+            mock.patch.object(state, "sh", return_value=""),
             mock.patch.object(state, "loop_pids", return_value={}),
             mock.patch.object(zombies, "_strays", return_value=[]),
         ]
@@ -190,14 +190,14 @@ class TestFindZombiesContainers(FindZombiesCase):
 
 class TestFindZombiesClusters(FindZombiesCase):
     def test_an_old_unmapped_cluster_is_a_zombie(self):
-        with mock.patch.object(common, "sh", return_value="fx-cluster-12345\n"), \
+        with mock.patch.object(state, "sh", return_value="fx-cluster-12345\n"), \
                 mock.patch.object(zombies, "_docker_age_s",
                                   return_value=zombies.ZOMBIE_UNKNOWN_GRACE_S + 1):
             zs = zombies.find_zombies()
         self.assertIn(("cluster", "fx-cluster-12345", "?", "no live owner"), zs)
 
     def test_an_age_unknown_cluster_is_never_reaped(self):
-        with mock.patch.object(common, "sh", return_value="fx-cluster-12345\n"), \
+        with mock.patch.object(state, "sh", return_value="fx-cluster-12345\n"), \
                 mock.patch.object(zombies, "_docker_age_s", return_value=None):
             zs = zombies.find_zombies()
         self.assertEqual(zs, [])
@@ -206,13 +206,13 @@ class TestFindZombiesClusters(FindZombiesCase):
 class TestFindZombiesTee(FindZombiesCase):
     def test_an_orphaned_tee_ppid_1_is_a_zombie(self):
         with mock.patch.object(state, "loop_pids", return_value={321: "cid1"}), \
-                mock.patch.object(common, "sh", return_value="1\n"):
+                mock.patch.object(state, "sh", return_value="1\n"):
             zs = zombies.find_zombies()
         self.assertIn(("tee", "321", "cid1", "orphaned logger (ppid 1)"), zs)
 
     def test_a_tee_with_a_real_parent_is_not_a_zombie(self):
         with mock.patch.object(state, "loop_pids", return_value={321: "cid1"}), \
-                mock.patch.object(common, "sh", return_value="500\n"):
+                mock.patch.object(state, "sh", return_value="500\n"):
             zs = zombies.find_zombies()
         self.assertEqual(zs, [])
 
