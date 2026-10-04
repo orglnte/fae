@@ -15,10 +15,9 @@ import csv
 from datetime import datetime, timezone
 
 from fae import archive as _archive
-from fae.driver import common
-from fae.driver.common import (
-    parse_cell_id, faults,
-)
+from fae import experiment as _experiment
+from fae.cell import faults
+from fae.experiment import parse_cell_id
 
 # The rules this validator keeps are the engine's own: a provider wall
 # charged as an attempt, a reverify aborted on a rig fault, an unreliable
@@ -33,8 +32,8 @@ def _validate_cell(ws):
     Re-runnable: rules can improve and be re-applied retroactively — the file
     records the rule set's verdict. Raises Busy while the cell is held."""
     taints, warns = [], []
-    cell = common.cell(Path(ws).name, workspaces=Path(ws).parent)
-    rc_text = common.definition().report_text(ws)
+    cell = _experiment.current().cell(Path(ws).name, workspaces=Path(ws).parent)
+    rc_text = _experiment.definition().report_text(ws)
     v_log = ws / "verify.log"
     v_text = v_log.read_text(errors="replace") if v_log.exists() else ""
     it_text = cell.ledger_text()
@@ -81,9 +80,9 @@ def _validate_cell(ws):
                      f"{'; '.join(res.get('cross_check_findings') or [])[:120]})")
     warns += archive_warns(ws, it_text)
     # the experiment's rules, and the fields it records beside the verdict
-    rules = common.definition().taint_rules
+    rules = _experiment.definition().taint_rules
     verdict = cell.read_ledger()["verdict"]
-    xt, xw, fields = rules(ws, common.WS, metrics, it_text, v_text, rc_text, verdict) \
+    xt, xw, fields = rules(ws, _experiment.workspace().path, metrics, it_text, v_text, rc_text, verdict) \
         if rules else ([], [], {})
     taints += xt
     warns += xw

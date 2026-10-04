@@ -111,7 +111,7 @@ shared by every workspace root, and each root's
 (10) attempts; each attempt is author → restore-and-judge → verify. The cell
 ends green, failed, or revoked.
 
-`cell_id` is encoded in ONE place, `fae/driver/common.py`'s `cell_id()`;
+`cell_id` is encoded in ONE place, `fae/experiment.py`'s `cell_id()`;
 the driver's entry point and the prepare import it — two implementations
 kept in sync by hand drift, and a drifted id writes to one workspace and is
 read from another. `parse_cell_id` is positional
@@ -661,7 +661,7 @@ every prior agent's memory — cross-run leakage invisible in the results.
   two-stage and auditable, and a `Retire` in the log (§7). `cli.py cell
   seal` is dry by default; `--apply` writes.
 - **The attempt budget is 10, everywhere, always.** `ATTEMPT_BUDGET` is a
-  module constant (`fae/driver/common.py`, `fae/cell/config.py`), recorded
+  module constant (`fae/cell/cell.py`), recorded
   in `cell.env`; no flag, spec field or environment override. A per-cell
   budget makes two cells incomparable and gives sealing an exception.
 - **`stop` is resumable; `--cancel` is the verdict, and a cancel is durable

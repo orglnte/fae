@@ -20,15 +20,6 @@ from fae.scoring import surface_filter
 
 from fae import paths as _paths  # noqa: E402
 
-REPO_ROOT = _paths.ROOT
-# same resolution rule as fae/driver/common.py: the workspace dir was renamed *.nosync to
-# keep agent artifacts out of iCloud; scoring hardcoding the old name made
-# every score invocation fail "no workspace" (2026-07-24 audit finding 1)
-WORKSPACES = next((REPO_ROOT / n for n in ("workspaces.nosync", "workspaces")
-                   if (REPO_ROOT / n).is_dir()), REPO_ROOT / "workspaces.nosync")
-# (no RESULTS_CELLS: the record moved into the cell's own directory as
-# score.json — 9293aa9 — and the old results/cells/ constant lingered unused,
-# pointing at a directory nothing writes and no one reads.)
 
 # Extension -> language label (author-surface metric 4).
 LANG_BY_EXT = {
@@ -298,10 +289,10 @@ def score_one(cell_id: str, cell=None) -> int:
     """Score one cell in-process. fae/driver/score.py's `score()` path-loads this
     module once and calls it per cell so a 300-cell sweep pays
     interpreter+import startup once, not per cell. The record is written
-    through the cell (`cell`, else the one in WORKSPACES)."""
+    through the cell (`cell`, else the current workspace's)."""
     if cell is None:
-        from fae.cell.cell import Cell
-        cell = Cell(cell_id, workspaces=WORKSPACES, root=REPO_ROOT)
+        from fae import experiment as _experiment
+        cell = _experiment.current().cell(cell_id)
     ws = cell.ws
     if not ws.is_dir():
         print(f"ERROR: no such cell '{cell_id}' at {ws}", file=sys.stderr)

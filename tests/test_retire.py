@@ -28,13 +28,13 @@ def _run(t0):
 class TestTheLogReadersSeeANewCell(OrchTmpCase):
 
     def write(self, rows):
-        runs.common.TRANSITIONS_LOG.write_text(
+        runs.experiment.workspace().transitions.write_text(
             "".join(f"{ts}\t{a}\t{CID}\t{x}\n" for ts, a, x in rows))
 
     def test_a_retired_cells_pause_does_not_carry_over(self):
         self.write([("2026-09-21T10:00:00Z", "Pause", ""),
                     ("2026-09-21T10:01:00Z", "Retire", "moved=/x")])
-        self.assertEqual(runs.common.cell(CID).intent(), "run")
+        self.assertEqual(runs.experiment.current().cell(CID).intent(), "run")
 
     def test_a_retired_cell_has_no_loop(self):
         self.write(_run(0)[:2] + [("2026-09-21T10:03:00Z", "Retire", "moved=/x")])

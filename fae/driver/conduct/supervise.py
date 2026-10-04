@@ -17,7 +17,8 @@ from datetime import datetime, timezone
 
 from fae.cell.cell import Busy, Cell
 from fae.cell.fsm import LOOP_CLEARED_BY, WAIT_PHASES
-from fae.driver import common
+from fae import experiment as _experiment
+from fae.cell import faults
 from fae.driver import validate as taint
 
 from . import host, records, zombies
@@ -40,7 +41,7 @@ def _is_quota_wall(text):
     not "limit reached/exceeded", and "resets 7:40pm" has no "in"/"at" for
     the relative-duration branch.
     """
-    return common.faults.quota_wall(text)
+    return faults.quota_wall(text)
 
 
 def _parse_reset_hint(text):
@@ -48,12 +49,12 @@ def _parse_reset_hint(text):
     None when the message carries no usable hint. Day-scale hints ("Resets
     in 3 days") come from weekly caps; a clock-time hint ("resets 7:40pm
     (UTC)") is always UTC and a future point today or tomorrow."""
-    return common.faults.reset_hint_s(text, now=datetime.now(timezone.utc))
+    return faults.reset_hint_s(text, now=datetime.now(timezone.utc))
 
 
 def _set_cooldown(agent, detail):
     until = time.time() + (_parse_reset_hint(detail) or COOLDOWN_DEFAULT_S)
-    return common.queues().set_cooldown(agent, until, detail[:Cell.WAIT_REASON_MAX])
+    return _experiment.workspace().queues.set_cooldown(agent, until, detail[:Cell.WAIT_REASON_MAX])
 
 def _arm_slot_of(arm, cid):
     """Seconds this cid has held a slot of `arm`, or None if it holds none.
@@ -61,7 +62,7 @@ def _arm_slot_of(arm, cid):
     it is still held — the note alone would age a slot released long ago."""
     if not arm:
         return None
-    q = common.queues()
+    q = _experiment.workspace().queues
     for slot in q.slot_files(arm):
         note = q.slot_note(slot)
         if not note or note[0] != cid or not q.slot_held(slot):
@@ -79,15 +80,15 @@ def _retire_finished_specs(dry=False):
     A cell resumed by hand leaves exactly that: the loop runs and finishes
     while the spec it came from is still in the lane, unclaimed.
     """
-    qs = common.queues()
+    qs = _experiment.workspace().queues
     boxes = host.containers()
     for d in qs.lane_dirs():
         agent = qs.lane_agent(d)
         for p in qs.specs_in(d):
             cid = qs.spec_cid(p)
-            if not (common.WS / cid).is_dir():
+            if not (_experiment.workspace().path / cid).is_dir():
                 continue
-            st = host.cell_state(common.WS / cid, {}, boxes)
+            st = host.cell_state(_experiment.workspace().path / cid, {}, boxes)
             if not st or st["state"] != "DONE":
                 continue
             records.rec_log(f"{cid} spec retired — cell is DONE·{st['why'] or '?'}"
@@ -182,7 +183,7 @@ def _agent_io(boxes=()):
 
 
 def _agent_io_book(write=None):
-    book = common.queues().agent_io_book()
+    book = _experiment.workspace().queues.agent_io_book()
     if write is not None:
         return book.save(write)
     return book.load()
@@ -226,7 +227,7 @@ def _verify_progress(ws, since_ts):
     """(stamp, age) of the newest VERIFY_READY/SHAPE mark the current verify
     has written, or (None, None) when it has written none yet."""
     newest = None
-    for line in common.cell(ws.name, workspaces=ws.parent).ledger_text().splitlines():
+    for line in _experiment.current().cell(ws.name, workspaces=ws.parent).ledger_text().splitlines():
         m = _VERIFY_MARK_RE.match(line)
         if m and (since_ts is None or m.group(1) >= since_ts):
             newest = m.group(1)
@@ -277,17 +278,17 @@ def _reconcile_dead_loop(cid, loop_pid, in_box, out_age, last, dry,
              f"out_age={int(out_age) if out_age is not None else -1}s) -> "
              f"reconciling the agent" + (" [dry-run]" if dry else ""))
     if not dry:
-        common.cell(cid).crashed("loop-vanished")
+        _experiment.current().cell(cid).crashed("loop-vanished")
     return True
 
 
 def _conducts(cid):
     """Is this cell conduct's to restart: claimed (converge restarts it) or
     its spec waiting in its lane (admission restarts it)?"""
-    if common.queues().is_claimed(cid.split("_", 1)[0], cid):
+    if _experiment.workspace().queues.is_claimed(cid.split("_", 1)[0], cid):
         return True
-    parsed = common.parse_cell_id(cid)
-    return bool(parsed and common.queues().lane_has(parsed[0], cid))
+    parsed = _experiment.parse_cell_id(cid)
+    return bool(parsed and _experiment.workspace().queues.lane_has(parsed[0], cid))
 
 
 def _reclaim(st, dry):
@@ -347,7 +348,7 @@ def supervise_pass(alerts, dry=False, only=""):
     io_now = _agent_io(boxes)
     io_book = _agent_io_book()
     io_flat = {c: v.get("flat", 0) for c, v in io_book.items()}
-    for ws in sorted(common.WS.iterdir()):
+    for ws in sorted(_experiment.workspace().path.iterdir()):
             if not ws.is_dir():
                 continue
             st = host.cell_state(ws, loops, boxes)
@@ -363,7 +364,7 @@ def supervise_pass(alerts, dry=False, only=""):
                                  host.agent_container(cid) in boxes,
                                  _attempt_out(ws)[1], last_tr.get(cid), dry,
                                  terminal=st["state"] == "DONE")
-            c = common.cell(ws.name, workspaces=ws.parent)
+            c = _experiment.current().cell(ws.name, workspaces=ws.parent)
             if c.flagged:
                 continue                      # human-flagged: hands off
             if c.declared_intent()[0] != "run":
@@ -414,7 +415,7 @@ def supervise_pass(alerts, dry=False, only=""):
                                  f"{VERIFY_HELD_ALERT_S}s (lock held {int(_held or 0)}s)"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
-                            common.cell(cid).alert(f"VERIFY-SLOW no progress for {int(_slow)}s > {VERIFY_HELD_ALERT_S}s (global verify-lock held {int(_held or 0)}s) — every other lane queues behind it")
+                            _experiment.current().cell(cid).alert(f"VERIFY-SLOW no progress for {int(_slow)}s > {VERIFY_HELD_ALERT_S}s (global verify-lock held {int(_held or 0)}s) — every other lane queues behind it")
                             alerts.verify_slow[cid] = _key
                     # Past the wedge threshold, end it. The alert above is
                     # report-only, and a global lock nobody frees stalls every
@@ -425,9 +426,9 @@ def supervise_pass(alerts, dry=False, only=""):
                                  f"{VERIFY_WEDGED_S}s -> stand down"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
-                            common.cell(cid).alert(f"VERIFY-WEDGED held the global verify-lock {int(_held)}s > {VERIFY_WEDGED_S}s — standing it down; this attempt is lost")
+                            _experiment.current().cell(cid).alert(f"VERIFY-WEDGED held the global verify-lock {int(_held)}s > {VERIFY_WEDGED_S}s — standing it down; this attempt is lost")
                             alerts.verify_wedged[cid] = _ts
-                            common.named_cell(cid, st["variant"]).take_down(
+                            _experiment.workspace().named_cell(cid, st["variant"]).take_down(
                                 "verify-wedged", unblock_agent=True, log=records.rec_log)
                             _reclaim(st, dry)
                         continue
@@ -449,14 +450,14 @@ def supervise_pass(alerts, dry=False, only=""):
                                  f"{int(_pa)}s > {_alert_s}s"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
-                            common.cell(cid).alert(f"{_kind} '{_ph}' unchanged {int(_pa)}s > {_alert_s}s")
+                            _experiment.current().cell(cid).alert(f"{_kind} '{_ph}' unchanged {int(_pa)}s > {_alert_s}s")
                             alerts.phase.add(_key)
                     if _kill_s is not None and _pa > _kill_s:
                         records.rec_log(f"{cid} ALERT — phase '{_ph}' unchanged "
                                  f"{int(_pa)}s > {_kill_s}s -> stand down"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
-                            common.named_cell(cid, st["variant"]).take_down(
+                            _experiment.workspace().named_cell(cid, st["variant"]).take_down(
                                 f"phase-stalled-{_ph}", unblock_agent=True,
                                 log=records.rec_log)
                             _reclaim(st, dry)
@@ -465,7 +466,7 @@ def supervise_pass(alerts, dry=False, only=""):
             # Ending the process is the only way a flock is released, so this
             # goes through the same teardown path as any other induced death.
             if not terminal and st["state"] in ("RUNNING", "WAITING"):
-                _arm = common.definition().lock_of(st["variant"])
+                _arm = _experiment.definition().lock_of(st["variant"])
                 _slot = _arm_slot_of(_arm, cid) if _arm else None
                 if _slot is not None and cid not in alerts.arm:
                     # Stalled means NOT PROGRESSING, which is phase_age. The
@@ -493,9 +494,9 @@ def supervise_pass(alerts, dry=False, only=""):
                                  f"{int(_silent)}s -> stand down"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
-                            common.cell(cid).alert(f"ARM-STUCK held the {_arm} arm {int(_slot)}s with no progress for {int(_silent)}s — standing it down")
+                            _experiment.current().cell(cid).alert(f"ARM-STUCK held the {_arm} arm {int(_slot)}s with no progress for {int(_silent)}s — standing it down")
                             alerts.arm.add(cid)
-                            common.named_cell(cid, st["variant"]).take_down(
+                            _experiment.workspace().named_cell(cid, st["variant"]).take_down(
                                 "arm-stuck", unblock_agent=True, log=records.rec_log)
                             _reclaim(st, dry)
                         continue
@@ -512,7 +513,7 @@ def supervise_pass(alerts, dry=False, only=""):
                          + (" [dry-run]" if dry else ""))
                 if not dry:
                     try:
-                        common.cell(cid).repair_stranded_reverify()
+                        _experiment.current().cell(cid).repair_stranded_reverify()
                     except Busy:
                         records.rec_log(f"{cid} stranded reverify: cell held, repair next pass")
             if terminal and loop_pid:
@@ -532,7 +533,7 @@ def supervise_pass(alerts, dry=False, only=""):
                     subprocess.run(["docker", "rm", "-f", "-v", host.agent_container(cid),
                                     *host.infra_containers(st["variant"], cid)],
                                    capture_output=True)
-                    common.named_cell(cid, st["variant"]).teardown()
+                    _experiment.workspace().named_cell(cid, st["variant"]).teardown()
             elif st["state"] == "CRASHED" and not in_box and _conducts(cid):
                 continue    # claimed or queued: conduct restarts it, and
                             # says so when it does
@@ -570,7 +571,7 @@ def supervise_pass(alerts, dry=False, only=""):
                          f"cool lane {agent}"
                          + (" [dry-run]" if dry else ""))
                 if not dry:
-                    common.cell(cid).request_pause("limit-wall", who="conduct")
+                    _experiment.current().cell(cid).request_pause("limit-wall", who="conduct")
                     _reclaim(st, dry)
                     until = _set_cooldown(agent, detail)
                     records.rec_log(f"lane {agent}: cooling until "
@@ -599,7 +600,7 @@ def supervise_pass(alerts, dry=False, only=""):
                         # the arm slot in the kernel while this cell's cluster
                         # is still up, and the next acquirer would provision
                         # against it.
-                        _outcome = common.named_cell(cid, st["variant"]).take_down(
+                        _outcome = _experiment.workspace().named_cell(cid, st["variant"]).take_down(
                             "limit-wall", unblock_agent=True, log=records.rec_log)
                         if _outcome in ("termed", "killed"):
                             c.crashed("limit-wall")
@@ -629,7 +630,7 @@ def supervise_pass(alerts, dry=False, only=""):
                          f"out_age={int(out_age or -1)}s iter_age={int(iter_age)}s)"
                          + (" [dry-run]" if dry else ""))
                 if not dry:
-                    _outcome = common.named_cell(cid, st["variant"]).take_down(
+                    _outcome = _experiment.workspace().named_cell(cid, st["variant"]).take_down(
                         "silent-hang", unblock_agent=True, log=records.rec_log)
                     if _outcome in ("termed", "killed"):
                         c.crashed("silent-hang")

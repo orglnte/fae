@@ -9,7 +9,7 @@ from _ctx import runs
 
 
 def _verdict(ws):
-    return runs.experiment.Experiment.smoke_verdict(runs.common.cell(ws.name, workspaces=ws.parent))
+    return runs.experiment.Experiment.smoke_verdict(runs.experiment.current().cell(ws.name, workspaces=ws.parent))
 
 
 def _cell(ledger_lines, metrics=None):

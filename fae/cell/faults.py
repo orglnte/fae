@@ -6,7 +6,7 @@ halts the cell for a human); the orchestrator asks whether a lane must cool
 and until when. Two regexes in two files drifted once — the driver missed a
 wording the orchestrator knew — and ten attempts burned in twenty seconds.
 
-Stdlib only: fae/driver/common.py loads this file by path, outside the package.
+Stdlib only.
 """
 from __future__ import annotations
 

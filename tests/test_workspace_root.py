@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from _ctx import ROOT, runs
+from _ctx import ROOT, runs, at_workspace, use_workspace
 
 from fae.cell import config as C
 
@@ -22,25 +22,26 @@ from fae.cell import config as C
 class TestThePythonOrchestratorKnob(unittest.TestCase):
 
     def test_ws_honors_the_environment(self):
-        src = (Path(ROOT) / "fae" / "driver" / "common.py").read_text()
-        i = src.index("The WORKSPACE root is parametric")
-        block = src[i:i + 1200]
-        self.assertIn('os.environ.get("WORKSPACES_DIR")', block)
-        self.assertIn('WS = Path(os.environ["WORKSPACES_DIR"])', block)
+        with mock.patch.dict(os.environ, {"WORKSPACES_DIR": "/x/ws-test.nosync"}):
+            w = runs.experiment.Workspace(Path("/r"))
+        self.assertEqual(w.path, Path("/x/ws-test.nosync"))
 
     def test_the_lock_plane_does_not_follow(self):
-        # The plane is derived from ROOT and a literal, never from WS: the
-        # override moves cells, not locks.
-        src = (Path(ROOT) / "fae" / "driver" / "common.py").read_text()
-        for name in ("QUEUES", "CONDUCT", "LOCKS"):
-            line = [l for l in src.splitlines() if l.startswith(f"{name} = ")][0]
-            self.assertIn("(ROOT)", line)
-            self.assertNotIn("WS", line.split("=", 1)[1])
-        plane = (Path(ROOT) / "fae" / "plane.py").read_text()
-        self.assertIn('Path(root) / "workspaces.nosync"', plane)
+        # the override moves cells, not the plane: that stays the root's
+        with mock.patch.dict(os.environ, {"WORKSPACES_DIR": "/x/ws-test.nosync"}):
+            w = runs.experiment.Workspace(Path("/r"))
+        self.assertEqual(w.plane, Path("/r/workspaces.nosync"))
+        self.assertEqual((w.conduct, w.locks), (w.plane / ".conduct", w.plane / ".locks"))
+        self.assertEqual(w.queues.base, w.plane / ".queues")
+
+    def test_without_the_environment_the_cells_live_on_the_plane(self):
+        env = {k: v for k, v in os.environ.items() if k != "WORKSPACES_DIR"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            w = runs.experiment.Workspace(Path("/r"))
+        self.assertEqual(w.path, Path("/r/workspaces.nosync"))
 
     def test_loop_pids_matches_the_active_root(self):
-        with mock.patch.object(runs.common, "WS", Path("/x/ws-test.nosync")), \
+        with at_workspace(Path("/x/ws-test.nosync")), \
              mock.patch.object(runs.host, "sh", return_value=(
                 "77 tee -a /x/ws-test.nosync/opus_high_beta_apidocs_T1_r99/run_cell.log\n"
                 "78 tee -a /x/workspaces.nosync/opus_high_beta_apidocs_T1_r1/run_cell.log\n")):

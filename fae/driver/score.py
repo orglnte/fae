@@ -17,7 +17,7 @@ import sys
 import ujson as json
 
 from fae.cell.cell import Busy
-from fae.driver import common
+from fae import experiment as _experiment
 from fae.driver import render
 from fae.driver.conduct import Conduct
 from fae.driver import validate as taint
@@ -50,8 +50,8 @@ def validate(args, quiet=False):
     # loop O(cells) docker round-trips, and a DONE cell's container state
     # cannot change mid-sweep.
     boxes = Conduct.containers()
-    for cid in common.select_cells(getattr(args, "selector", None) or "all"):
-        ws = common.WS / cid
+    for cid in _experiment.workspace().select(getattr(args, "selector", None) or "all"):
+        ws = _experiment.workspace().path / cid
         st = Conduct.cell_state(ws, {}, boxes)
         if not st or st["state"] != "DONE" or st["why"] == "cancelled":
             continue
@@ -108,7 +108,7 @@ def score(args):
           "authored surface -> <cell>/score.json, which the scoreboard reads)")
     sys.stdout.flush()
 
-    cids = [getattr(args, "cell")] if getattr(args, "cell", None) else common.select_cells("all")
+    cids = [getattr(args, "cell")] if getattr(args, "cell", None) else _experiment.workspace().select("all")
     boxes = Conduct.containers()
     # This phase used to print NOTHING: 50+ subprocesses ran silently under a
     # bare header, so the only evidence they had worked was the aggregate table
@@ -122,7 +122,7 @@ def score(args):
     # scoreboard from stale score.json files.
     todo = []
     for cid in cids:
-        st = Conduct.cell_state(common.WS / cid, {}, boxes)
+        st = Conduct.cell_state(_experiment.workspace().path / cid, {}, boxes)
         if st and st["state"] == "DONE" and st["why"] != "cancelled":
             todo.append(cid)
 
@@ -155,7 +155,7 @@ def score(args):
         err = io.StringIO()
         try:
             with contextlib.redirect_stderr(err):
-                rc = _sc.score_one(cid, cell=common.cell(cid))
+                rc = _sc.score_one(cid, cell=_experiment.current().cell(cid))
         except Exception as e:
             rc, _ = 1, err.write(f"{type(e).__name__}: {e}")
         if rc == 0:

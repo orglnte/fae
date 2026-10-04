@@ -13,7 +13,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from fae.cell.cell import ATTEMPT_BUDGET
-from fae.driver import common
+from fae import experiment as _experiment
 from fae.driver.conduct import Conduct
 
 
@@ -46,17 +46,17 @@ def collect(since: float | None) -> tuple[dict, list]:
     """(completed_by_variant, in_progress). A cell is completed-this-run if it
     is sealed and its seal landed at/after `since`; in-progress if a live loop
     marker is present and it is not yet sealed."""
-    gate_n = common.definition().gate.arity
+    gate_n = _experiment.definition().gate.arity
     done: dict = defaultdict(lambda: {"done": 0, "green": 0, "budget": 0, "itg": []})
     live: list = []
-    for d in sorted(common.WS.iterdir()):
+    for d in sorted(_experiment.workspace().path.iterdir()):
         if not d.is_dir():
             continue
-        p = common.parse_cell_id(d.name)
+        p = _experiment.parse_cell_id(d.name)
         if not p:
             continue
         agent, variant, _task, rep = p
-        c = common.cell(d.name, workspaces=d.parent)
+        c = _experiment.current().cell(d.name, workspaces=d.parent)
         if c.heartbeat() is not None and not c.sealed:
             L = c.read_ledger(gate_n=gate_n)
             hb = Conduct.heartbeat(d, c)

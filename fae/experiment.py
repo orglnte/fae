@@ -279,6 +279,11 @@ def current():
     return _current["x"]
 
 
+def workspace():
+    """The workspace this process runs on: current().workspace."""
+    return current().workspace
+
+
 def definition():
     """The definition this process runs: current().definition."""
     return current().definition
@@ -344,37 +349,46 @@ def matches(cid, sel):
     return f"_{cid}_".find(f"_{sel}_") >= 0
 
 
+def is_blanket(selectors):
+    """A selection naming `all`: standing operator decisions (roster or manual
+    pauses, a cancel) survive it, and yield only to a cell or agent named."""
+    return any(s in ("all", "*") for s in selectors)
+
+
 class Workspace:
     """The cells' folders of one root (`path`; WORKSPACES_DIR names another
-    tree) and the scheduling plane beside them (fae/plane.py: queues,
-    conduct, locks, transitions), which is the root's whatever `path` is.
+    tree) and the scheduling plane (fae/plane.py: queues, conduct, locks,
+    transitions) under `plane`, the root's whatever `path` is.
     `parse(cid)` says whether a folder is a cell of this experiment."""
 
-    def __init__(self, root, path=None, *, parse=None, queues=None, conduct=None,
-                 locks=None, transitions=None):
-        from fae import plane
+    def __init__(self, root, path=None, *, plane=None, parse=None):
+        from fae import plane as _plane
         self.root = Path(root)
         if path is None:
-            path = os.environ.get("WORKSPACES_DIR") or plane.base(self.root)
+            path = os.environ.get("WORKSPACES_DIR") or _plane.base(self.root)
         self.path = Path(path)
+        self.plane = Path(plane) if plane else _plane.base(self.root)
         self._parse = parse
-        self._queues = queues
-        self.conduct = Path(conduct) if conduct else plane.conduct(self.root)
-        self.locks = Path(locks) if locks else plane.locks(self.root)
-        self.transitions = Path(transitions) if transitions else plane.transitions_log(self.root)
+        self.conduct = self.plane / _plane.CONDUCT
+        self.locks = self.plane / _plane.LOCKS
+        self.transitions = self.plane / _plane.TRANSITIONS
 
     def parse(self, cid):
         return (self._parse or parse_cell_id)(cid)
 
     @property
     def queues(self):
-        """The queues (fae/queues.py) the plane holds."""
-        if self._queues is None:
-            from fae import plane
-            from fae.queues import Queues
-            self._queues = Queues(plane.queues(self.root), locks=self.locks,
-                                  workspaces=self.path)
-        return self._queues
+        """The queues (fae/queues.py) the plane holds: the cell-id grammar
+        names their specs, and a sealed cell is refused."""
+        from fae import plane as _plane
+        from fae.queues import Queues
+        return Queues(self.plane / _plane.QUEUES, locks=self.locks, cell_id=cell_id,
+                      refuse=self._refusal, workspaces=self.path)
+
+    def _refusal(self, cid):
+        # a sealed cell's spec could only ever be refused: a stuck queue entry
+        c = self.cell(cid)
+        return f"SEALED — {c.seal_record().replace(chr(9), ' ') or 'sealed'}" if c.sealed else None
 
     def cells(self):
         """Every cell with a folder here, sorted."""
@@ -403,6 +417,13 @@ class Workspace:
         return Cell.new(cid, task or "T1", variant, rep, agent=agent, reference=reference,
                         **plane)
 
+    def named_cell(self, cid, variant=None):
+        """The cell `cid`, its identity read from its id where its folder does
+        not record it."""
+        p = self.parse(cid)
+        return self.cell(cid, p[2] if p else "T1", variant or (p[1] if p else ""),
+                         p[3] if p else 1)
+
 
 # --- the experiment -------------------------------------------------------------
 
@@ -412,11 +433,25 @@ class Experiment:
     supervising them) is the Conduct's; one cell's verbs are its Cell's."""
 
     SMOKE_DIR = "ws-test.nosync"
+    REFERENCE_DIR = "smoke-workspaces.nosync"
 
     def __init__(self, root=None, workspace=None):
         from fae import paths
         self.root = Path(root or paths.root())
         self.workspace = workspace or Workspace(self.root)
+
+    @property
+    def reference_workspaces(self):
+        """Where the SMOKE=1 cells an experiment's own verb runs live
+        (fae/cell/config.py roots them here), never among scored cells."""
+        return self.root / self.REFERENCE_DIR
+
+    def cell(self, cid, task=None, variant=None, rep=1, agent=None, reference=False,
+             workspaces=None):
+        """The cell `cid` on this experiment's workspace, or on the root
+        `workspaces` names (on the same plane)."""
+        ws = self.beside(workspaces) if workspaces else self.workspace
+        return ws.cell(cid, task, variant, rep, agent=agent, reference=reference)
 
     @property
     def definition(self):
@@ -509,9 +544,7 @@ class Experiment:
 
     def beside(self, path):
         """Another workspace root on this experiment's plane (the smoke cells')."""
-        return Workspace(self.root, path, parse=self.workspace.parse,
-                         queues=self.workspace.queues, conduct=self.workspace.conduct,
-                         locks=self.workspace.locks, transitions=self.workspace.transitions)
+        return Workspace(self.root, path, plane=self.workspace.plane, parse=self.workspace._parse)
 
     def reference_cell(self, cid, vid, rep, workspaces):
         """A Cell over a REFERENCE workspace (the variant's template and inputs

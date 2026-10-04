@@ -76,11 +76,11 @@ class TestTheToolContainer(unittest.TestCase):
 
     def test_the_reaper_knows_the_prefix(self):
         from fae.driver.conduct import zombies
-        with mock.patch.object(zombies, "common") as c:
-            c.AGENT_CONTAINER_PREFIX = "fae-agent-"
-            c.definition.return_value.verifier_class.return_value.PREFIXES = {}
-            with mock.patch("fae.cell.variants.registry", return_value={}):
-                self.assertIn(("container", "fae-tool-"), zombies._prefixes())
+        d = mock.Mock()
+        d.verifier_class.return_value.PREFIXES = {}
+        with mock.patch.object(zombies._experiment, "definition", return_value=d), \
+                mock.patch("fae.cell.variants.registry", return_value={}):
+            self.assertIn(("container", "fae-tool-"), zombies._prefixes())
 
 
 if __name__ == "__main__":

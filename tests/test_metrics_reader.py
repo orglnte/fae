@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from _ctx import runs
+from _ctx import runs, at_workspace, use_workspace
 
 from fae import metrics
 from fae.cell.cell import Cell
@@ -60,9 +60,8 @@ class TestTheReadersUseIt(unittest.TestCase):
             return [], [], {}
 
         definition = mock.Mock(taint_rules=rules)
-        with mock.patch.object(runs.common, "definition", return_value=definition), \
-             mock.patch.object(runs.common, "WS", ws.parent), \
-             mock.patch.object(runs.common, "LOCKS", ws.parent / ".locks"):
+        with mock.patch.object(runs.experiment, "definition", return_value=definition), \
+             at_workspace(ws.parent, ws.parent):
             runs.taint._validate_cell(ws)
         self.assertEqual((seen["load_total"], seen["load_errors"]), (28114, 3))
 

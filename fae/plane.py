@@ -15,26 +15,29 @@ from __future__ import annotations
 
 from pathlib import Path
 
+QUEUES, CONDUCT, LOCKS, TRANSITIONS, IMAGES = (
+    ".queues", ".conduct", ".locks", "transitions.log", ".images")
+
 
 def base(root):
     return Path(root) / "workspaces.nosync"
 
 
 def queues(root):
-    return base(root) / ".queues"
+    return base(root) / QUEUES
 
 
 def conduct(root):
-    return base(root) / ".conduct"
+    return base(root) / CONDUCT
 
 
 def locks(root):
-    return base(root) / ".locks"
+    return base(root) / LOCKS
 
 
 def transitions_log(root):
-    return base(root) / "transitions.log"
+    return base(root) / TRANSITIONS
 
 
 def images(root):
-    return base(root) / ".images"
+    return base(root) / IMAGES

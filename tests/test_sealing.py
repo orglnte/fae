@@ -125,7 +125,7 @@ class TestNoLaunchPathStartsASealedCell(SealedFleetTestCase):
     def test_spawn_is_refused_and_no_process_is_started(self):
         self.cell(self.CID, self.GREEN, sealed="sealed=x\tverdict=green\n")
         with mock.patch.object(runs.subprocess, "Popen") as popen:
-            rc = runs.conduct.Conduct().launch(runs.common.named_cell(self.CID), "sonnet")
+            rc = runs.conduct.Conduct().launch(runs.experiment.workspace().named_cell(self.CID), "sonnet")
         popen.assert_not_called()
         self.assertEqual(rc, runs.SEAL_EXIT)
 
@@ -136,7 +136,7 @@ class TestNoLaunchPathStartsASealedCell(SealedFleetTestCase):
              mock.patch.object(Cell, "prestart_clean"), \
              mock.patch.object(runs.conduct.Conduct, "SPAWN_PROBE_S", 0):
             popen.return_value.poll.return_value = None
-            runs.conduct.Conduct().launch(runs.common.named_cell(self.CID), "sonnet")
+            runs.conduct.Conduct().launch(runs.experiment.workspace().named_cell(self.CID), "sonnet")
         popen.assert_called_once()
 
     def test_queueing_a_sealed_cell_is_refused(self):

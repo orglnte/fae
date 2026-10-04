@@ -14,8 +14,6 @@ import unittest
 from pathlib import Path
 
 from _ctx import ROOT
-# By package name: the module under test is fae/cell/ledger.py itself, not
-# fae/driver/common's path-loaded copy of it.
 from fae.cell import ledger
 
 TS = "2026-07-30T09:00:00Z"

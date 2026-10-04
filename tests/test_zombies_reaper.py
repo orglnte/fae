@@ -15,10 +15,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from _ctx import runs, patch_plane
+from _ctx import runs, patch_plane, at_workspace, use_workspace
 
 zombies = runs.zombies
-common = runs.common
 state = runs.host
 mutex = runs.mutex
 
@@ -58,14 +57,13 @@ class TestIterAgeS(unittest.TestCase):
     def test_an_existing_log_has_an_age(self):
         with tempfile.TemporaryDirectory() as d:
             ws = Path(d)
-            with mock.patch.object(common, "WS", ws):
+            with at_workspace(ws):
                 (ws / "cid1").mkdir()
                 (ws / "cid1" / "iterations.log").write_text("x")
                 self.assertIsNotNone(zombies._iter_age_s("cid1"))
 
     def test_a_missing_log_is_none(self):
-        with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(common, "WS", Path(d)):
+        with tempfile.TemporaryDirectory() as d, at_workspace(Path(d)):
             self.assertIsNone(zombies._iter_age_s("no-such-cid"))
 
 
@@ -117,9 +115,7 @@ class TestJanitorLines(unittest.TestCase):
             old.mkdir(parents=True)
             old_time = time.time() - 30 * 3600
             os.utime(old.parent, (old_time, old_time))
-            with mock.patch.object(common, "WS", ws), \
-                    mock.patch.object(common, "SMOKE_WS", ws / "smoke"), \
-                    mock.patch.object(common, "ROOT", ws):
+            with at_workspace(ws, root=ws):
                 lines = zombies.janitor_lines()
             self.assertEqual(len(lines), 1)
             self.assertIn("review + confirm", lines[0])
@@ -128,15 +124,11 @@ class TestJanitorLines(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             ws = Path(d)
             (ws / ".to_be_deleted" / "20260101-000000").mkdir(parents=True)
-            with mock.patch.object(common, "WS", ws), \
-                    mock.patch.object(common, "SMOKE_WS", ws / "smoke"), \
-                    mock.patch.object(common, "ROOT", ws):
+            with at_workspace(ws, root=ws):
                 self.assertEqual(zombies.janitor_lines(), [])
 
     def test_no_to_be_deleted_dir_is_empty(self):
-        with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(common, "WS", Path(d)), \
-                mock.patch.object(common, "SMOKE_WS", Path(d) / "smoke"):
+        with tempfile.TemporaryDirectory() as d, at_workspace(Path(d), root=Path(d)):
             self.assertEqual(zombies.janitor_lines(), [])
 
 
@@ -159,9 +151,7 @@ class FindZombiesCase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         ws = Path(self.tmp.name)
-        self.ws_patch = mock.patch.object(common, "WS", ws)
-        self.ws_patch.start()
-        self.addCleanup(self.ws_patch.stop)
+        use_workspace(self, ws)
         # no arm-*.slots dirs, no zombie candidates there
         patch_plane(self, ws)
 
@@ -219,7 +209,7 @@ class TestFindZombiesTee(FindZombiesCase):
 
 class TestFindZombiesHeartbeat(FindZombiesCase):
     def test_a_dead_loop_file_is_a_corpse(self):
-        ws = common.WS
+        ws = runs.experiment.workspace().path
         cell = ws / "cid1"
         cell.mkdir()
         (cell / ".loop").write_text("x")
@@ -228,7 +218,7 @@ class TestFindZombiesHeartbeat(FindZombiesCase):
         self.assertIn(("heartbeat", str(cell), "cid1", "corpse file"), zs)
 
     def test_a_beating_loop_file_is_not_a_corpse(self):
-        ws = common.WS
+        ws = runs.experiment.workspace().path
         cell = ws / "cid1"
         cell.mkdir()
         (cell / ".loop").write_text("x")
@@ -239,7 +229,7 @@ class TestFindZombiesHeartbeat(FindZombiesCase):
 
 class TestFindZombiesWithoutAWorkspaceRoot(FindZombiesCase):
     def test_a_missing_workspace_root_has_no_zombies(self):
-        with mock.patch.object(common, "WS", common.WS / "absent"):
+        with at_workspace(runs.experiment.workspace().path / "absent"):
             self.assertEqual(zombies.find_zombies(), [])
 
 
@@ -295,7 +285,7 @@ class TestReapZombies(unittest.TestCase):
             p.parent.mkdir()
             p.write_text("x")
             with mock.patch.object(state, "heartbeat", return_value=None), \
-                    mock.patch.object(zombies.common, "LOCKS", Path(d) / ".locks"):
+                    at_workspace(plane=Path(d)):
                 done = zombies.reap_zombies([("heartbeat", str(p.parent), "cid1", "note")])
             self.assertFalse(p.exists())
             self.assertIn(f"reaped heartbeat {p.parent} (cid1)", done)
@@ -358,7 +348,7 @@ class TestClusterMapAsksTheCellsVariant(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             ws = Path(d)
             (ws / cid).mkdir()
-            with mock.patch.object(common, "WS", ws), \
+            with at_workspace(ws), \
                     mock.patch.object(beta.INFRA, "identities",
                                       classmethod(lambda cls, c: [("cluster", f"cl-{c}")])), \
                     mock.patch.dict(zombies._CLMAP, {"key": None, "map": {}}):
@@ -383,16 +373,14 @@ class TestTheRepairReaps(unittest.TestCase):
             sweep.assert_not_called()
 
     def test_a_sweep_within_the_cooldown_does_nothing(self):
-        from fae.driver import common
         from fae.driver.conduct import zombies
-        with tempfile.TemporaryDirectory() as d, \
-                mock.patch.multiple(common, QUEUES=Path(d), CONDUCT=Path(d), LOCKS=Path(d)), \
+        with tempfile.TemporaryDirectory() as d, at_workspace(plane=Path(d)), \
                 mock.patch.object(zombies, "find_zombies", return_value=[("c", "x", "o", "n")]), \
                 mock.patch.object(zombies, "reap_zombies", return_value=["reaped x"]) as reap:
             self.assertEqual(zombies.reap_sweep(), ["reaped x"])
             self.assertEqual(zombies.reap_sweep(), [])
             reap.assert_called_once()
-            self.assertFalse((Path(d) / ".zombie-reap.lock").exists())
+            self.assertFalse((Path(d) / ".conduct" / ".zombie-reap.lock").exists())
 
 
 if __name__ == "__main__":

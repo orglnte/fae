@@ -15,8 +15,6 @@ from pathlib import Path
 from unittest import mock
 
 from _ctx import ROOT  # noqa: F401 — puts the tree on sys.path
-# By package name: the module under test is fae/cell/ledger.py itself, not
-# fae/driver/common's path-loaded copy of it.
 from fae.cell import ledger
 
 TS = "2026-07-30T09:00:00Z"

@@ -119,7 +119,7 @@ class TestTheLogIsAppendedTo(CellCase):
 class TestTraceResetAppends(OrchTmpCase):
 
     def test_the_log_is_kept_and_the_epoch_block_follows_it(self):
-        log = runs.common.TRANSITIONS_LOG
+        log = runs.experiment.workspace().transitions
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text(f"2026-10-01T00:00:00Z\tAdmit\t{CID}\t\n")
         cells = [dict(cid=CID, outcome="green", intent="paused", loop="none", attempts=1,
@@ -127,7 +127,7 @@ class TestTraceResetAppends(OrchTmpCase):
                  dict(cid="opus_high_beta_apidocs_T1_r2", outcome="none", intent="run",
                       loop="none", attempts=0, slot=False, verify=False)]
         with mock.patch.object(runs.experiment.Experiment, "observed_epoch", return_value=cells):
-            runs.common.experiment().reset_trace()
+            runs.experiment.current().reset_trace()
         lines = log.read_text().splitlines()
         self.assertEqual(lines[0].split("\t")[1], "Admit")
         self.assertEqual([l.split("\t")[1:3] for l in lines[2:]],

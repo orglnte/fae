@@ -48,7 +48,7 @@ class TestParseCellId(unittest.TestCase):
             ("sonnet", "beta_apidocs", "T1", "1"))
 
     def test_round_trips_every_variant(self):
-        for variant in runs.common.definition().ids:
+        for variant in runs.experiment.definition().ids:
             for agent in ("sonnet", "haiku", "gemini", "opus", "dsv4f", "kimi"):
                 cid = runs.cell_id(agent, variant, 3)
                 with self.subTest(cid=cid):

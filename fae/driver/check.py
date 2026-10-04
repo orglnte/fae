@@ -25,8 +25,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from fae import experiment as _experiment
 from fae import paths as _paths
-from fae.driver import common
 
 HOWTO = "HOWTO.md"
 
@@ -48,8 +48,8 @@ def probe_variants(variants=None):
     printed one per line; the count refused."""
     from fae.cell import variants as _tr
     bad = 0
-    for vid in sorted(variants or common.definition().active):
-        cell = _tr._ShimCell(f"infra-probe-{vid}", "/nonexistent", common.ROOT)
+    for vid in sorted(variants or _experiment.definition().active):
+        cell = _tr._ShimCell(f"infra-probe-{vid}", "/nonexistent", _experiment.current().root)
         cell.variant = vid
         infra = _tr.for_cell(cell)
         ok, note = True, ""
@@ -150,12 +150,11 @@ class Ctx:
 
     def definition(self):
         if self._definition is None:
-            self._definition = common.definition()
+            self._definition = _experiment.definition()
         return self._definition
 
     def forget(self):
         """Drop the loaded definition, so a retry sees the files as they are now."""
-        from fae import experiment as _experiment
         _experiment.unload()
         self._definition = None
 
@@ -191,8 +190,7 @@ def _prerequisites(ctx):
         out.append(Finding(ok, "docker daemon " + ("answers" if ok else "unreachable"),
                            "start Docker, then `docker info` must succeed"))
     from fae import mutex as _mutex
-    from fae.driver import common as _common
-    local, fstype = _mutex.fs_is_local(_common.WS)
+    local, fstype = _mutex.fs_is_local(_experiment.workspace().path)
     if local is False:
         out.append(Finding(True, f"WARNING: workspaces on {fstype}, not a local disk: ledger "
                                  f"appends from conduct and a cell can interleave"))
@@ -301,7 +299,7 @@ def _seeds(ctx):
                 if reference and cls.REFERENCE is None:
                     continue
                 what = f"{vid}{' (reference)' if reference else ''}"
-                cid = common.cell_id("check", vid, 2 if reference else 1, ctx.task)
+                cid = _experiment.cell_id("check", vid, 2 if reference else 1, ctx.task)
                 try:
                     _prepare.prepare(cid, ctx.task, vid, 1, workspaces=tmp, root=ctx.root,
                                      reference=reference, cfg=cfg)
@@ -344,7 +342,7 @@ def _invariants(ctx):
                        "not smoke, a cell started from this shell would name itself otherwise"))
     d = ctx.definition()
     hook = d.verbs.get("selftest")
-    problems = list(hook(common.WS)) if hook else []
+    problems = list(hook(_experiment.workspace().path)) if hook else []
     out += [Finding(False, f"the experiment's own check: {p}",
                     "what it names (the experiment's selftest hook)") for p in problems]
     if not problems:
@@ -353,13 +351,13 @@ def _invariants(ctx):
         where = cls.SOURCE.name if cls.SOURCE else vid
         out += [Finding(False, f"variant {vid}: {p}", f"fix {where}") for p in _files.problems(cls)]
     disagree = []
-    if common.WS.is_dir():
-        for ws in sorted(common.WS.iterdir()):
-            if not ws.is_dir() or not common.parse_cell_id(ws.name):
+    if _experiment.workspace().path.is_dir():
+        for ws in sorted(_experiment.workspace().path.iterdir()):
+            if not ws.is_dir() or not _experiment.parse_cell_id(ws.name):
                 continue
             st = Conduct.cell_state(ws)
             if st and st["state"] == "DONE" and st["why"] in ("green", "failed", "revoked"):
-                if common.cell(ws.name, workspaces=ws.parent).read_ledger()["verdict"] != st["why"]:
+                if _experiment.current().cell(ws.name, workspaces=ws.parent).read_ledger()["verdict"] != st["why"]:
                     disagree.append(ws.name)
     out.append(Finding(not disagree, "every finished cell's ledger agrees with its state" if not disagree
                        else f"ledger and state disagree: {', '.join(disagree[:5])}",
@@ -383,7 +381,7 @@ def _trace(ctx):
     if tool is None:
         return [Finding(False, "no TLA+ trace checker",
                         "unset FAE_TLA_VERIFY to use fae/utils/tla_verify.py, or point it at a file")]
-    log = common.TRANSITIONS_LOG
+    log = _experiment.workspace().transitions
     if not (log.exists() and log.stat().st_size):
         return [Finding(True, "no transitions recorded yet: nothing to replay")]
     spec = sorted(TLA_DIR.glob("*.tla"))
@@ -405,7 +403,7 @@ def _trace(ctx):
 
 
 def _pipeline(ctx):
-    exp = common.experiment()
+    exp = _experiment.current()
     try:
         exp.smoke(variants=",".join(v for v in exp.smoke_variants() if v in ctx.selected()))
         rc = 0
@@ -541,6 +539,6 @@ def main(args):
     if args.walk and not sys.stdin.isatty():
         sys.exit("check: --walk asks before each step and needs a terminal; "
                  "run without --walk for the checklist")
-    ctx = Ctx(root=common.ROOT, variants=tuple(v for v in (args.variants or "").split(",") if v),
+    ctx = Ctx(root=_experiment.current().root, variants=tuple(v for v in (args.variants or "").split(",") if v),
               task=args.task, static=args.static)
     sys.exit(run(ctx, walk=args.walk, smoke=args.smoke, tla_trace=getattr(args, "tla_trace", False)))

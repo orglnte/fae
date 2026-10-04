@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import time
 
-from fae.driver import common
+from fae import experiment as _experiment
 
 HOST_SLEEP_GAP_S = 30
 HOST_SLEEP_BOOK_DAYS = 7
@@ -19,7 +19,7 @@ _sleep_gaps = None              # the book, loaded on first use
 
 
 def reconcile_log():
-    return common.CONDUCT / "reconcile.log"
+    return _experiment.workspace().conduct / "reconcile.log"
 
 
 def rec_log(msg):
@@ -33,7 +33,7 @@ def rec_log(msg):
 
 
 def _host_sleep_book():
-    return common.CONDUCT / "host_sleep.json"
+    return _experiment.workspace().conduct / "host_sleep.json"
 
 
 def _host_sleep_gaps():

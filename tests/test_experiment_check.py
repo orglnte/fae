@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from _ctx import ROOT  # noqa: F401  (sys.path, EXPERIMENT_DIR = the fixture)
+from _ctx import ROOT, at_workspace  # noqa: F401  (sys.path, EXPERIMENT_DIR = the fixture)
 
 from fae import experiment as _experiment
 from fae.cell.variants.base import Variant
@@ -68,7 +68,7 @@ class TestEachFailureNamesItsFix(CheckCase):
         self.assertIn("fix: python3 cli.py experiment init --experiment", self.text())
 
     def test_a_definition_that_raises_is_shown_with_where_to_fix_it(self):
-        with mock.patch.object(check.common, "definition", side_effect=NameError("name 'GAET' is not defined")):
+        with mock.patch.object(check._experiment, "definition", side_effect=NameError("name 'GAET' is not defined")):
             self.assertEqual(self.run_check(), 1)
         self.assertIn("raised NameError: name 'GAET' is not defined", self.text())
         self.assertIn("  skip    definition", self.lines)
@@ -232,7 +232,7 @@ class TestTheFoldedSteps(CheckCase):
         empty = self.root / "transitions.log"
         empty.write_text("")
         with mock.patch.object(check, "tla_verify_path", return_value="/x/tla_verify"), \
-                mock.patch.object(check.common, "TRANSITIONS_LOG", empty):
+                at_workspace(plane=self.root):
             (f,) = self.findings(check._trace)
         self.assertTrue(f.ok)
 
@@ -240,7 +240,7 @@ class TestTheFoldedSteps(CheckCase):
         log = self.root / "transitions.log"
         log.write_text("2026-10-02T00:00:00Z\tSPAWN\tc\n")
         with mock.patch.object(check, "tla_verify_path", return_value="/x/tla_verify"), \
-                mock.patch.object(check.common, "TRANSITIONS_LOG", log), \
+                at_workspace(plane=self.root), \
                 mock.patch.object(check.subprocess, "run",
                                   return_value=mock.Mock(returncode=1, stdout="Resume not ENABLED\n",
                                                          stderr="")):

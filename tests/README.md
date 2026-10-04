@@ -17,8 +17,9 @@ under them would act on live cells.
 So: importing `runs` is safe (import is side-effect free — path construction,
 no writes), but **any test that
 exercises a function which writes must redirect the target into a
-`TemporaryDirectory` first**, by passing an explicit path or by patching
-`runs.common.WS` and the plane (`_ctx.patch_plane`, or `OrchTmpCase`). No test in this suite reads or writes the real
+`TemporaryDirectory` first**, by passing an explicit path or by making a temp tree the current
+Experiment's (`_ctx.use_workspace` / `at_workspace` / `patch_plane`, or
+`OrchTmpCase`). No test in this suite reads or writes the real
 workspace tree.
 
 ## What is covered

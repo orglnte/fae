@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fae.cell.cell import Cell
-from fae.driver import common
+from fae import experiment as _experiment
 from fae.experiment import parse_cell_id
 from .records import awake_age
 
@@ -42,7 +42,7 @@ def _workspace_entries():
     """The workspace root's entries; none when the root does not exist yet
     (a fresh checkout, a root no cell has run in)."""
     try:
-        return list(common.WS.iterdir())
+        return list(_experiment.workspace().path.iterdir())
     except OSError:
         return []
 
@@ -77,7 +77,7 @@ def _verifier_infra(cid):
     the verifier's own (a store), named as they name them."""
     from fae.cell import image as _image
     out = [("container", _image.verify_container(cid)), ("network", _image.cell_network(cid))]
-    for pair in common.definition().verifier_class().identities(cid):
+    for pair in _experiment.definition().verifier_class().identities(cid):
         if pair not in out:
             out.append(pair)
     return out
@@ -105,7 +105,7 @@ def _strays(live):
     from fae.cell import variants as _tr
     out = []
     for infra in {cls.INFRA for cls in _tr.registry().values()}:
-        for item in infra.stray(live, common.WS):
+        for item in infra.stray(live, _experiment.workspace().path):
             if item not in out:
                 out.append(item)
     return out
@@ -120,7 +120,7 @@ def _prefixes():
            ("container", _image.VERIFY_PREFIX), ("container", _image.TOOL_PREFIX),
            ("container", _image.RUN_PREFIX),
            ("network", _image.NET_PREFIX)]
-    classes = list(dict.fromkeys(c.INFRA for c in _tr.registry().values())) + [common.definition().verifier_class()]
+    classes = list(dict.fromkeys(c.INFRA for c in _tr.registry().values())) + [_experiment.definition().verifier_class()]
     for cls in classes:
         for kind, pfxs in cls.PREFIXES.items():
             for pfx in ((pfxs,) if isinstance(pfxs, str) else pfxs):
@@ -162,7 +162,7 @@ def _docker_age_s(name):
 
 
 def _iter_age_s(cid):
-    mt = common.cell(cid).mtimes()["ledger"]
+    mt = _experiment.current().cell(cid).mtimes()["ledger"]
     return awake_age(mt / 1e9) if mt is not None else None
 
 
@@ -205,10 +205,10 @@ def _leaked_lock_holders():
     """
     out = []
     for name in ("rig", "verify"):
-        if not Cell.shared_lock_held(common.LOCKS, name) \
+        if not Cell.shared_lock_held(_experiment.workspace().locks, name) \
                 or host.loop_parents() or _verify_holders_alive():
             continue
-        p = Cell.shared_lock(common.LOCKS, name)
+        p = Cell.shared_lock(_experiment.workspace().locks, name)
         for pid in _fd_holders(p):
             if _pid_alive(pid) and not _is_driver_pid(pid):
                 out.append((p.name, pid))
@@ -231,7 +231,7 @@ def find_zombies():
     live = host.loop_parents()
     zs = []
     for lock, pid in _leaked_lock_holders():
-        who = Cell.shared_lock_holder(common.LOCKS, lock[:-len("-lock")])
+        who = Cell.shared_lock_holder(_experiment.workspace().locks, lock[:-len("-lock")])
         zs.append(("lockholder", f"{pid}:{lock}", who or "?",
                    f"holds {lock} with no process entitled to it"))
     prefixes = _prefixes()
@@ -296,14 +296,14 @@ def find_zombies():
     for ws in _workspace_entries():
         if not ws.is_dir():
             continue
-        c = common.cell(ws.name, workspaces=ws.parent)
+        c = _experiment.current().cell(ws.name, workspaces=ws.parent)
         if c.heartbeat() is not None and host.heartbeat(ws, c) is None:
             zs.append(("heartbeat", str(ws), ws.name, "corpse file"))
     # No stale-lock class: a lock is held by fd, so the kernel frees it when
     # its holder dies. What can outlive a holder is INFRA, and an arm
     # slot's last-holder sidecar is the cheapest place to notice it.
     present = None                      # infra that exists, read once
-    q = common.queues()
+    q = _experiment.workspace().queues
     for d in [s for lock in q.slot_pools() for s in q.slot_files(lock)]:
         owner = (q.slot_note(d) or ("",))[0]
         if not owner or owner in live or q.slot_held(d):
@@ -358,7 +358,7 @@ def reap_zombies(zs):
                     done.append(f"skipped heartbeat {ident} — beating again")
                     continue
                 ws = Path(ident)
-                if not common.cell(ws.name, workspaces=ws.parent).clear_heartbeat():
+                if not _experiment.current().cell(ws.name, workspaces=ws.parent).clear_heartbeat():
                     done.append(f"skipped heartbeat {ident} — its cell is held")
                     continue
             elif kind == "process":
@@ -391,14 +391,14 @@ def reap_sweep():
     concurrent docker and kind sweeps racing on the same targets are host
     contention of their own."""
     cooldown = int(os.environ.get("ZOMBIE_REAP_COOLDOWN_S", 120))
-    stamp = common.CONDUCT / ".zombie-reap.done"
-    lock = common.CONDUCT / ".zombie-reap.lock"
+    stamp = _experiment.workspace().conduct / ".zombie-reap.done"
+    lock = _experiment.workspace().conduct / ".zombie-reap.lock"
     try:
         if time.time() - stamp.stat().st_mtime < cooldown:
             return []
     except OSError:
         pass
-    common.CONDUCT.mkdir(parents=True, exist_ok=True)
+    _experiment.workspace().conduct.mkdir(parents=True, exist_ok=True)
     try:
         lock.mkdir()
     except FileExistsError:
@@ -426,13 +426,13 @@ def janitor_lines():
     NEVER deletes anything — deletion happens only after the operator reviews
     and explicitly confirms (SAFE DATA DELETION rule)."""
     out = []
-    for root in (common.WS, common.SMOKE_WS):
+    for root in (_experiment.workspace().path, _experiment.current().reference_workspaces):
         tbd = root / ".to_be_deleted"
         if not tbd.is_dir():
             continue
         for entry in sorted(p for p in tbd.iterdir() if p.is_dir()):
             age_h = (time.time() - entry.stat().st_mtime) / 3600
             if age_h > 24:
-                out.append(f"  janitor: {entry.relative_to(common.ROOT)} is {age_h:.0f}h old "
+                out.append(f"  janitor: {entry.relative_to(_experiment.current().root)} is {age_h:.0f}h old "
                            f"— review + confirm with operator before deleting")
     return out

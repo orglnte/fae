@@ -742,7 +742,7 @@ unknown keys refused):
 (`cell` | `reverify` | `exp1`).
 
 **Cell id**: `<agent>_<effort>[_smoke]_<variant>_<task>_r<rep>`, encoded in
-one place (`fae/driver/common.py`).
+one place (`fae/experiment.py`: `cell_id`, `parse_cell_id`).
 
 ---
 

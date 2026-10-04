@@ -58,10 +58,6 @@ from fae.queues import Queues  # noqa: E402
 HARNESS = _paths.ENGINE
 ROOT = _paths.ROOT
 
-# The budget is a constant, not a knob — attempts-to-green is the dependent
-# variable, and a per-cell budget makes two cells incomparable. Mirrored in
-# fae/driver/common.py and in fae/cell/config.py; prepare.py records it into cell.env.
-# Nothing reads it from the environment.
 class Halt(RuntimeError):
     """The cell stopped without a verdict, and a human has to look.
 
@@ -363,10 +359,6 @@ class Cell:
     # artifacts/ — while derived files (validation.json, score*.json) stay
     # regenerable, since they are functions of the result and the scoring rules
     # are meant to improve. New evidence goes under reverify/<ts>/.
-    #
-    # The file format is a contract with fae/driver/common.py, which reads the
-    # same marker (is_sealed / seal_reason) before a cell is spawned, resumed
-    # or queued.
     SEAL_MARKER = ".sealed"
     # The driver every cell records in cell.env IMPL and the ledger: bash
     # (harness/run_cell.sh) -> py (the python driver this engine replaced) ->

@@ -4,7 +4,7 @@ preview writing state.
 Money is at stake in both: an unordered respawn is a paid agent run, and a
 dry-run that flags a cell silently removes it from supervision.
 
-`runs.common.WS` and the scheduling plane are patched to a TemporaryDirectory in every test that
+`runs.experiment.workspace().path` and the scheduling plane are patched to a TemporaryDirectory in every test that
 writes. Nothing touches the live workspace tree.
 """
 import fcntl
@@ -20,7 +20,7 @@ from unittest import mock
 
 from fae.cell.cell import Cell
 
-from _ctx import runs, ROOT, patch_plane
+from _ctx import runs, ROOT, patch_plane, at_workspace, use_workspace
 from fae.cell.fsm import LOOP_CLEARED_BY
 
 TS = "2026-07-30T09:00:00Z"
@@ -89,7 +89,7 @@ class TestCellStateExposesPrepared(unittest.TestCase):
 
     def test_prepared_workspace_reports_prepared(self):
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(runs.common, "WS", Path(d)):
+                at_workspace(Path(d)):
             ws = Path(d) / "sonnet_high_beta_apidocs_T1_r1"
             (ws / "artifacts").mkdir(parents=True)
             (ws / "iterations.log").write_text(
@@ -107,7 +107,7 @@ class TestCellStateExposesPrepared(unittest.TestCase):
 
     def test_a_workspace_with_attempts_reports_not_only_prepared(self):
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(runs.common, "WS", Path(d)):
+                at_workspace(Path(d)):
             ws = Path(d) / "sonnet_high_beta_apidocs_T1_r1"
             (ws / "artifacts").mkdir(parents=True)
             (ws / "iterations.log").write_text(
@@ -156,8 +156,9 @@ class TestAgentProgress(unittest.TestCase):
 
     def test_the_book_survives_a_corrupt_file(self):
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.multiple(runs.common, QUEUES=Path(d), CONDUCT=Path(d), LOCKS=Path(d)):
-            (Path(d) / "agent-io.json").write_text("{not json")
+                at_workspace(plane=Path(d)):
+            (Path(d) / ".queues").mkdir()
+            (Path(d) / ".queues" / "agent-io.json").write_text("{not json")
             self.assertEqual(runs.supervise._agent_io_book(), {})
 
 
@@ -191,35 +192,37 @@ class TestTheEpochSeedIsComplete(unittest.TestCase):
 
     def test_lock_holders_are_read_from_the_mutex_files(self):
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.multiple(runs.common, QUEUES=Path(d), CONDUCT=Path(d), LOCKS=Path(d)):
-            slots = Path(d) / "work-slots"
+                at_workspace(plane=Path(d)):
+            slots = Path(d) / ".queues" / "work-slots"
             slots.mkdir(parents=True)
+            (Path(d) / ".locks").mkdir()
             held = open(slots / "slot-1", "a+")
             self.addCleanup(held.close)
             fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             (slots / "slot-1.holder").write_text("cell-a 4242 123\n")
             (slots / "slot-2").touch()
             (slots / "slot-2.holder").write_text("cell-c 4243 123\n")
-            vlock = open(Path(d) / "verify-lock", "a+")
+            vlock = open(Path(d) / ".locks" / "verify-lock", "a+")
             self.addCleanup(vlock.close)
             fcntl.flock(vlock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            (Path(d) / "verify-lock.holder").write_text("cell-b 99 123\n")
-            exp = runs.common.experiment()
+            (Path(d) / ".locks" / "verify-lock.holder").write_text("cell-b 99 123\n")
+            exp = runs.experiment.current()
             self.assertEqual(exp.slot_holders(), {"cell-a"})
             self.assertEqual(exp.verify_holder(), "cell-b")
 
     def test_a_released_verify_lock_names_no_holder(self):
         # the holder note outlives the release; the kernel decides
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.multiple(runs.common, QUEUES=Path(d), CONDUCT=Path(d), LOCKS=Path(d)):
-            (Path(d) / "verify-lock").touch()
-            (Path(d) / "verify-lock.holder").write_text("cell-b 99 123\n")
-            self.assertEqual(runs.common.experiment().verify_holder(), "")
+                at_workspace(plane=Path(d)):
+            (Path(d) / ".locks").mkdir()
+            (Path(d) / ".locks" / "verify-lock").touch()
+            (Path(d) / ".locks" / "verify-lock.holder").write_text("cell-b 99 123\n")
+            self.assertEqual(runs.experiment.current().verify_holder(), "")
 
     def test_no_locks_held_reads_empty(self):
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.multiple(runs.common, QUEUES=Path(d), CONDUCT=Path(d), LOCKS=Path(d)):
-            exp = runs.common.experiment()
+                at_workspace(plane=Path(d)):
+            exp = runs.experiment.current()
             self.assertEqual(exp.slot_holders(), set())
             self.assertEqual(exp.verify_holder(), "")
 
@@ -262,7 +265,7 @@ class TestNoEditReachesTheStatus(unittest.TestCase):
 
     def _state(self, *lines):
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(runs.common, "WS", Path(d)):
+                at_workspace(Path(d)):
             ws = Path(d) / "sonnet_high_beta_apidocs_T1_r1"
             (ws / "artifacts").mkdir(parents=True)
             (ws / "iterations.log").write_text("".join(l + "\n" for l in lines))
@@ -426,9 +429,8 @@ class TestDryRunWritesNothing(unittest.TestCase):
         self.cid = "sonnet_high_beta_apidocs_T1_r1"
         (self.ws / self.cid).mkdir(parents=True)
         patch_plane(self, self.ws)
-        self.patches = [mock.patch.object(runs.common, "WS", self.ws)]
-        for p in self.patches:
-            p.start()
+        use_workspace(self, self.ws)
+        self.patches = []
 
     def tearDown(self):
         for p in self.patches:
@@ -463,7 +465,7 @@ class TestDryRunWritesNothing(unittest.TestCase):
 
     def test_dry_run_writes_no_transition(self):
         runs.conduct.Conduct().respawn(self.st(), dry=True)
-        self.assertFalse(runs.common.TRANSITIONS_LOG.exists(),
+        self.assertFalse(runs.experiment.workspace().transitions.exists(),
                          "a preview wrote to the trace the TLA+ check replays")
 
 
@@ -489,7 +491,7 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
     def spawn(self, argv, cid):
         """Conduct.launch, the cell's process being `argv`."""
         with mock.patch.object(Cell, "process_argv", return_value=argv):
-            return runs.conduct.Conduct().launch(runs.common.named_cell(cid), "sonnet")
+            return runs.conduct.Conduct().launch(runs.experiment.workspace().named_cell(cid), "sonnet")
 
     def test_immediate_failure_returns_the_exit_code(self):
         rc = self.spawn(
@@ -525,37 +527,37 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         # anyway must lift it, or the model keeps intent='paused' and every
         # later event on the cell replays as an illegal transition.
         cid = "cell-paused"
-        (runs.common.WS / cid).mkdir(parents=True, exist_ok=True)
-        self.addCleanup(shutil.rmtree, runs.common.WS / cid, True)
-        (runs.common.WS / cid / ".paused").write_text("stopped by=operator\n")
+        (runs.experiment.workspace().path / cid).mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, runs.experiment.workspace().path / cid, True)
+        (runs.experiment.workspace().path / cid / ".paused").write_text("stopped by=operator\n")
         # The Resume is gated on the LEDGER pause, exactly as replay judges
         # it — so the fixture seeds the Pause `stop` emits.
-        log = runs.common.TRANSITIONS_LOG
+        log = runs.experiment.workspace().transitions
         with log.open("a") as f:
             f.write(f"{TS}\tPause\t{cid}\treason=stopped\n")
         self.spawn(["bash", "-c", "exit 0"], cid)
         self.assertEqual([l.split("\t")[1] for l in log.read_text().splitlines()
                           if l.split("\t")[2] == cid], ["Pause", "Resume"])
-        self.assertFalse((runs.common.WS / cid / ".paused").exists())
+        self.assertFalse((runs.experiment.workspace().path / cid / ".paused").exists())
 
     def test_a_cancelled_cell_is_never_resumed_by_a_spawn(self):
         cid = "cell-cancelled"
-        (runs.common.WS / cid).mkdir(parents=True, exist_ok=True)
-        self.addCleanup(shutil.rmtree, runs.common.WS / cid, True)
-        (runs.common.WS / cid / ".paused").write_text("killed by=operator\n")
-        (runs.common.WS / cid / ".cancelled").write_text("by=operator\n")
-        with runs.common.TRANSITIONS_LOG.open("a") as f:
+        (runs.experiment.workspace().path / cid).mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, runs.experiment.workspace().path / cid, True)
+        (runs.experiment.workspace().path / cid / ".paused").write_text("killed by=operator\n")
+        (runs.experiment.workspace().path / cid / ".cancelled").write_text("by=operator\n")
+        with runs.experiment.workspace().transitions.open("a") as f:
             f.write(f"{TS}\tKill\t{cid}\treason=killed\n")
         self.spawn(["bash", "-c", "exit 0"], cid)
-        self.assertNotIn("\tResume\t", runs.common.TRANSITIONS_LOG.read_text())
-        self.assertTrue((runs.common.WS / cid / ".paused").exists())
+        self.assertNotIn("\tResume\t", runs.experiment.workspace().transitions.read_text())
+        self.assertTrue((runs.experiment.workspace().path / cid / ".paused").exists())
 
     def test_it_never_creates_a_workspace(self):
         # The sink must not be minted under WS: a spawn precedes prepare, so
         # writing there invents a workspace for a cell that never ran — and
         # every scanner that walks WS then sees it.
         self.spawn(["bash", "-c", "exit 3"], "cell-never")
-        self.assertFalse((runs.common.WS / "cell-never").exists())
+        self.assertFalse((runs.experiment.workspace().path / "cell-never").exists())
 
 
 if __name__ == "__main__":
@@ -573,6 +575,7 @@ class SweepCase(unittest.TestCase):
         self.cell = self.ws / self.cid
         self.cell.mkdir(parents=True)
         patch_plane(self, self.ws)
+        use_workspace(self, self.ws)
         self.alerts = runs.supervise.Alerts()
         (self.cell / "iterations.log").touch()
         self.patches = [
@@ -580,7 +583,6 @@ class SweepCase(unittest.TestCase):
             # patch os.kill with a bare Mock — every pid then looks alive
             # forever and the full grace is burned in a unit test.
             mock.patch.object(Cell, "_gone", return_value=True),
-            mock.patch.object(runs.common, "WS", self.ws),
             mock.patch.object(runs.host, "loop_pids", return_value={}),
         ]
         for p in self.patches:
@@ -833,8 +835,8 @@ class TestAStaleArmSlotSidecarIsNotAZombieForever(unittest.TestCase):
         self.slot = slots / "slot-2"
         self.slot.touch()
         (slots / "slot-2.holder").write_text("sonnet_high_alpha_apidocs_T1_r6 54638 1\n")
+        use_workspace(self, self.ws)
         self.patches = [
-            mock.patch.object(runs.common, "WS", self.ws),
             mock.patch.object(runs.host, "loop_parents", return_value={}),
             mock.patch.object(runs.zombies, "_leaked_lock_holders", return_value=[]),
             mock.patch.object(runs.host, "containers", return_value=[]),
@@ -1123,7 +1125,7 @@ class TestSpawnTagsSmokeCells(unittest.TestCase):
     def test_the_spawn_cid_carries_the_smoke_flag(self):
         import inspect
         src = inspect.getsource(runs.cli.spawn)
-        m = re.search(r"cid = common\.cell_id\(([^)]*)\)", src)
+        m = re.search(r"cid = _experiment\.cell_id\(([^)]*)\)", src)
         self.assertIsNotNone(m)
         self.assertIn("smoke=", m.group(1))
 
@@ -1145,5 +1147,5 @@ class TestRespawnKeepsTheCellsImplementation(unittest.TestCase):
             cid = "opus_high_beta_apidocs_T1_r96"
             (Path(d) / cid).mkdir()
             (Path(d) / cid / "cell.env").write_text("TASK=T1\nIMPL=py\n")
-            with mock.patch.object(runs.common, "WS", Path(d)):
-                self.assertEqual(runs.common.cell(cid).impl, "py")
+            with at_workspace(Path(d)):
+                self.assertEqual(runs.experiment.current().cell(cid).impl, "py")
