@@ -56,14 +56,14 @@ class TestRigOutputRule(unittest.TestCase):
 
 
 class TestTheValidatorAppliesIt(unittest.TestCase):
-    def test_the_cell_is_tainted_under_rule_set_9(self):
+    def test_the_cell_is_tainted_under_rule_set_10(self):
         ws, _ = ledger_of(("ITER", "fail", "attempt=1 stage=e2e"), ALERT)
         definition = mock.Mock(taint_rules=None)
         definition.report_text.return_value = ""
         with mock.patch.object(runs.experiment, "definition", return_value=definition), \
              at_workspace(ws.parent, ws.parent):
             doc = runs.taint._validate_cell(ws)
-        self.assertEqual((doc["verdict"], doc["rule_set"]), ("TAINTED", 9))
+        self.assertEqual((doc["verdict"], doc["rule_set"]), ("TAINTED", 10))
         self.assertEqual(json.loads((ws / "validation.json").read_text())["verdict"], "TAINTED")
 
 

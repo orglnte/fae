@@ -38,6 +38,11 @@ def _validate_cell(ws):
     it_text = cell.ledger_text()
     metrics = cell.read_metrics()
 
+    # A ledger that breaks the lifecycle's rules miscounts attempts-to-green.
+    bad = cell.ledger_violation()
+    if bad:
+        rule, text, n, line = bad
+        taints.append(f"ledger rule {rule} broken at line {n} ({text}): {line.strip()[:100]}")
     # A verify that changed the cell's record (Cell._record_changes): the cell
     # paused for the operator, and nothing it recorded can stand unexamined.
     for m in re.finditer(r"\tALERT\t[^\t\n]*\t(?:attempt=\d+\t)?INTEGRITY ([^\n]*)", it_text):
@@ -97,8 +102,9 @@ def _validate_cell(ws):
            # rule_set 7 adds the archive checks (runs not charged, and the
            # archive disagreeing with the ledger); rule_set 8 the integrity
            # rule (a verify that changed the cell's record); rule_set 9 the
-           # rig-output rule (a verify that left a required output unwritten).
-           "rule_set": 9,
+           # rig-output rule (a verify that left a required output unwritten);
+           # rule_set 10 the ledger's lifecycle rules (Cell.ledger_violation).
+           "rule_set": 10,
            "at": f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}"}
     with cell.changing():
         cell.write_derived("validation.json", json.dumps(doc, indent=1))

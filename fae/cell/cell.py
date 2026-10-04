@@ -329,6 +329,14 @@ class Cell:
         except OSError:
             return ""
 
+    def ledger_violation(self):
+        """The first ledger line that breaks a lifecycle rule (ledger.RULES),
+        as (rule, its text, line number, line); None when the ledger keeps
+        them all."""
+        b = self.env.get("ATTEMPT_BUDGET", "")
+        v = ledger.check(self.ledger_text(), int(b) if b.isdigit() else None)
+        return None if v is None else (v[0], ledger.RULES[v[0]], v[1], v[2])
+
     def read_metrics(self):
         """The last verify's metrics.json (fae/metrics.py), {} when absent."""
         return _metrics.read(self.ws)

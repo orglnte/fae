@@ -57,70 +57,6 @@ def load_header(path):
     return consts, actions, invariants, sorted(consts[argsrc])
 
 
-def check_trace(ws):
-    """--trace <workspace>: replay a cell's iterations.log against the model's
-    lifecycle rules. Layer 2 of the verify-end conformance gate: an illegal
-    ledger trace is flagged at its FIRST occurrence, not N burned attempts
-    later. Rules (the per-cell projection of the spec):
-      1. attempt numbers on ITER lines strictly increase by 1
-      2. attempts never exceed ATTEMPT_BUDGET (cell.env)
-      3. nothing but bookkeeping (SHAPE/REVERIFY/PAUSED) after an END
-      4. at most one END; green END requires a green ITER
-      5. an ITER requires a preceding START for the same attempt
-    """
-    import re as _re
-    ws = os.path.abspath(ws)
-    log = os.path.join(ws, "iterations.log")
-    if not os.path.isfile(log):
-        print(f"tla_verify --trace: no ledger at {log}")
-        return 1
-    budget = None
-    envf = os.path.join(ws, "cell.env")
-    if os.path.isfile(envf):
-        m = _re.search(r"ATTEMPT_BUDGET=(\d+)", open(envf).read())
-        budget = int(m.group(1)) if m else None
-    last_att = 0
-    started = set()
-    ended = False
-    green_iter = False
-    for i, line in enumerate(open(log), 1):
-        if line.startswith("#"):
-            continue
-        f = line.rstrip("\n").split("\t")
-        if len(f) < 3:
-            continue
-        ev = f[1]
-        m = _re.search(r"attempt=(\d+)", line)
-        att = int(m.group(1)) if m else None
-        def die(rule):
-            print(f"tla_verify --trace VIOLATION line {i}: {rule}\n  {line.rstrip()}")
-            return 1
-        if ended and ev not in ("SHAPE", "REVERIFY", "PAUSED", "END"):
-            return die("events after END (rule 3)")
-        if ev == "END":
-            if ended:
-                return die("second END (rule 4)")
-            if "green=true" in line and not green_iter:
-                return die("green END without a green ITER (rule 4)")
-            ended = True
-        elif ev == "START" and att is not None:
-            started.add(att)
-        elif ev == "ITER":
-            if att is not None:
-                if att != last_att + 1:
-                    return die(f"attempt {att} after {last_att} (rule 1)")
-                if budget and att > budget:
-                    return die(f"attempt {att} > budget {budget} (rule 2)")
-                if att not in started and started:
-                    return die(f"ITER attempt {att} without START (rule 5)")
-                last_att = att
-            if f[2] == "green":
-                green_iter = True
-    print(f"tla_verify --trace OK: {os.path.basename(ws)} "
-          f"({last_att} attempts{', ended' if ended else ''})")
-    return 0
-
-
 def _fcn_items(val):
     """The domain->value mapping of a TLA+ function value, or None if `val`
     is not a function. PlusPy's simplify() renders a function whose domain is
@@ -282,14 +218,14 @@ def _incarnations(events):
 def check_live_trace(path, spec=None, since=None):
     """--live-trace <transitions.log> [spec.tla]: replay the GLOBAL,
     cross-cell event trace through PlusPy against the real spec (not a
-    lookalike rule set, unlike --trace). Checks:
+    lookalike rule set). Checks:
       - every event is an ENABLED transition given prior history (an
         illegal transition — e.g. two cells both holding AcquireVerify —
         is flagged at the event, with a shortest-trace-style citation)
       - TypeOK, VerifyMutualExclusion, WorkCap, KilledStaysDead hold after
         every step (NoBudgetOverrun is deliberately excluded: it's a
-        per-cell property already covered correctly by --trace using each
-        cell's own ATTEMPT_BUDGET; the model's one global Budget constant
+        per-cell property the ledger's own rules check with each cell's
+        ATTEMPT_BUDGET (fae/cell/ledger.py: check); the model's one global Budget constant
         can't represent per-treatment budgets)
       - one timing predicate, checked in Python over event timestamps, not
         modeled in TLA+ (wall-clock reasoning doesn't belong in the spec):
@@ -470,8 +406,6 @@ def check_live_trace(path, spec=None, since=None):
 
 
 def main():
-    if len(sys.argv) > 2 and sys.argv[1] == "--trace":
-        return check_trace(sys.argv[2])
     if len(sys.argv) > 2 and sys.argv[1] == "--live-trace":
         argv, since = list(sys.argv[2:]), None
         if "--since" in argv:

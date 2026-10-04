@@ -232,6 +232,56 @@ def hist(parsed: dict) -> str:
 # Measured on this platform at 12 concurrent writers and at 64KB lines.
 # (Not true over NFS, where O_APPEND is not atomic.)
 
+# The per-cell projection of .tla/Runs.tla's lifecycle, as rules a ledger's
+# lines must keep: a ledger that breaks one miscounts attempts-to-green.
+RULES = {
+    1: "attempt numbers on ITER lines increase by exactly 1",
+    2: "no attempt beyond the cell's ATTEMPT_BUDGET",
+    3: "after the END, only bookkeeping (SHAPE, REVERIFY, REVERIFY_END, PAUSED, ALERT)",
+    4: "at most one END, and a green END needs a green ITER",
+    5: "an ITER needs a START for its attempt",
+}
+_AFTER_END = ("SHAPE", "REVERIFY", "REVERIFY_END", "PAUSED", "ALERT", "END")
+_ATTEMPT_RE = re.compile(r"attempt=(\d+)")
+
+
+def check(text: str, budget: int | None = None):
+    """The first line of the ledger `text` that breaks a rule (RULES), as
+    (rule, line number, line); None when every line keeps them. `budget` is
+    the cell's ATTEMPT_BUDGET (rule 2 is skipped without one). Rule 5 holds
+    only once a START was recorded: the oldest ledgers wrote none."""
+    last_att, started, ended, green_iter = 0, set(), False, False
+    for i, line in enumerate(text.splitlines(), 1):
+        if line.startswith("#"):
+            continue
+        f = line.split("\t")
+        if len(f) < 3:
+            continue
+        ev = f[1]
+        m = _ATTEMPT_RE.search(line)
+        att = int(m.group(1)) if m else None
+        if ended and ev not in _AFTER_END:
+            return 3, i, line
+        if ev == "END":
+            if ended or ("green=true" in line and not green_iter):
+                return 4, i, line
+            ended = True
+        elif ev == "START" and att is not None:
+            started.add(att)
+        elif ev == "ITER":
+            if att is not None:
+                if att != last_att + 1:
+                    return 1, i, line
+                if budget and att > budget:
+                    return 2, i, line
+                if started and att not in started:
+                    return 5, i, line
+                last_att = att
+            if f[2] == "green":
+                green_iter = True
+    return None
+
+
 ITER_RESULTS = ("fail", "green", "budget")
 FIELD_MAX = 400
 
