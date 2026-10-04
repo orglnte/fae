@@ -413,7 +413,7 @@ class TestTheModelLearnsAboutKilledLoops(unittest.TestCase):
         # emitting there wrote one legal Crash and an illegal one every sweep
         # after it. The two survivors kill the loop themselves, which is what
         # makes their Crash both true and once-only.
-        src = (Path(ROOT) / "fae" / "driver" / "conduct" / "supervise.py").read_text()
+        src = (Path(ROOT) / "fae" / "conduct" / "supervise.py").read_text()
         body = src[src.index("def supervise_pass"):]
         emits = re.findall(r'\.crashed\("([^"]+)"\)', body)
         self.assertEqual(sorted(emits), ["limit-wall", "silent-hang"])

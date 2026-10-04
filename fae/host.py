@@ -1,15 +1,20 @@
 """What the host shows about the fleet: which cell loops run (the process
-table, each cell's declared heartbeat), which containers exist, and each
-cell's status with those facts put in. The Conduct's own view; everything
-else asks the Conduct (its read-only methods).
+table, each cell's declared heartbeat), which containers exist, each cell's
+status with those facts put in, the host's memory, and the book of host
+suspends that keeps ages honest across a sleep.
 
-Everything here is a query: nothing writes but the two small caches
-(_LPCACHE, _PIDCACHE), which bound how often the process table is swept.
-What a cell's status means is the Cell's (Cell.status); this module only
-supplies what the host knows.
+Everything here is a query except the host-sleep book (.conduct/host_sleep.json)
+and two small caches (_LPCACHE, _PIDCACHE) that bound how often the process
+table is swept. What a cell's status means is the Cell's (Cell.status); this
+module only supplies what the host knows.
+
+The monotonic clock does not advance while the host sleeps, so wall minus
+monotonic across one observation is the sleep; gaps are kept on disk so ages
+computed after a restart still exclude sleeps seen before it.
 """
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -17,7 +22,12 @@ import time
 
 from fae.cell.fsm import LOOP_UNCHANGED_BY
 from fae import experiment as _experiment
-from .records import awake_age
+
+
+HOST_SLEEP_GAP_S = 30
+HOST_SLEEP_BOOK_DAYS = 7
+_sleep_clocks = None            # (wall, monotonic) at the last observation
+_sleep_gaps = None              # the book, loaded on first use
 
 
 def sh(cmd, **kw):
@@ -231,3 +241,59 @@ def last_transitions():
     except OSError:
         pass
     return last
+
+
+# --- the host-sleep book -------------------------------------------------------
+
+def _host_sleep_book():
+    return _experiment.workspace().conduct / "host_sleep.json"
+
+
+def _host_sleep_gaps():
+    global _sleep_gaps
+    if _sleep_gaps is None:
+        try:
+            _sleep_gaps = [g for g in json.loads(_host_sleep_book().read_text())
+                           if isinstance(g, dict) and "start" in g and "s" in g]
+        except (OSError, ValueError, TypeError):
+            _sleep_gaps = []
+    return _sleep_gaps
+
+
+def host_sleep_observe(now=None, mono=None):
+    """Record a host suspend since the previous call, if one happened.
+    Returns the gap in seconds (0 when none)."""
+    global _sleep_clocks
+    wall = time.time() if now is None else now
+    mono = time.monotonic() if mono is None else mono
+    gap = 0.0
+    if _sleep_clocks is not None:
+        gap = (wall - _sleep_clocks[0]) - (mono - _sleep_clocks[1])
+        if gap > HOST_SLEEP_GAP_S:
+            gaps = _host_sleep_gaps()
+            gaps.append({"start": _sleep_clocks[0], "s": gap})
+            keep = wall - HOST_SLEEP_BOOK_DAYS * 86400
+            gaps[:] = [g for g in gaps if g["start"] + g["s"] >= keep]
+            try:
+                _host_sleep_book().parent.mkdir(parents=True, exist_ok=True)
+                _host_sleep_book().write_text(json.dumps(gaps))
+            except OSError:
+                pass
+        else:
+            gap = 0.0
+    _sleep_clocks = (wall, mono)
+    return gap
+
+
+def awake_age(t_wall, now=None):
+    """Seconds since the wall stamp t_wall, host sleep excluded. A sleep is
+    counted from the last awake observation for its whole length; the
+    overlap with [t_wall, now] is what is subtracted."""
+    now = time.time() if now is None else now
+    age = now - t_wall
+    for g in _host_sleep_gaps():
+        start, end = g["start"], g["start"] + g["s"]
+        overlap = min(end, now) - max(start, t_wall)
+        if overlap > 0:
+            age -= overlap
+    return age

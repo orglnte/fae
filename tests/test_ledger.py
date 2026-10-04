@@ -326,8 +326,7 @@ class TestTheLedgerHasOneWriter(unittest.TestCase):
         (self.ws / "iterations.log").write_text("")
 
     def test_no_producer_formats_the_line_itself(self):
-        for f in ([Path(ROOT) / "fae" / "cli.py", Path(ROOT) / "fae" / "cell" / "cell.py"]
-                  + sorted((Path(ROOT) / "driver").glob("*.py"))):
+        for f in sorted((Path(ROOT) / "fae").rglob("*.py")):
             self.assertNotIn('iterations.log").open("a")', f.read_text(), f.name)
 
     def test_tabs_and_newlines_cannot_break_the_tsv(self):

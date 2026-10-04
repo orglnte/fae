@@ -16,7 +16,7 @@ from _ctx import ROOT
 sys.path.insert(0, str(ROOT))
 from fae import experiment as exp  # noqa: E402
 
-ENGINE = ["cli.py", "driver", "harness", "scoring"]
+ENGINE = ["fae"]
 _IMPORT = re.compile(r"^\s*(from experiment[.\s]|import experiment[.\s]|import experiment$)", re.M)
 
 

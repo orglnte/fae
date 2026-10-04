@@ -323,7 +323,7 @@ def _invariants(ctx):
     from fae import mutex
     from fae.cell import config as _config, prepare as _prep, rig as _rig, verify as _verify
     from fae.cell.variants import files as _files
-    from fae.driver.conduct import Conduct
+    from fae.conduct import Conduct
     out = []
     missing = [f"{mod.__name__}.{name}"
                for mod, names in ((_rig, ("fp", "free_port_from")),
@@ -366,7 +366,7 @@ def _invariants(ctx):
 
 
 def _leftovers(ctx):
-    from fae.driver.conduct import Conduct
+    from fae.conduct import Conduct
     found = Conduct.find_zombies()
     if not found:
         return [Finding(True, "no leftovers of dead cells")]

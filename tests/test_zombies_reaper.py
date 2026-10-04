@@ -1,4 +1,4 @@
-"""fae/driver/conduct/zombies.py: the small process/docker-probe helpers, and the two
+"""fae/conduct/zombies.py: the small process/docker-probe helpers, and the two
 functions that matter most and had the least coverage — find_zombies()
 (what's orphaned) and reap_zombies() (what to do about it). test_cluster_
 name.py owns _cksum/_cluster_for; test_reconcile_safety.py owns
@@ -360,8 +360,8 @@ class TestTheRepairReaps(unittest.TestCase):
     run lists them; the sweep itself is a singleton with a cooldown."""
 
     def test_repair_reaps_and_a_dry_run_only_lists(self):
-        from fae.driver import conduct
-        from fae.driver.conduct import supervise, zombies
+        from fae import conduct
+        from fae.conduct import supervise, zombies
         with mock.patch.object(supervise, "supervise_pass"), \
                 mock.patch.object(zombies, "reap_sweep", return_value=["reaped x"]) as sweep, \
                 mock.patch.object(zombies, "find_zombies",
@@ -373,7 +373,7 @@ class TestTheRepairReaps(unittest.TestCase):
             sweep.assert_not_called()
 
     def test_a_sweep_within_the_cooldown_does_nothing(self):
-        from fae.driver.conduct import zombies
+        from fae.conduct import zombies
         with tempfile.TemporaryDirectory() as d, at_workspace(plane=Path(d)), \
                 mock.patch.object(zombies, "find_zombies", return_value=[("c", "x", "o", "n")]), \
                 mock.patch.object(zombies, "reap_zombies", return_value=["reaped x"]) as reap:

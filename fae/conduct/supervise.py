@@ -20,7 +20,8 @@ from fae.cell.fsm import LOOP_CLEARED_BY, WAIT_PHASES
 from fae import experiment as _experiment
 from fae.cell import faults
 
-from . import host, records, zombies
+from fae import host
+from . import records, zombies
 
 # A lane that hits a provider quota/rate wall cools for the provider's
 # parsed reset hint, else this long, rather than retrying a multi-hour cap
@@ -66,7 +67,7 @@ def _arm_slot_of(arm, cid):
         note = q.slot_note(slot)
         if not note or note[0] != cid or not q.slot_held(slot):
             continue
-        return records.awake_age(note[2]) if note[2] is not None else None
+        return host.awake_age(note[2]) if note[2] is not None else None
     return None
 
 
@@ -213,7 +214,7 @@ def _attempt_out(cell):
     if not logs:
         return None, None
     stt = logs[-1].stat()
-    return stt.st_size, records.awake_age(stt.st_mtime)
+    return stt.st_size, host.awake_age(stt.st_mtime)
 
 
 AGENT_DEAD_GRACE = int(os.environ.get("AGENT_DEAD_GRACE", 300))
@@ -239,7 +240,7 @@ def _age_of(ts):
     """Seconds since an ISO-Z stamp (host sleep excluded), or None if it does
     not parse."""
     try:
-        return records.awake_age(datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
+        return host.awake_age(datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
                          .replace(tzinfo=timezone.utc).timestamp())
     except (ValueError, TypeError):
         return None
@@ -331,7 +332,7 @@ def supervise_pass(alerts, dry=False, only=""):
     Never touches workspace data. Runs inside conduct's loop every
     --supervise-interval, and as the one-shot `reconcile` /
     `experiment diagnose` (dry)."""
-    records.host_sleep_observe()
+    host.host_sleep_observe()
     _mp = host.mem_pressure()
     if _mp["level"] >= 2 and _mp["level"] != alerts.memory["level"]:
         records.rec_log(f"MEMORY PRESSURE {_mp['label']} — "
@@ -389,7 +390,7 @@ def supervise_pass(alerts, dry=False, only=""):
             loop_pid = parents.get(cid)
             in_box = host.agent_container(cid) in boxes
             out_size, out_age = _attempt_out(c)
-            iter_age = records.awake_age(c.mtimes()["ledger"] / 1e9)
+            iter_age = host.awake_age(c.mtimes()["ledger"] / 1e9)
             # A cell still inside verify_lock_acquire (last transition
             # AcquireVerify, no later one yet) that has held it past the
             # threshold: write an ALERT to the cell's own ledger, same shape
