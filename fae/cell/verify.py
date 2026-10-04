@@ -375,7 +375,7 @@ def verify_mounts(ctx, root_reads=None):
     from . import image as _image
     if root_reads is None:
         from fae import experiment as _experiment
-        root_reads = _experiment.current().verifier_class().ROOT_READS
+        root_reads = _experiment.definition().verifier_class().ROOT_READS
     out = Path(ctx.out)
     root, ws = Path(ctx.root), Path(ctx.workspace)
 
@@ -457,7 +457,7 @@ def run_teardown(ctx, infra, timeout_s=900, log_dir=None):
     (work / "teardown.ctx.json").write_text(ctx.to_json())
     conf = getattr(infra, "conf", None)
     try:
-        image = _image.for_variant(infra.variant, _experiment.current(), conf,
+        image = _image.for_variant(infra.variant, _experiment.definition(), conf,
                                    log=lambda m: _log_line(out, m))
     except RuntimeError as e:
         _log_line(out, f"teardown image: {e}")
@@ -497,7 +497,7 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
     ctx_path.write_text(ctx.to_json())
     conf = getattr(infra, "conf", None)
     try:
-        image = _image.for_variant(infra.variant, _experiment.current(), conf,
+        image = _image.for_variant(infra.variant, _experiment.definition(), conf,
                                    log=lambda m: _log_line(out, m))
     except RuntimeError as e:
         _log_line(out, f"verifier image: {e}")
@@ -505,7 +505,7 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
                        why=f"no verify image: {str(e).splitlines()[0]}", arrangement=ctx.arrangement)
     name = _image.verify_container(ctx.cid)
     _image.remove_container(name)                 # a previous run's, if any
-    cls = _experiment.current().verifier_class()
+    cls = _experiment.definition().verifier_class()
     argv = verify_argv(ctx, image, conf, cpus=cls.CPUS)
     _log_line(out, f"verifier start arrangement={ctx.arrangement or 'seed'} "
                    f"image={image} container={name}"

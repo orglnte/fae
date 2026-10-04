@@ -82,7 +82,7 @@ class TestTheTwoGates(unittest.TestCase):
         with mock.patch.object(cell, "run_verifier", runner), \
                 mock.patch.object(cell.Cell, "expected_fp", new_callable=mock.PropertyMock,
                                   return_value=""), \
-                mock.patch.object(_experiment, "current",
+                mock.patch.object(_experiment, "definition",
                                   return_value=mock.Mock(exclusive=None,
                                                          verifier_class=lambda: vcls)):
             r = self.c.verify(shape="A")

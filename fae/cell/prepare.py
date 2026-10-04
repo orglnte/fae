@@ -39,7 +39,7 @@ CELL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*_r[0-9]+$")
 
 
 def variant_of(vid):
-    cls = _experiment.current().variant(vid)
+    cls = _experiment.definition().variant(vid)
     if cls is None:
         raise FileNotFoundError(f"no variant named {vid!r} in the experiment")
     return cls
@@ -125,18 +125,6 @@ def _seed_repo(artifacts, task, vid):
     git("commit", "-q", "-m", f"seed: task {task}, {vid}")
 
 
-_runs_cache = {}
-
-
-def runs_module(root=None):
-    """The engine's fae/driver/common.py, loaded by path from the ENGINE's root
-    (never the cell's: an experiment repo imports the engine, it does not
-    contain it). cell_id has ONE definition, and re-encoding it here is how
-    a cell ends up in one workspace and is read from another."""
-    from fae.driver import common
-    return common
-
-
 def prepare(cid, task, vid, rep, workspaces, root=ROOT, fresh=False, reference=False,
             impl="bash", agent_model="?", cfg=None):
     """The cell's workspace, seeded from variant `vid`; with `reference` the
@@ -188,10 +176,10 @@ def main(argv=None):
     rep = a[2] if len(a) > 2 else "1"
     root = _paths.root()
     cfg = _config.load(root)
-    common = runs_module(root)
-    cid = common.cell_id(os.environ.get("AGENT", "?"), vid, rep,
-                         task, effort=os.environ.get("EFFORT", "high"),
-                         smoke=bool(os.environ.get("SMOKE")))
+    from fae.experiment import cell_id
+    cid = cell_id(os.environ.get("AGENT", "?"), vid, rep,
+                  task, effort=os.environ.get("EFFORT", "high"),
+                  smoke=bool(os.environ.get("SMOKE")))
     ws = prepare(cid, task, vid, rep,
                  workspaces=cfg.get("WORKSPACES_DIR"), root=root,
                  fresh=bool(os.environ.get("FRESH")),

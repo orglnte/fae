@@ -29,13 +29,11 @@ def main(argv=None):
         return 2
     task, variant = a[0], a[1]
     rep = a[2] if len(a) > 2 else "1"
-    # cell_id is encoded in ONE place; reimplementing the format here is the
-    # drift that makes a cell write to one workspace and be read from another.
     import os
-    from fae.driver import common
-    cid = common.cell_id(os.environ.get("AGENT", "?"), variant, rep,
-                         task, effort=os.environ.get("EFFORT", "high"),
-                         smoke=bool(os.environ.get("SMOKE")))
+    from fae.experiment import cell_id
+    cid = cell_id(os.environ.get("AGENT", "?"), variant, rep,
+                  task, effort=os.environ.get("EFFORT", "high"),
+                  smoke=bool(os.environ.get("SMOKE")))
 
     c = Cell.new(cid, task, variant, rep, reference=os.environ.get("REFERENCE") == "1")
     try:
@@ -43,7 +41,7 @@ def main(argv=None):
                         ignore_slots=os.environ.get(Cell.IGNORE_SLOTS_ENV) == "1")
     except Sealed as e:
         print(f"refusing: {e}", file=sys.stderr)
-        return 46
+        return Cell.SEAL_EXIT
     except Halt as e:
         print(str(e), file=sys.stderr)
         return e.code
@@ -51,7 +49,7 @@ def main(argv=None):
         # Anything not raised as Halt (which is caught above) is an
         # unclassified crash, not the benign lock-contention refusal.
         print(str(e), file=sys.stderr)
-        return common.GENERIC_CRASH_EXIT_RC
+        return Cell.CRASH_EXIT
     print(c.ws)
     return 0 if verdict in ("green", "failed", None) else 1
 

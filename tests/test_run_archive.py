@@ -46,7 +46,7 @@ class TestRunArchive(unittest.TestCase):
                                   return_value=""), \
                 mock.patch.object(cell.Cell, "exclusive_acquire",
                                   return_value=mock.Mock() if lock else None), \
-                mock.patch.object(_experiment, "current", return_value=definition):
+                mock.patch.object(_experiment, "definition", return_value=definition):
             return self.c.verify(shape=verdict.arrangement)
 
     def runs(self):
@@ -167,7 +167,7 @@ class TestTheVerifyWritesOnlyItsOwnDirectory(TestRunArchive):
         with mock.patch.object(cell, "run_verifier", runner), \
                 mock.patch.object(cell.Cell, "expected_fp", new_callable=mock.PropertyMock,
                                   return_value=""), \
-                mock.patch.object(_experiment, "current",
+                mock.patch.object(_experiment, "definition",
                                   return_value=mock.Mock(exclusive=None, verifier_class=lambda: vcls)):
             self.c.verify(shape="A", out_dir=out)
         self.assertEqual(self.ledger(), [])
@@ -267,7 +267,7 @@ class TestRequiredOutputs(unittest.TestCase):
         with mock.patch.object(cell, "run_verifier", runner), \
                 mock.patch.object(cell.Cell, "expected_fp", new_callable=mock.PropertyMock,
                                   return_value=""), \
-                mock.patch.object(_experiment, "current",
+                mock.patch.object(_experiment, "definition",
                                   return_value=mock.Mock(exclusive=None, verifier_class=lambda: vcls)):
             return self.c.verify(shape="A")
 

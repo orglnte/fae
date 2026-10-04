@@ -523,7 +523,7 @@ def _definition():
         if p not in sys.path:
             sys.path.insert(0, p)
     from fae import experiment as _experiment
-    return _experiment.current()
+    return _experiment.definition()
 
 
 def _pooled_models():

@@ -60,7 +60,7 @@ class TestFeedbackLogs(unittest.TestCase):
         for n in ("verify.log", "deploy.log", "tool.log", "other.log"):
             (ws / n).write_text(n)
         verifier = type("V", (), {"FEEDBACK_LOGS": names})
-        with mock.patch.object(_experiment.current(), "verifier_class", return_value=verifier):
+        with mock.patch.object(_experiment.definition(), "verifier_class", return_value=verifier):
             staged = Cell._stage_feedback(SimpleNamespace(ws=ws))
         return staged, sorted(p.name for p in (ws / "feedback").iterdir())
 

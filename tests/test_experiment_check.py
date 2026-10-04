@@ -33,7 +33,7 @@ class CheckCase(unittest.TestCase):
         return "\n".join(self.lines)
 
     def variant(self, arm):
-        return _experiment.current().variant(arm)
+        return _experiment.definition().variant(arm)
 
 
 class TestTheFixtureIsReady(CheckCase):
@@ -77,7 +77,7 @@ class TestEachFailureNamesItsFix(CheckCase):
         from fae.cell.variants import files
         with mock.patch.object(files, "load", side_effect=files.VariantFileError(
                 "variants/x.toml: unknown key(s) in [verify]: rn")):
-            d = _experiment.current()
+            d = _experiment.definition()
             d._subjects = None
             self.addCleanup(setattr, d, "_subjects", None)
             self.assertEqual(self.run_check(), 1)
@@ -208,7 +208,7 @@ class TestTheFoldedSteps(CheckCase):
         self.assertTrue(any("fae.cell.verify.run_verifier" in f.text for f in bad))
 
     def test_the_experiments_own_checks_are_findings(self):
-        d = _experiment.current()
+        d = _experiment.definition()
         verbs = dict(d.verbs, selftest=lambda ws: ["a green with no mount"])
         with mock.patch.object(type(d), "verbs", new_callable=mock.PropertyMock, return_value=verbs):
             bad = [f for f in self.findings(check._invariants) if not f.ok]

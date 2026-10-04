@@ -21,7 +21,7 @@ class TestAgentCliSelection(unittest.TestCase):
 
     def definition(self):
         from fae import experiment
-        return experiment.current()
+        return experiment.definition()
 
     def test_each_agent_is_its_declared_cli_and_model(self):
         for key, cli in (("gemini", "agy"), ("dsv4f", "opencode"),

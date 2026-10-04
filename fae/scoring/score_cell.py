@@ -78,7 +78,7 @@ def _factors(vid) -> dict:
             if p not in sys.path:
                 sys.path.insert(0, p)
         from fae import experiment as _experiment
-        cls = _experiment.current().variant(vid)
+        cls = _experiment.definition().variant(vid)
     except (OSError, RuntimeError, ValueError, ImportError):
         return {}
     return dict(cls.FACTORS) if cls is not None else {}

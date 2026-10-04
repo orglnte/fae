@@ -445,7 +445,7 @@ def stage_agent(conf, cli, dest, root):
         shutil.copy(paths.ENGINE / "testagent.py",
                     Path(dest) / "testagent.py")
         from fae import experiment as _experiment
-        for vid, cls in _experiment.current().variants.items():
+        for vid, cls in _experiment.definition().variants.items():
             if cls.REFERENCE is not None and Path(cls.REFERENCE).is_dir():
                 shutil.copytree(cls.REFERENCE, Path(dest) / "reference" / vid)
         subprocess_chmod(dest)

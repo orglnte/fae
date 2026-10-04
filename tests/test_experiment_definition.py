@@ -205,7 +205,7 @@ class TestTheExperimentsOwnCommands(unittest.TestCase):
     experiment; it lists and runs what the definition's commands() declares."""
 
     def _with(self, commands):
-        d = exp.current()
+        d = exp.definition()
         return mock.patch.object(type(d), "commands", new_callable=mock.PropertyMock,
                                  return_value=commands), exp.Experiment()
 
@@ -237,7 +237,7 @@ class TestTheExperimentsOwnCommands(unittest.TestCase):
             e.verb("nosuch", [])
 
     def test_a_definition_without_commands_has_none(self):
-        self.assertEqual(exp.current().commands, {})
+        self.assertEqual(exp.definition().commands, {})
 
 
 class TestTheAgentsFile(unittest.TestCase):

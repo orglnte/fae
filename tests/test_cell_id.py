@@ -129,13 +129,12 @@ class TestParseCellId(unittest.TestCase):
 
 
 class TestOneImplementation(unittest.TestCase):
-    """Every other producer of a cell id imports driver.common.cell_id;
-    nothing shells out to a hidden subcommand (the `_cell_id` verb went with
-    the bash callers that needed it)."""
+    """Every other producer of a cell id imports fae.experiment.cell_id;
+    nothing shells out to a hidden subcommand."""
 
     def test_the_driver_and_the_prepare_import_the_function(self):
         for rel in ("fae/cell/__main__.py", "fae/cell/prepare.py"):
-            self.assertIn("common.cell_id(", (runs.ROOT / rel).read_text(), rel)
+            self.assertIn("from fae.experiment import cell_id", (runs.ROOT / rel).read_text(), rel)
 
     def test_no_hidden_subcommand_remains(self):
         src = (runs.ROOT / "fae" / "cli.py").read_text()
@@ -160,5 +159,5 @@ class TestTheVariantIsTheExperiments(unittest.TestCase):
 
     def test_the_variants_come_from_the_definition_not_a_regex(self):
         from fae import experiment as _experiment
-        for vid in _experiment.current().ids:
+        for vid in _experiment.definition().ids:
             self.assertEqual(runs.parse_cell_id(f"m_high_{vid}_T1_r1")[1], vid)

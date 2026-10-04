@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import sys
 import threading
 from dataclasses import dataclass
@@ -267,17 +268,27 @@ def for_config(path):
     return _loaded["def"] if _loaded["def"] is not None else load(path)
 
 
-def current(root=None, env=None):
-    """The definition this process runs: the one already loaded, else the
-    root's (REPO_ROOT, else the engine's own) through the config's
-    EXPERIMENT_DIR rule."""
-    from fae.cell import config as _config
-    if _loaded["def"] is not None:
-        return _loaded["def"]
-    env = os.environ if env is None else env
-    from fae import paths
-    root = Path(root or env.get("REPO_ROOT") or paths.root())
-    return load(_config.experiment_dir(root, env))
+_current: dict = {"x": None}
+
+
+def current():
+    """The experiment this process runs, built on first use from the
+    environment: REPO_ROOT (else the working directory) and WORKSPACES_DIR."""
+    if _current["x"] is None:
+        _current["x"] = Experiment()
+    return _current["x"]
+
+
+def definition():
+    """The definition this process runs: current().definition."""
+    return current().definition
+
+
+def set_current(experiment):
+    """Make `experiment` the one this process runs (tests only); returns the
+    previous one."""
+    prev, _current["x"] = _current["x"], experiment
+    return prev
 
 
 def unload():
@@ -286,6 +297,40 @@ def unload():
         _loaded["def"] = None
         for name in [n for n in sys.modules if n == PACKAGE or n.startswith(PACKAGE + ".")]:
             del sys.modules[name]
+
+
+# --- cell ids -------------------------------------------------------------------
+
+def cell_id(agent, variant, rep, task="T1", effort="high", smoke=False):
+    """<agent>[_<effort>][_smoke]_<variant>_<task>_r<rep>; effort="" omits it."""
+    prefix = agent + (f"_{effort}" if effort else "") + ("_smoke" if smoke else "")
+    return f"{prefix}_{variant}_{task}_r{rep}"
+
+
+_AGENT_RE = re.compile(r"^[a-zA-Z0-9-]+$")
+_TASK_RE = re.compile(r"^T\d$")
+_REP_RE = re.compile(r"^r(\d+)$")
+
+
+def parse_cell_id(cid):
+    """<agent>_<effort>[_smoke]_<variant>_<task>_r<rep> as (agent, variant,
+    task, rep), or None.
+
+    Agent and effort carry no underscore; the variant may, so it is whatever
+    lies between the effort and the last two tokens — and it must be one of
+    the experiment's variants: a name from another experiment is not a cell
+    of this one."""
+    t = cid.split("_")
+    if len(t) < 5:
+        return None
+    rep = _REP_RE.match(t[-1])
+    if not rep or not _TASK_RE.match(t[-2]) or not _AGENT_RE.match(t[0]):
+        return None
+    i = 3 if t[2] == "smoke" else 2
+    variant = "_".join(t[i:-2])
+    if not variant or variant not in definition().variants:
+        return None
+    return t[0], variant, t[-2], rep.group(1)
 
 
 # --- the workspace ------------------------------------------------------------
@@ -319,10 +364,7 @@ class Workspace:
         self.transitions = Path(transitions) if transitions else plane.transitions_log(self.root)
 
     def parse(self, cid):
-        if self._parse is None:
-            from fae.driver.common import parse_cell_id
-            self._parse = parse_cell_id
-        return self._parse(cid)
+        return (self._parse or parse_cell_id)(cid)
 
     @property
     def queues(self):
@@ -378,8 +420,14 @@ class Experiment:
 
     @property
     def definition(self):
-        """The definition this process runs (current): one process, one experiment."""
-        return current(self.root)
+        """The definition this process runs: the one loaded, else this root's
+        (fae/cell/config.py: EXPERIMENT_DIR). One process, one experiment."""
+        if _loaded["def"] is not None:
+            return _loaded["def"]
+        from fae.cell import config as _config
+        if str(self.root) not in sys.path:
+            sys.path.insert(0, str(self.root))
+        return load(_config.experiment_dir(self.root))
 
     def prepare(self, agent, reps=1, task="T1", fresh=False):
         """Seed the matrix's workspaces for `agent` (`reps` reps of every
@@ -387,7 +435,6 @@ class Experiment:
         (Cell.prepare), as at every start. `fresh` moves an existing workspace
         aside first (safe_wipe; never a delete). Returns how many."""
         from fae.cell.cell import Busy
-        from fae.driver.common import cell_id
         n = 0
         for rep in range(1, reps + 1):
             for vid in self.definition.active:
@@ -522,7 +569,6 @@ class Experiment:
         import tempfile
         import time
         from fae.driver import check
-        from fae.driver.common import cell_id
         from fae.driver.conduct import Conduct
         chosen = [v for v in (variants.split(",") if variants else self.smoke_variants())
                   if not only or only in v]

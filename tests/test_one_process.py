@@ -356,7 +356,7 @@ class TestBothImplementationsAreSpawnable(unittest.TestCase):
 
     def test_the_entry_point_does_not_reimplement_cell_id(self):
         src = (PKG / "__main__.py").read_text()
-        self.assertIn("common.cell_id(", src)
+        self.assertIn("from fae.experiment import cell_id", src)
 
 
 class TestTheVerifySurfaceIsFingerprinted(unittest.TestCase):

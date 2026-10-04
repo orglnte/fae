@@ -73,11 +73,7 @@ from fae.cell import faults  # noqa: E402
 from fae import experiment as _experiment  # noqa: E402
 
 
-def definition():
-    """The loaded experiment definition (fae/experiment.py)."""
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
-    return _experiment.load(experiment_dir())
+from fae.experiment import cell_id, definition, parse_cell_id  # noqa: E402,F401
 
 
 def agent_container(cid):
@@ -103,7 +99,7 @@ def __getattr__(name):
 PAUSE_EXIT_RC = int(os.environ.get("PAUSE_EXIT", 44))
 INFRA_EXIT_RC = 45          # Cell.INFRA_EXIT: the driver halted on its infra
 LOCK_EXIT_RC = 43               # Cell.LOCK_EXIT: another loop owns the workspace, benign
-GENERIC_CRASH_EXIT_RC = 47      # an uncaught driver-side exception, not otherwise classified
+GENERIC_CRASH_EXIT_RC = 47      # Cell.CRASH_EXIT
 # driver exit codes that mean EVERY cell would fail the same way:
 #   1  _fp FATAL (unguarded verify surface); 2  AGENT_CMD empty; 42  HALT[agent] no creds
 SYSTEMIC_EXITS = frozenset({1, 2, 42})
@@ -149,40 +145,6 @@ def mem_pressure():
     return {"label": label, "level": level, "avail_pct": avail,
             "used_gb": used_gb, "total_gb": total_gb,
             "swap_used_mb": su, "swap_total_mb": su + sf}
-
-
-def cell_id(agent, variant, rep, task="T1", effort="high", smoke=False):
-    # effort="" (not just unset) disables the suffix. THE one implementation:
-    # fae/cell/__main__.py and fae/cell/prepare.py import this rather than
-    # re-encoding the format.
-    prefix = agent + (f"_{effort}" if effort else "") + ("_smoke" if smoke else "")
-    return f"{prefix}_{variant}_{task}_r{rep}"
-
-
-_AGENT_RE = re.compile(r"^[a-zA-Z0-9-]+$")
-_TASK_RE = re.compile(r"^T\d$")
-_REP_RE = re.compile(r"^r(\d+)$")
-
-
-def parse_cell_id(cid):
-    """<agent>_<effort>[_smoke]_<variant>_<task>_r<rep> as (agent, variant,
-    task, rep), or None.
-
-    Agent and effort carry no underscore; the variant may, so it is whatever
-    lies between the effort and the last two tokens — and it must be one of
-    the experiment's variants: a name from another experiment is not a cell
-    of this one."""
-    t = cid.split("_")
-    if len(t) < 5:
-        return None
-    rep = _REP_RE.match(t[-1])
-    if not rep or not _TASK_RE.match(t[-2]) or not _AGENT_RE.match(t[0]):
-        return None
-    i = 3 if t[2] == "smoke" else 2
-    variant = "_".join(t[i:-2])
-    if not variant or variant not in definition().variants:
-        return None
-    return t[0], variant, t[-2], rep.group(1)
 
 
 def hhmm():

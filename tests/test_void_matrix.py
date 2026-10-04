@@ -19,7 +19,7 @@ from _ctx import ROOT
 
 from fae import cell
 from fae import experiment as _experiment  # noqa: E402
-SHAPES = _experiment.current().gate.arrangements
+SHAPES = _experiment.definition().gate.arrangements
 
 T = cell.T
 

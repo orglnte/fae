@@ -1241,7 +1241,7 @@ class Cell:
     def gate_def(self):
         """The experiment's gate: the arrangements every attempt must pass."""
         from fae import experiment as _experiment
-        return _experiment.current().gate
+        return _experiment.definition().gate
 
     @property
     def gate_shapes(self):
@@ -1363,7 +1363,7 @@ class Cell:
                   workspace=str(self.ws), artifacts=str(self.artifacts), out=str(run_out),
                   cid=self.cid, task=self.task, variant=self.variant,
                   arrangement=shape, expected_fp=self.expected_fp)
-        definition = _experiment.current()
+        definition = _experiment.definition()
         self._archive_interrupted(out)
         self._mark_inflight(out, shape)
         # an infra already dead voids fast, before a deploy and a load
@@ -1486,7 +1486,7 @@ class Cell:
         """The experiment's REQUIRED_OUTPUTS a verify that ran did not write:
         absent from its own directory, or left there by an earlier verify."""
         from fae import experiment as _experiment
-        cls = _experiment.current().verifier_class()
+        cls = _experiment.definition().verifier_class()
         if v.stage in cls.NOT_RUN_STAGES:
             return []
         missing = []
@@ -1509,7 +1509,7 @@ class Cell:
         for stamp, event, fields in take_events(run_out):
             if record_events:
                 ledger.append(self.ws, event, self.cid, *fields, stamp=stamp)
-        cls = _experiment.current().verifier_class()
+        cls = _experiment.definition().verifier_class()
         for name in dict.fromkeys((*cls.FILES, *cls.FEEDBACK_LOGS, *cls.REQUIRED_OUTPUTS)):
             if name in self.HOST_OWNED or "/" in name:
                 continue
@@ -1567,7 +1567,7 @@ class Cell:
 
     def _archive(self, out, m, end, verdict, files=()):
         from fae import experiment as _experiment
-        cls = _experiment.current().verifier_class()
+        cls = _experiment.definition().verifier_class()
         names = list(dict.fromkeys((*(files or cls.FILES), *cls.FEEDBACK_LOGS,
                                     *cls.REQUIRED_OUTPUTS, "metrics.json")))
         base = out / "arrangements"
@@ -1744,7 +1744,7 @@ class Cell:
     def _agent_images(self):
         from fae import experiment as _experiment
         from .agent_image import AgentImage
-        return AgentImage(self.root, _experiment.current(), self.conf)
+        return AgentImage(self.root, _experiment.definition(), self.conf)
 
     def agent_image(self):
         """The image this cell's agents run in: its variant's layer over the base."""
@@ -2211,7 +2211,7 @@ class Cell:
         dest.mkdir()
         staged = []
         from fae import experiment as _experiment
-        for name in _experiment.current().verifier_class().FEEDBACK_LOGS:
+        for name in _experiment.definition().verifier_class().FEEDBACK_LOGS:
             src = src_root / name
             try:
                 if src.is_dir():
@@ -2307,6 +2307,7 @@ class Cell:
     PAUSE_EXIT = 44
     LOCK_EXIT = 43          # another loop owns the workspace
     INFRA_EXIT = 45     # the infra failed under the cell; nothing to charge
+    CRASH_EXIT = 47     # an uncaught exception, not otherwise classified
 
     def run(self, stub_overlay=None, agent_cmd=None, verify=None, ignore_slots=False):
         """The attempt loop. Returns the cell's verdict, or None if it stood

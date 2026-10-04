@@ -211,7 +211,7 @@ class Infra:
         """The image this cell is verified in, built when missing."""
         from fae import experiment as _experiment
         from .. import image as _image
-        return _image.for_variant(self.variant, _experiment.current(), self.conf, self.log)
+        return _image.for_variant(self.variant, _experiment.definition(), self.conf, self.log)
 
     def network(self):
         """The cell's docker network, the engine's: every container of the

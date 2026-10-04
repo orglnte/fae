@@ -32,7 +32,7 @@ def authorable(vid):
     or one that declares no surface, raises: a default would let one
     experiment's layout decide what another's agents may write."""
     from fae import experiment as _experiment
-    s = _experiment.current().variant(vid)
+    s = _experiment.definition().variant(vid)
     if s is None:
         raise RuntimeError(f"no variant {vid!r}: it has no authorable surface")
     if s.AUTHORING_SURFACE is None:
