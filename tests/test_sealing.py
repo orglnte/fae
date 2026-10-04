@@ -24,7 +24,7 @@ from _ctx import ROOT, runs, OrchTmpCase
 
 HARNESS = Path(ROOT) / "fae"
 CELL_PY = (HARNESS / "cell" / "cell.py").read_text()
-CLI_PY = (Path(ROOT) / "fae" / "cli.py").read_text()
+CLI_PY = (Path(ROOT) / "fae" / "cli" / "__init__.py").read_text()
 # Every engine module outside the cell's own package: the seal/unseal
 # invariant must hold on every front end that can act on a cell.
 OPERATOR_SURFACE = [p.read_text() for p in sorted(HARNESS.rglob("*.py"))

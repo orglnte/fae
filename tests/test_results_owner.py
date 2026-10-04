@@ -1,5 +1,5 @@
 """The results actions are the Experiment's, on one Workspace: they never
-reach the scheduler's driver code, and score() scores exactly the cells
+reach the scheduler or the CLI, and score() scores exactly the cells
 validate() found finished."""
 import ast
 import inspect
@@ -24,19 +24,21 @@ def _imports(path):
 
 class TestNoDriverOnTheResultsPath(unittest.TestCase):
 
-    def test_the_scoring_modules_import_no_driver(self):
+    def test_the_scoring_modules_import_no_scheduler_or_cli(self):
         for name in ("validate.py", "score_cell.py", "aggregate.py"):
-            bad = [m for m in _imports(ENGINE / "scoring" / name) if m.startswith("fae.driver")]
+            bad = [m for m in _imports(ENGINE / "scoring" / name)
+                   if m.startswith(("fae.conduct", "fae.cli"))]
             self.assertEqual(bad, [], name)
 
-    def test_the_experiment_results_methods_import_no_driver(self):
+    def test_the_experiment_results_methods_import_no_scheduler_or_cli(self):
         E = runs.experiment.Experiment
         for name in ("validate_cell", "finished", "validate", "score", "aggregate", "_workspace_of"):
-            self.assertNotIn("fae.driver", inspect.getsource(getattr(E, name)), name)
+            src = inspect.getsource(getattr(E, name))
+            self.assertNotIn("fae.conduct", src, name)
+            self.assertNotIn("fae.cli", src, name)
 
-    def test_the_driver_holds_no_results_module(self):
-        for name in ("score.py", "validate.py"):
-            self.assertFalse((ENGINE / "driver" / name).exists(), name)
+    def test_there_is_no_driver_package(self):
+        self.assertFalse((ENGINE / "driver" / "__init__.py").exists())
 
 
 class TestScoreScoresWhatValidateFound(unittest.TestCase):

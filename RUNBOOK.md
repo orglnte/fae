@@ -156,14 +156,17 @@ RUNBOOK.md           this runbook
 AGENTS.md            rig contract: cells, ledger, locks, verdicts, delete rules,
                      and §0 the engine/experiment boundary
 cli.py               operator CLI (noun groups); the only entry point
-fae/driver/          the orchestrator's library: conduct/ (admission,
-                     supervision, the host's view, the reaper), check,
-                     validate, score, render
-fae/experiment/     the experiment: Definition, Workspace, Experiment; check_exp.py its readiness check
+fae/cli/            the operator CLI's verbs; render.py, the console
+fae/conduct/        the scheduler: admission, supervision, the reaper,
+                     its reconcile log
+fae/host.py         the host's facts: process table, containers, memory,
+                     the host-sleep book
+fae/experiment/     the experiment: Definition, Workspace, Experiment and
+                     its results actions; check_exp.py its readiness check
 fae/cell/           the Python cell driver: attempt loop, the Variant
                      interface + registry, verify, config, the ledger (the
                      one parser), the contract base, contrib/ and infra/ blocks
-fae/                the engine package: cli.py, driver/, cell/, scoring/,
+fae/                the engine package: cli/, conduct/, experiment/, cell/, scoring/,
                      mutex.py (the one flock),
                      queues.py (the only code touching .queues/),
                      plane.py (where the scheduling plane lives),
