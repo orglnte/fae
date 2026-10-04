@@ -160,14 +160,14 @@ class TestTheRunCommands(unittest.TestCase):
 
 class TestResultsScore(unittest.TestCase):
     def test_variant_filter_plumbs(self):
-        (ns,), _ = invoke("score", ["results", "score", "--variant", "beta_apidocs"],
-                          mod=cli.score)
+        (ns,), _ = invoke("results_score", ["results", "score", "--variant", "beta_apidocs"],
+                          mod=cli.render)
         self.assertEqual(ns.variant, "beta_apidocs")
         self.assertIsNone(ns.selector)
 
     def test_factor_and_impl_filters_plumb(self):
-        (ns,), _ = invoke("score", ["results", "score", "--where", "docs=apidocs",
-                                    "--where", "tech=beta", "--impl", "py"], mod=cli.score)
+        (ns,), _ = invoke("results_score", ["results", "score", "--where", "docs=apidocs",
+                                    "--where", "tech=beta", "--impl", "py"], mod=cli.render)
         self.assertEqual(ns.where, ["docs=apidocs", "tech=beta"])
         self.assertEqual(ns.impl, "py")
 

@@ -273,9 +273,8 @@ def main() -> int:
 
 
 def score_one(cell_id: str, cell=None) -> int:
-    """Score one cell in-process. fae/driver/score.py's `score()` path-loads this
-    module once and calls it per cell so a 300-cell sweep pays
-    interpreter+import startup once, not per cell. The record is written
+    """Score one cell in-process (Experiment.score calls it per cell, so a
+    sweep pays interpreter and import startup once). The record is written
     through the cell (`cell`, else the current workspace's)."""
     if cell is None:
         from fae import experiment as _experiment

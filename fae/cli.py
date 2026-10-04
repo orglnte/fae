@@ -53,7 +53,7 @@ sys.path.insert(0, str(ROOT))
 
 from fae import experiment as _experiment  # noqa: E402
 from fae.cell.cell import Busy  # noqa: E402
-from fae.driver import check, conduct, render, score  # noqa: E402
+from fae.driver import check, conduct, render  # noqa: E402
 from fae.driver.conduct import Conduct  # noqa: E402
 
 
@@ -768,12 +768,13 @@ def results_score(
                                                "--sort-discrepancy for significant AND big "
                                                "first (needs --impl; no-op without it)"),
 ):
-    """Score cells and print the metrics table (was score + aggregate)."""
-    score.score(_ns(selector=selector, all_cells=all_cells,
-                    allow_stale=allow_stale, no_aggregate=no_aggregate,
-                    variant=variant, where=list(where), impl=impl,
-                    sort_discrepancy=sort_discrepancy,
-                    sort_significant=sort_significant))
+    """Validate and score the finished cells (the selector's, else all), then
+    print the metrics table."""
+    render.results_score(_ns(selector=selector, all_cells=all_cells,
+                             allow_stale=allow_stale, no_aggregate=no_aggregate,
+                             variant=variant, where=list(where), impl=impl,
+                             sort_discrepancy=sort_discrepancy,
+                             sort_significant=sort_significant))
 
 
 @results_app.command("run-report")
@@ -791,7 +792,7 @@ def results_run_report(
 @results_app.command("validate")
 def results_validate(selector: Optional[str] = typer.Argument(None, help=SEL)):
     """Post-DONE trust check: VALID or TAINTED, with reasons."""
-    score.validate(_ns(selector=selector))
+    render.results_validate(_ns(selector=selector))
 
 
 @results_app.command("aggregate")
@@ -821,12 +822,12 @@ def results_aggregate(
                                                "first (needs --impl; no-op without it)"),
 ):
     """Print the scoreboard from existing score.json files, without rescoring
-    (was `runs.py aggregate`; `results score` also runs this as its last
-    step)."""
-    score.aggregate(_ns(variant=variant, where=list(where), impl=impl,
-                        include_tainted=include_tainted,
-                        tainted_cells_details=tainted_cells_details, allow_stale=allow_stale,
-                        sort_discrepancy=sort_discrepancy, sort_significant=sort_significant))
+    (`results score` also runs this as its last step)."""
+    render.results_aggregate(_ns(variant=variant, where=list(where), impl=impl,
+                                 include_tainted=include_tainted,
+                                 tainted_cells_details=tainted_cells_details,
+                                 allow_stale=allow_stale, sort_discrepancy=sort_discrepancy,
+                                 sort_significant=sort_significant))
 
 
 # --- experiment / rig ------------------------------------------------------
