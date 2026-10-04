@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import itertools
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -105,6 +106,12 @@ class Infra:
     # {kind: name prefix} — the infra a reaper may discover by scanning
     # (containers, clusters) for a cell that left no live loop.
     PREFIXES = {}
+    # The infra's own files in the cell's folder: ENV_FILE, the KEY=value
+    # endpoints its setup records (the verify adopts the keys VERIFY_ADOPTS
+    # names, every key when None); RUN_DIR, the state it keeps for the cell.
+    ENV_FILE = None
+    VERIFY_ADOPTS = None
+    RUN_DIR = None
 
     def __init__(self, variant, cell):
         self.variant = variant
@@ -113,6 +120,39 @@ class Infra:
         self.ws = Path(cell.ws)
         self.root = Path(cell.root)
         self.conf = cell.conf
+
+    @property
+    def env_file(self):
+        return self.ws / self.ENV_FILE if self.ENV_FILE else None
+
+    @property
+    def run_dir(self):
+        return self.ws / self.RUN_DIR if self.RUN_DIR else None
+
+    def record_env(self, pairs):
+        """Record the endpoints the verify and the agent reach (ENV_FILE)."""
+        write_env(self.env_file, pairs)
+
+    def env(self):
+        """{KEY: value} the setup recorded in ENV_FILE; {} when there is none."""
+        out = {}
+        try:
+            text = self.env_file.read_text(errors="replace") if self.env_file else ""
+        except OSError:
+            return out
+        for line in text.splitlines():
+            m = re.match(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)$", line)
+            if m:
+                v = m.group(2).strip()
+                if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                    v = v[1:-1]
+                out[m.group(1)] = v
+        return out
+
+    def verify_env(self):
+        """The recorded endpoints a verify adopts (VERIFY_ADOPTS)."""
+        keys = self.VERIFY_ADOPTS
+        return {k: v for k, v in self.env().items() if keys is None or k in keys}
 
     def cfg(self, key, default=None):
         v = self.conf.get(key) if self.conf is not None else None

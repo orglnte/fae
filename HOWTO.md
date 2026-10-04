@@ -723,6 +723,8 @@ unknown keys refused):
 | `cell_setup()` / `cell_teardown()` | the cell-lifetime infra, driver-run |
 | `verify_setup(ctx, env)` / `verify_teardown(ctx, env)` | the per-arrangement infra, verifier-run |
 | `PREFIXES`, `identities(cid)`, `stray()`, `sweep()` | what a reaper may find and remove |
+| `ENV_FILE`, `record_env(pairs)`, `env()`, `VERIFY_ADOPTS`, `verify_env()` | the endpoints its setup records in the cell's folder, and the keys a verify adopts; the verifier asks the infra, never opens the file |
+| `RUN_DIR`, `run_dir` | the state it keeps in the cell's folder |
 | `image_context(conf)`, `agent_image_context(conf)` | sources staged beside the variant's verify and agent Dockerfiles |
 
 **Verifier** (`fae/cell/verify.py`):
