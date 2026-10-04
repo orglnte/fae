@@ -704,13 +704,6 @@ class Experiment:
         argv += ["--" + s.replace("_", "-") for s in self.AGGREGATE_SWITCHES if switches.get(s)]
         return subprocess.run(argv, check=True, env=dict(os.environ, WORKSPACES_DIR=str(ws.path)))
 
-    def run_report(self, since=None, workspace=None):
-        """What `workspace`'s cells produced since `since` (epoch seconds;
-        None: every sealed cell): (completed by variant, in progress)
-        (fae/experiment/scoring/run_report.py)."""
-        from fae.experiment.scoring import run_report as _report
-        return _report.collect(workspace or self.workspace, self.definition.gate.arrangements_nr, since)
-
     # --- the transitions log, re-anchored -----------------------------------
 
     def observed_epoch(self):

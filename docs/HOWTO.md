@@ -597,7 +597,6 @@ terminal:
 
 ```sh
 EXPERIMENT_DIR=shout python3 cli.py experiment status          # the table
-EXPERIMENT_DIR=shout python3 cli.py results run-report    # what this run produced so far
 EXPERIMENT_DIR=shout python3 cli.py results score         # validate -> score.json -> table
 ```
 
