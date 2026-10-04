@@ -117,33 +117,32 @@ class TestSelectorIsAnchored(OperatorTestCase):
         self.assertEqual(runs.common.select_cells("apidoc"), [])
 
 
-class TestQueuedOnly(OperatorTestCase):
-    """Work that exists only as a queued spec was invisible to every operator
-    verb, because select_cells enumerates workspaces."""
+class TestQueuedCells(OperatorTestCase):
+    """Workspace.queued_cells: every cell with a pending spec, the ones with
+    no workspace folder included, which select_cells cannot see."""
 
     def test_finds_specs_with_no_workspace(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2)])
-        self.assertEqual(runs.common.workspace().queued_only("all"),
+        self.assertEqual(runs.common.workspace().queued_cells("all"),
                          ["sonnet_high_alpha_apidocs_T1_r2"])
 
-    def test_ignores_specs_that_already_have_a_workspace(self):
-        """Those are select_cells' business; counting them twice would
-        double-report the backlog."""
+    def test_includes_specs_that_already_have_a_workspace(self):
         self.queue("sonnet", [dict(task="T1", variant="beta_apidocs", rep=1)])
-        self.assertEqual(runs.common.workspace().queued_only("all"), [])
+        self.assertEqual(runs.common.workspace().queued_cells("all"),
+                         ["sonnet_high_beta_apidocs_T1_r1"])
 
     def test_selector_applies_and_is_anchored(self):
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=2)])
         self.queue("haiku", [dict(task="T1", variant="beta_howto", rep=3)])
-        self.assertEqual(len(runs.common.workspace().queued_only("sonnet")), 1)
-        self.assertEqual(len(runs.common.workspace().queued_only("haiku")), 1)
-        self.assertEqual(len(runs.common.workspace().queued_only("T1")), 2)   # whole token
-        self.assertEqual(runs.common.workspace().queued_only("son"), [])      # partial: no match
+        self.assertEqual(len(runs.common.workspace().queued_cells("sonnet")), 1)
+        self.assertEqual(len(runs.common.workspace().queued_cells("haiku")), 1)
+        self.assertEqual(len(runs.common.workspace().queued_cells("T1")), 2)   # whole token
+        self.assertEqual(runs.common.workspace().queued_cells("son"), [])      # partial: no match
 
     def test_unreadable_spec_file_is_survived(self):
         d = runs.queues.lane_dir("sonnet"); d.mkdir(parents=True)
         (d / "100000.sonnet_high_beta_apidocs_T1_r9.json").write_text("{not json\n")
-        self.assertEqual(runs.common.workspace().queued_only("all"),
+        self.assertEqual(runs.common.workspace().queued_cells("all"),
                          ["sonnet_high_beta_apidocs_T1_r9"])
 
 
@@ -1083,6 +1082,13 @@ class TestConductPauseDryRun(OperatorTestCase):
         self.assertIn("queued spec(s) in place", out)
         rp.assert_not_called()
         sc.assert_not_called()
+
+    def test_full_preview_counts_only_specs_with_no_workspace(self):
+        (self.conduct / "conduct.pid").write_text("4242 cap=7")
+        self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7),
+                              dict(task="T1", variant="beta_apidocs", rep=1)])
+        out, _, _ = self._dry(["all"], live={CIDS[0]: 4242})
+        self.assertIn("would leave 1 queued spec(s) in place", out)
 
     def test_unknown_model_is_refused(self):
         with self.assertRaises(SystemExit):
