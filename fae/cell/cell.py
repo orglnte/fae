@@ -111,7 +111,7 @@ def _append(log, text):
 
 
 from fae.cell import ledger  # noqa: E402
-from fae import metrics as _metrics  # noqa: E402
+from fae.cell import metrics as _metrics  # noqa: E402
 
 
 class VerifyResult:
@@ -338,7 +338,7 @@ class Cell:
         return None if v is None else (v[0], ledger.RULES[v[0]], v[1], v[2])
 
     def read_metrics(self):
-        """The last verify's metrics.json (fae/metrics.py), {} when absent."""
+        """The last verify's metrics.json (fae/cell/metrics.py), {} when absent."""
         return _metrics.read(self.ws)
 
     def read_derived(self, name):
@@ -1111,6 +1111,12 @@ class Cell:
     def judged(self, name):
         """`name` from every judged archived run that has it, in archive order."""
         return archive.judged_files(self.ws, name)
+
+    def evidence_all(self, name):
+        """`name`'s text in the cell's folder (when there), then in every judged
+        archived run, in archive order."""
+        out = [self.evidence_text(name)] if self.evidence(name).exists() else []
+        return out + [p.read_text(errors="replace") for p in self.judged(name)]
 
     def console_log(self):
         """The cell's most recent story: the verify log if one exists, else the

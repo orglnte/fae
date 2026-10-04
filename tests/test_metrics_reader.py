@@ -1,4 +1,4 @@
-"""fae/metrics.py — the one reader of metrics.json for validation and scoring.
+"""fae/cell/metrics.py — the one reader of metrics.json for validation and scoring.
 
 A count written as the text it was parsed from must reach the rules and the
 results table as a number: a string there crashed the taint rules and made the
@@ -12,7 +12,7 @@ from unittest import mock
 
 from _ctx import runs, at_workspace, use_workspace
 
-from fae import metrics
+from fae.cell import metrics
 from fae.cell.cell import Cell
 
 

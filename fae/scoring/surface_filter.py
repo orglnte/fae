@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from fae.cell.surface import MANIFEST
+
 # Directory names that are never authored surface, whatever they contain.
 IGNORE_PARTS = frozenset({
     "__pycache__", "node_modules", ".venv", "venv", "env", ".terraform",
@@ -26,7 +28,7 @@ IGNORE_SUFFIXES = frozenset({
 })
 
 # Names that are rig bookkeeping, not artifacts.
-IGNORE_NAMES = frozenset({".skeleton_manifest"})
+IGNORE_NAMES = frozenset({MANIFEST})
 
 _BINARY_SNIFF_BYTES = 8192
 
