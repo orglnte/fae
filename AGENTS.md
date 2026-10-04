@@ -686,7 +686,7 @@ every prior agent's memory — cross-run leakage invisible in the results.
   cell running, apply multi-hunk patches whole, and run `cli.py experiment
   check` after. An empty experiment tree or a missing declared file is FATAL, never
   a silently smaller surface. `fae/mutex.py`, `cli.py`, `fae/cli/`,
-  `fae/conduct/`, `fae/host.py` and the root docs are not guarded.
+  `fae/conduct/` (its `_host.py` included) and the root docs are not guarded.
 - **A drain is only a window because it stops CONDUCT.** Pausing covers
   cells that have a workspace; the scheduler is free to pop a spec that has
   none. `experiment pause all` stops the run first; `experiment pause M…` parks

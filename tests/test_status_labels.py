@@ -13,17 +13,17 @@ def st(state, why="loop", **kw):
 
 class TestARequeuedCrash(unittest.TestCase):
     def test_reads_as_queued_when_its_spec_waits_in_its_lane(self):
-        with mock.patch.object(runs.host, "queued", return_value=True):
+        with runs.patch_host("queued", return_value=True):
             self.assertTrue(runs.render.requeued(st("CRASHED")))
             self.assertEqual(runs.render.display_state(st("CRASHED")), "QUEUED·interrupted")
 
     def test_reads_as_crashed_when_nobody_will_restart_it(self):
-        with mock.patch.object(runs.host, "queued", return_value=False):
+        with runs.patch_host("queued", return_value=False):
             self.assertFalse(runs.render.requeued(st("CRASHED")))
             self.assertEqual(runs.render.display_state(st("CRASHED")), "CRASHED·loop")
 
     def test_other_states_are_untouched(self):
-        with mock.patch.object(runs.host, "queued", return_value=True):
+        with runs.patch_host("queued", return_value=True):
             self.assertEqual(runs.render.display_state(st("PAUSED", "drain")), "PAUSED·drain")
             self.assertEqual(runs.render.display_state(st("DONE", "green")), "DONE·green")
 
@@ -41,7 +41,7 @@ class TestALongWaitIsNotAStall(SweepCase):
 
     def _alert_for(self, phase):
         limit = runs.supervise.PHASE_LIMITS[phase][0]
-        with mock.patch.object(runs.host, "heartbeat",
+        with runs.patch_host("heartbeat",
                                return_value={"phase": phase, "phase_age": limit + 60,
                                              "age": 1.0, "attempt": 1}), \
              mock.patch.object(runs.supervise, "_arm_slot_of", return_value=None), \

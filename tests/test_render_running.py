@@ -28,9 +28,9 @@ class TestTheRunningTable(unittest.TestCase):
     def _render(self, rows):
         states = [s for s, _ in rows]
         hbs = {s["cid"]: hb for s, hb in rows}
-        with mock.patch.object(runs.host, "all_states", return_value=(states, {}, [])), \
-             mock.patch.object(runs.host, "loop_parents", return_value={}), \
-             mock.patch.object(runs.host, "heartbeat",
+        with runs.patch_host("all_states", return_value=(states, {}, [])), \
+             runs.patch_host("loop_parents", return_value={}), \
+             runs.patch_host("heartbeat",
                                side_effect=lambda ws, cell=None: hbs[Path(ws).name]), \
              mock.patch.object(runs.zombies, "find_zombies", return_value=[]), \
              mock.patch.object(runs.render, "queued_summary", return_value=[]), \

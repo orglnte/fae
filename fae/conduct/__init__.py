@@ -7,8 +7,9 @@ it) rather than a second controller racing the first.
 A `Conduct` owns the scheduler's state: conduct.pid in .conduct/ and what the
 supervision pass has already reported. The CLI builds one for every operator
 verb that acts on the run as a whole (run, pause, resume, stop, diagnose,
-repair); only `run` loops. The host's facts about the fleet are fae/host.py,
-read by anyone; the leftovers of dead cells are the Conduct's (zombies.py).
+repair); only `run` loops. The host's facts about the fleet are the Conduct's
+(_host.py), the ones others read exported here; the leftovers of dead cells
+are the Conduct's (zombies.py).
 """
 from __future__ import annotations
 
@@ -27,7 +28,9 @@ from fae.cell.cell import Cell
 from fae import experiment as _experiment
 from fae import mutex
 from fae.queues import hhmm
-from fae import host
+from . import _host
+from ._host import (agent_containers, all_states, cell_state, containers,  # noqa: F401
+                    heartbeat, loop_parents, loop_pids, mem_pressure, queued)
 from . import records, supervise, zombies
 
 # One live cell per agent, everywhere: admission enforces it and resume defers
@@ -243,7 +246,7 @@ class Conduct:
         records.rec_log(f"{cid} RESPAWN (resume, #{n + 1})" + (" [dry-run]" if dry else ""))
         if dry:
             return False
-        if host.loop_parents().get(cid):
+        if _host.loop_parents().get(cid):
             records.rec_log(f"{cid} respawn skipped — a live loop already owns the workspace")
             return False
         refusal = self.refusal_while_up("respawn", ignore_slots)
@@ -279,7 +282,7 @@ class Conduct:
               f"on the 2nd consecutive sighting")
         for kind, ident, owner, note in zs:
             print(f"  {kind:<10} {ident}  owner={owner}  {note}")
-        live = host.loop_parents()
+        live = _host.loop_parents()
         up = self.pidfile.exists()
         print(f"\n— ADMISSION PREVIEW — {len(live)} live loop(s), per-agent cap "
               f"{PER_AGENT_CAP}, run {'UP' if up else 'DOWN'}"
@@ -308,7 +311,7 @@ class Conduct:
                         if fae.experiment.exp().cell(cid).flagged:
                             skipped += 1
                             continue
-                        st = host.cell_state(ws, {}, set())
+                        st = _host.cell_state(ws, {}, set())
                         if st and st["state"] == "DONE":
                             skipped += 1
                             continue
@@ -437,7 +440,7 @@ class Conduct:
               ". Ctrl-C detaches (cells keep running).", flush=True)
         try:
             while True:
-                host.host_sleep_observe()
+                _host.host_sleep_observe()
                 self.act_on_requests()
                 # Supervision inside the ONE controller: repair requeues at the
                 # lane front and the admission below picks it up — conduct is the
@@ -463,13 +466,13 @@ class Conduct:
                           + f"; one cell per lane needs -n {len(active)}",
                           flush=True)
                 warned_lanes = len(active)
-                live = host.loop_parents()
-                boxes = host.containers()
+                live = _host.loop_parents()
+                boxes = _host.containers()
 
                 # Narrate state changes: cells STARTing (not admitted by us —
                 # reconcile respawns, operator spawns), reaching a verdict,
                 # crashing. First pass establishes the baseline silently.
-                states, _, _ = host.all_states()
+                states, _, _ = _host.all_states()
                 now = {s["cid"]: f"{s['state']}·{s['why']}" for s in states}
                 if first:
                     first = False
@@ -546,7 +549,7 @@ class Conduct:
                 order.sort(key=lambda m: lane_live[m])
                 idle_sweep = 0
                 while order and idle_sweep < len(order):
-                    live = host.loop_parents()
+                    live = _host.loop_parents()
                     if len(live) >= n:
                         break
                     m = order[rr % len(order)]
@@ -576,7 +579,7 @@ class Conduct:
                         idle_sweep = 0
                         admitted.add(cid)
                         print(f"  [{hhmm()}] admitted {cid} "
-                              f"({len(host.loop_parents())}/{n} live)", flush=True)
+                              f"({len(_host.loop_parents())}/{n} live)", flush=True)
                     elif rc in (Cell.LOCK_EXIT, Cell.PAUSE_EXIT):
                         # LOCK_EXIT: workspace already owned; PAUSE: a pause landed
                         # in the claim->spawn window. Cell-specific, not lane-wide:
@@ -613,14 +616,14 @@ class Conduct:
                 if poll_i % 10 == 0:      # sign of life on a quiet fleet
                     cool = sorted(m for m in agents
                                   if qs.cooldown_until(m) > time.time())
-                    print(f"  [{hhmm()}] alive — {len(host.loop_parents())}/{n} live, "
+                    print(f"  [{hhmm()}] alive — {len(_host.loop_parents())}/{n} live, "
                           f"{sum(pending.values())} pending"
                           + (f", cooling: {', '.join(cool)}" if cool else "")
                           + f", {qs.weekly_line()}", flush=True)
                 time.sleep(args.interval)
         except KeyboardInterrupt:
             pidfile.unlink(missing_ok=True)
-            print(f"\nrun: detached — {len(host.loop_parents())} loop(s) keep "
+            print(f"\nrun: detached — {len(_host.loop_parents())} loop(s) keep "
                   f"running; nothing new starts until `cli.py experiment run` runs again.")
         finally:
             sys.stdout, sys.stderr = _old_out, _old_err
@@ -661,12 +664,12 @@ class Conduct:
                          f"{', '.join(sorted(known)) or 'none'})")
         cids = fae.experiment.exp().workspace.select(*(agents or ["all"]))
         if args.dry_run:
-            parents = {c: p for c, p in host.loop_parents().items() if p > 1}
+            parents = {c: p for c, p in _host.loop_parents().items() if p > 1}
             if agents:
                 parents = {c: p for c, p in parents.items()
                            if c.split("_", 1)[0] in set(agents)}
             for cid in sorted(parents):
-                st = host.cell_state(fae.experiment.exp().workspace.path / cid, host.loop_pids(), host.containers())
+                st = _host.cell_state(fae.experiment.exp().workspace.path / cid, _host.loop_pids(), _host.containers())
                 print(f"would pause {cid} ({st['state']}·{st['why']})" if st
                       else f"would pause {cid}")
             if agents:
@@ -719,12 +722,12 @@ class Conduct:
         print(f"pause requested [drain] for {len(cids)} cell(s) — waiting for loops "
               f"to reach a safe point", flush=True)
         while True:
-            parents = {c: p for c, p in host.loop_parents().items() if p > 1}
+            parents = {c: p for c, p in _host.loop_parents().items() if p > 1}
             # Cell loops are not the only FP-pinned processes: a reverify, an
             # exp1 verify or a smoke run holds a pinned fingerprint too, and
             # "DRAIN COMPLETE" while one runs invited an edit that voided it
             # mid-batch (audit finding 9). Wait for them as well.
-            others = [l for l in host.sh(["ps", "-axww", "-o", "pid=,command="]).splitlines()
+            others = [l for l in _host.sh(["ps", "-axww", "-o", "pid=,command="]).splitlines()
                       if re.search(zombies.VERIFY_HOLDER_ARGV, l)]
             if not parents and not others:
                 break
@@ -733,16 +736,16 @@ class Conduct:
                       f"(reverify/exp1/smoke verify)", flush=True)
                 time.sleep(args.interval)
                 continue
-            pids, boxes = host.loop_pids(), host.containers()
+            pids, boxes = _host.loop_pids(), _host.containers()
             lbl = []
             for c in sorted(parents):
-                st = host.cell_state(fae.experiment.exp().workspace.path / c, pids, boxes)
+                st = _host.cell_state(fae.experiment.exp().workspace.path / c, pids, boxes)
                 lbl.append(f"{c}[{st['why'] or st['state'] if st else '?'}]")
             print(f"waiting: {len(parents)} loop(s) still up: {', '.join(lbl)}", flush=True)
             time.sleep(args.interval)
-        for pid in host.loop_pids():   # tees: reap ORPHANS only (ppid 1) — a live
+        for pid in _host.loop_pids():   # tees: reap ORPHANS only (ppid 1) — a live
             try:                   # reverify's tee dies with its owner, not here
-                ppid = int(host.sh(["ps", "-o", "ppid=", "-p", str(pid)]).strip() or 0)
+                ppid = int(_host.sh(["ps", "-o", "ppid=", "-p", str(pid)]).strip() or 0)
                 if ppid == 1:
                     os.kill(pid, signal.SIGTERM)
             except (ProcessLookupError, ValueError):
@@ -786,14 +789,14 @@ class Conduct:
             elif r == "conflict":
                 print(f"  queue[{m}]: BOTH the live and the parked lane exist — "
                       f"merge by hand, refusing to clobber")
-        parents = host.loop_parents()
-        pids, boxes = host.loop_pids(), host.containers()   # once — per-cell ps/docker
+        parents = _host.loop_parents()
+        pids, boxes = _host.loop_pids(), _host.containers()   # once — per-cell ps/docker
                                                   # calls made resume-all crawl
         requeued, lifted = 0, 0
         budget_resets = []
         for cid in fae.experiment.exp().workspace.select(*(["all"] if blanket else scope)):
             ws = fae.experiment.exp().workspace.path / cid
-            st = host.cell_state(ws, pids, boxes)
+            st = _host.cell_state(ws, pids, boxes)
             if st is None:
                 continue
             reason = fae.experiment.exp().cell(cid).pause_reason
@@ -854,7 +857,7 @@ class Conduct:
                          f"{', '.join(sorted(known)) or 'none'})")
         def _in_scope(cid):
             return blanket or cid.split("_", 1)[0] in set(agents)
-        _loops_now = sorted(c for c in host.loop_parents() if _in_scope(c))
+        _loops_now = sorted(c for c in _host.loop_parents() if _in_scope(c))
         _pending = sum(len(qs.specs_in(d)) for d in qs.lane_dirs(include_parked=True)
                        if not agents or qs.lane_agent(d) in set(agents))
         if not _confirm_stop(blanket, agents, _loops_now, _pending,
@@ -870,7 +873,7 @@ class Conduct:
         # lanes keep being served.
         if blanket and self.stop_conductor():
             print("conduct stopped (TERM)")
-        loops = {c: p for c, p in host.loop_parents().items() if _in_scope(c)}
+        loops = {c: p for c, p in _host.loop_parents().items() if _in_scope(c)}
         # Through the one teardown path. TERM alone left the dind sidecar, every
         # anonymous volume and the cell's kind cluster behind whenever the EXIT
         # trap did not complete, and the arm slot with them.
@@ -1080,11 +1083,11 @@ class Conduct:
                 # right past the flag. The operator's resume clears the flag.
                 if fae.experiment.exp().cell(cid).flagged:
                     continue
-                st = host.cell_state(ws, {}, boxes)
+                st = _host.cell_state(ws, {}, boxes)
                 if st and st["state"] == "DONE":
                     qs.finish(agent, p)
                     continue
-            if fae.experiment.exp().cell(cid).pause_reason or host.loop_parents().get(cid):
+            if fae.experiment.exp().cell(cid).pause_reason or _host.loop_parents().get(cid):
                 continue
             return p, cid
         return None, "none-admissible"
@@ -1096,10 +1099,10 @@ class Conduct:
         claim, so its lane would read as free and admit a second cell. Adoption
         makes the claim match reality before the first admission."""
         n = 0
-        for cid, _pid in host.loop_parents().items():
+        for cid, _pid in _host.loop_parents().items():
             if self.is_claimed(cid):
                 continue
-            st = host.cell_state(fae.experiment.exp().workspace.path / cid, {}, set())
+            st = _host.cell_state(fae.experiment.exp().workspace.path / cid, {}, set())
             if not st:
                 continue
             fae.experiment.exp().workspace.queues.adopt(cid.split("_", 1)[0], cid, _spec_of(st))
@@ -1120,7 +1123,7 @@ class Conduct:
                     continue
                 if c.cancelled or c.flagged:
                     continue
-                if at is not None and host.awake_age(at, now_t) < STANDDOWN_COOL_S:
+                if at is not None and _host.awake_age(at, now_t) < STANDDOWN_COOL_S:
                     continue
                 n = self.respawn_count(cid)
                 if n >= MAX_RESPAWNS:
@@ -1143,13 +1146,13 @@ class Conduct:
         reaches a verdict, so a conduct that dies mid-attempt (or a cell killed by
         a hang sweep) is recovered by the next pass with no journal to replay."""
         qs = fae.experiment.exp().workspace.queues
-        live = host.loop_parents()
-        boxes = host.containers()
+        live = _host.loop_parents()
+        boxes = _host.containers()
         for p in qs.running_specs():
             agent, cid = p.parent.name, qs.spec_cid(p)
             if live.get(cid):
                 continue
-            st = host.cell_state(fae.experiment.exp().workspace.path / cid, {}, boxes)
+            st = _host.cell_state(fae.experiment.exp().workspace.path / cid, {}, boxes)
             if st and st["state"] == "DONE":
                 qs.finish(agent, p)
                 continue

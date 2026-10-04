@@ -21,7 +21,7 @@ from fae.cell.fsm import LOOP_CLEARED_BY, WAIT_PHASES
 from fae import experiment as _experiment
 from fae.cell import faults
 
-from fae import host
+from . import _host
 from . import records, zombies
 
 # A lane that hits a provider quota/rate wall cools for the provider's
@@ -68,7 +68,7 @@ def _arm_slot_of(arm, cid):
         note = q.slot_note(slot)
         if not note or note[0] != cid or not q.slot_held(slot):
             continue
-        return host.awake_age(note[2]) if note[2] is not None else None
+        return _host.awake_age(note[2]) if note[2] is not None else None
     return None
 
 
@@ -82,14 +82,14 @@ def _retire_finished_specs(dry=False):
     while the spec it came from is still in the lane, unclaimed.
     """
     qs = fae.experiment.exp().workspace.queues
-    boxes = host.containers()
+    boxes = _host.containers()
     for d in qs.lane_dirs():
         agent = qs.lane_agent(d)
         for p in qs.specs_in(d):
             cid = qs.spec_cid(p)
             if not (fae.experiment.exp().workspace.path / cid).is_dir():
                 continue
-            st = host.cell_state(fae.experiment.exp().workspace.path / cid, {}, boxes)
+            st = _host.cell_state(fae.experiment.exp().workspace.path / cid, {}, boxes)
             if not st or st["state"] != "DONE":
                 continue
             records.rec_log(f"{cid} spec retired — cell is DONE·{st['why'] or '?'}"
@@ -160,7 +160,7 @@ def _agent_io(boxes=()):
     never refute it.
     """
     out = {}
-    pfx = host.agent_container("")
+    pfx = _host.agent_container("")
     if not any(str(b).startswith(pfx) for b in boxes):
         return out
     try:
@@ -215,7 +215,7 @@ def _attempt_out(cell):
     if not logs:
         return None, None
     stt = logs[-1].stat()
-    return stt.st_size, host.awake_age(stt.st_mtime)
+    return stt.st_size, _host.awake_age(stt.st_mtime)
 
 
 AGENT_DEAD_GRACE = int(os.environ.get("AGENT_DEAD_GRACE", 300))
@@ -241,7 +241,7 @@ def _age_of(ts):
     """Seconds since an ISO-Z stamp (host sleep excluded), or None if it does
     not parse."""
     try:
-        return host.awake_age(datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
+        return _host.awake_age(datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
                          .replace(tzinfo=timezone.utc).timestamp())
     except (ValueError, TypeError):
         return None
@@ -333,8 +333,8 @@ def supervise_pass(alerts, dry=False, only=""):
     Never touches workspace data. Runs inside conduct's loop every
     --supervise-interval, and as the one-shot `reconcile` /
     `experiment diagnose` (dry)."""
-    host.host_sleep_observe()
-    _mp = host.mem_pressure()
+    _host.host_sleep_observe()
+    _mp = _host.mem_pressure()
     if _mp["level"] >= 2 and _mp["level"] != alerts.memory["level"]:
         records.rec_log(f"MEMORY PRESSURE {_mp['label']} — "
                  f"{_mp['used_gb']:.1f}/{_mp['total_gb']:.1f}GB used "
@@ -343,16 +343,16 @@ def supervise_pass(alerts, dry=False, only=""):
     elif _mp["level"] < 2 and alerts.memory["level"] >= 2:
         records.rec_log("memory pressure back to normal")
     alerts.memory["level"] = _mp["level"]
-    loops, boxes = host.loop_pids(), host.containers()
-    parents = host.loop_parents()
-    last_tr = host.last_transitions()
+    loops, boxes = _host.loop_pids(), _host.containers()
+    parents = _host.loop_parents()
+    last_tr = _host.last_transitions()
     io_now = _agent_io(boxes)
     io_book = _agent_io_book()
     io_flat = {c: v.get("flat", 0) for c, v in io_book.items()}
     for ws in sorted(fae.experiment.exp().workspace.path.iterdir()):
             if not ws.is_dir():
                 continue
-            st = host.cell_state(ws, loops, boxes)
+            st = _host.cell_state(ws, loops, boxes)
             if not st:
                 continue
             cid = st["cid"]
@@ -363,7 +363,7 @@ def supervise_pass(alerts, dry=False, only=""):
             # world, and the agent has to learn it whatever the operator
             # intends for the cell. Writes one transition, nothing else.
             _reconcile_dead_loop(cid, parents.get(cid),
-                                 host.agent_container(cid) in boxes,
+                                 _host.agent_container(cid) in boxes,
                                  _attempt_out(c)[1], last_tr.get(cid), dry,
                                  terminal=st["state"] == "DONE")
             if c.flagged:
@@ -389,9 +389,9 @@ def supervise_pass(alerts, dry=False, only=""):
                     records.rec_log(f"{cid} validated: {doc['verdict']}"
                              + (f" ({'; '.join(doc['taints'])})" if doc["taints"] else ""))
             loop_pid = parents.get(cid)
-            in_box = host.agent_container(cid) in boxes
+            in_box = _host.agent_container(cid) in boxes
             out_size, out_age = _attempt_out(c)
-            iter_age = host.awake_age(c.mtimes()["ledger"] / 1e9)
+            iter_age = _host.awake_age(c.mtimes()["ledger"] / 1e9)
             # A cell still inside verify_lock_acquire (last transition
             # AcquireVerify, no later one yet) that has held it past the
             # threshold: write an ALERT to the cell's own ledger, same shape
@@ -437,7 +437,7 @@ def supervise_pass(alerts, dry=False, only=""):
             # progress signal: the heartbeat says the ticker lives, not that
             # the cell is getting anywhere.
             if not terminal and st["state"] in ("RUNNING", "WAITING"):
-                _hbp = host.heartbeat(ws)
+                _hbp = _host.heartbeat(ws)
                 _ph = (_hbp or {}).get("phase")
                 _pa = (_hbp or {}).get("phase_age")
                 _lim = PHASE_LIMITS.get(_ph)
@@ -482,7 +482,7 @@ def supervise_pass(alerts, dry=False, only=""):
                     # a provider wall is waiting on someone else, not wedged —
                     # the lock holder is VERIFY-WEDGED's, the wall the wall
                     # branch's.
-                    _hb = host.heartbeat(ws)
+                    _hb = _host.heartbeat(ws)
                     _phase = (_hb or {}).get("phase")
                     _silent = (_hb.get("phase_age") if _hb else None)
                     if _silent is None:
@@ -509,7 +509,7 @@ def supervise_pass(alerts, dry=False, only=""):
             if terminal and _L["reverify_active"] \
                     and iter_age > T_HANG \
                     and not any(re.search(zombies.VERIFY_HOLDER_ARGV, l)
-                                for l in host.sh(["ps", "-axww", "-o", "command="]).splitlines()):
+                                for l in _host.sh(["ps", "-axww", "-o", "command="]).splitlines()):
                 records.rec_log(f"{cid} stranded reverify ({st['shape']}) -> ledger repair"
                          + (" [dry-run]" if dry else ""))
                 if not dry:
@@ -531,8 +531,8 @@ def supervise_pass(alerts, dry=False, only=""):
                          + (" [dry-run]" if dry else ""))
                 if not dry:
                     os.kill(loop_pid, signal.SIGKILL)
-                    subprocess.run(["docker", "rm", "-f", "-v", host.agent_container(cid),
-                                    *host.infra_containers(st["variant"], cid)],
+                    subprocess.run(["docker", "rm", "-f", "-v", _host.agent_container(cid),
+                                    *_host.infra_containers(st["variant"], cid)],
                                    capture_output=True)
                     fae.experiment.exp().workspace.named_cell(cid, st["variant"]).teardown()
             elif st["state"] == "CRASHED" and not in_box and _conducts(cid):

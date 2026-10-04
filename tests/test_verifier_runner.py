@@ -322,7 +322,7 @@ class TestTheChildIsItsOwnSession(unittest.TestCase):
     def test_the_child_argv_reads_as_a_driver_to_the_reaper(self):
         from fae.conduct import zombies
         self.assertIn("fae.cell", " ".join(verify.CHILD_ARGV))
-        with mock.patch.object(zombies.host, "sh", return_value=" ".join(verify.CHILD_ARGV)):
+        with mock.patch.object(zombies._host, "sh", return_value=" ".join(verify.CHILD_ARGV)):
             self.assertTrue(zombies._is_driver_pid(1))
 
     def test_the_runner_never_names_the_hosts_interpreter(self):

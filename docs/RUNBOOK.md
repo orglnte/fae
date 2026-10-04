@@ -159,9 +159,9 @@ AGENTS.md            rig contract: cells, ledger, locks, verdicts, delete rules,
 cli.py               operator CLI (noun groups); the only entry point
 fae/cli/            the operator CLI's verbs; render.py, the console
 fae/conduct/        the scheduler: admission, supervision, the reaper,
-                     its reconcile log
-fae/host.py         the host's facts: process table, containers, memory,
-                     the host-sleep book
+                     its reconcile log; _host.py the host's facts (process
+                     table, containers, memory, the host-sleep book), the
+                     ones others read exported from fae.conduct
 fae/experiment/     the experiment: Definition, Workspace, Experiment and
                      its actions; config.py the root's configuration;
                      check_exp.py its readiness check;

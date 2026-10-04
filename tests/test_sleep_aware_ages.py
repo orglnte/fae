@@ -18,8 +18,8 @@ class SleepCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         patch_plane(self, Path(self._tmp.name))
-        self.patches = [mock.patch.object(runs.host, "_sleep_clocks", None),
-                        mock.patch.object(runs.host, "_sleep_gaps", None)]
+        self.patches = [runs.patch_host("_sleep_clocks", None),
+                        runs.patch_host("_sleep_gaps", None)]
         for p in self.patches:
             p.start()
         self.addCleanup(self._tmp.cleanup)
@@ -99,7 +99,7 @@ class TestTheAgesTheSupervisorReads(SleepCase):
         (ws / ".loop").write_text(
             f"pid={os.getpid()} cid={ws.name} phase=verify-lock attempt=3 "
             f"ts={int(self.now)} since={int(self.now - 7200)}\n")
-        with mock.patch.object(runs.host, "run_cell_pids",
+        with runs.patch_host("run_cell_pids",
                                return_value={os.getpid()}):
             hb = runs.host.heartbeat(ws)
         self.assertLess(hb["phase_age"], 400)

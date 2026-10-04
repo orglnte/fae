@@ -42,9 +42,24 @@ class TestTheConductOwnsSupervision(unittest.TestCase):
 
 
 
-class TestTheHostIsNotTheConducts(unittest.TestCase):
-    """The host's facts are fae/host.py, read directly: reading them never
-    needs the scheduler."""
+class TestTheHostFactsAreTheConducts(unittest.TestCase):
+    """The host's facts are the Conduct's private module (fae/conduct/_host.py);
+    the ones others read are exported by name from fae.conduct, and the
+    Conduct class relays none of them."""
+
+    def test_only_the_conduct_package_imports_its_host_module(self):
+        pkg = Path(__file__).resolve().parents[1] / "fae"
+        for f in sorted(pkg.rglob("*.py")):
+            if "conduct" in f.relative_to(pkg).parts[:1]:
+                continue
+            self.assertIsNone(re.search(r"\b_host\b", f.read_text()), f.name)
+
+    def test_the_host_facts_others_read_are_exported(self):
+        import fae.conduct
+        from fae.conduct import _host
+        for name in ("agent_containers", "all_states", "cell_state", "containers", "heartbeat",
+                     "loop_parents", "loop_pids", "mem_pressure", "queued"):
+            self.assertIs(getattr(fae.conduct, name), getattr(_host, name), name)
 
     def test_the_conduct_relays_no_host_fact(self):
         from fae.conduct import Conduct

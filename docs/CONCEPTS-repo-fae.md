@@ -44,7 +44,7 @@ would not expect, and names that collide, are in
 | Lock | A kernel `flock` on a file, released when its holder dies | rig lock (the exclusive one) | `mutex`, `Cell` | mutual exclusion; crash safety |
 | Leftovers | Containers, clusters and loops no live cell owns | zombies | `zombies` | a clean host |
 | Lifecycle log | Every cell's transitions, replayable against the formal model | transitions.log, live trace | `Cell`, `tla_verify`, `Experiment.reset_trace` | conformance |
-| Host facts | What the host shows: loops, containers, memory, sleeps | host-sleep book | `fae/host.py` | honest ages; status |
+| Host facts | What the host shows: loops, containers, memory, sleeps | host-sleep book | `fae/conduct/_host.py` | honest ages; status |
 | **The results** | | | | |
 | Validation | Whether a finished cell's verdict can be believed: VALID or TAINTED | taint, trust check | `experiment/scoring/validate.py`, `Experiment.validate_cell` | separating rig faults from data |
 | Score | One finished cell's record: attempts to green, authored surface, timings | score.json | `score_cell.py`, `Experiment.score` | the per-cell datum |
