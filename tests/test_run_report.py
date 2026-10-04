@@ -28,7 +28,7 @@ class TestTheRunReport(OrchTmpCase):
         return ws
 
     def _report(self, since=None):
-        return runs.shared.current().run_report(since)
+        return runs.experiment.exp().run_report(since)
 
     def test_completed_by_variant_and_in_progress(self):
         g = "sonnet_high_alpha_apidocs_T1_r1"

@@ -13,9 +13,9 @@ from pathlib import Path
 
 from _ctx import ROOT
 
+import fae.experiment
 from fae import cell            # the package, not a file loaded by path
-from fae import shared as _shared  # noqa: E402
-SHAPES = _shared.definition().gate.arrangements
+SHAPES = fae.experiment.exp().definition.gate.arrangements
 
 T, Loop, Phase = cell.T, cell.Loop, cell.Phase
 
@@ -758,7 +758,6 @@ class TestAnUndeclaredSurfaceHaltsAtPreflight(CellTestCase):
     def test_infra_ok_is_false_and_names_the_variant(self):
         from unittest import mock
         from fae import experiment
-        from fae import shared
         from fae.cell.variants.base import Variant
 
         from fae.cell.infra.base import NoopInfra
@@ -769,7 +768,7 @@ class TestAnUndeclaredSurfaceHaltsAtPreflight(CellTestCase):
 
         c = self.cell()
         c._infra = NoopInfra(Surfaceless, c)
-        with mock.patch.object(experiment.Definition, "variant",
+        with mock.patch.object(fae.experiment._experiment.Definition, "variant",
                                lambda self, vid: Surfaceless):
             self.assertFalse(c.infra_ok())
         self.assertIn("HALT[definition]: variant 'beta_apidocs' declares no [authoring] surface",

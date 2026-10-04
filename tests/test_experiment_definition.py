@@ -14,8 +14,7 @@ from unittest import mock
 from _ctx import ROOT
 
 sys.path.insert(0, str(ROOT))
-from fae import experiment as exp  # noqa: E402
-from fae import shared  # noqa: E402
+import fae.experiment  # noqa: E402
 
 ENGINE = ["fae"]
 _IMPORT = re.compile(r"^\s*(from experiment[.\s]|import experiment[.\s]|import experiment$)", re.M)
@@ -51,8 +50,8 @@ class TestMinimalDefinition(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             _write_definition(td, body, variants)
             prog = ("import sys; sys.path.insert(0, %r)\n"
-                    "from fae import experiment as exp\n"
-                    "d = exp.load(%r)\n" % (str(ROOT), str(Path(td) / "experiment"))) + code
+                    "import fae.experiment\n"
+                    "d = fae.experiment._experiment.load(%r)\n" % (str(ROOT), str(Path(td) / "experiment"))) + code
             r = subprocess.run([sys.executable, "-c", prog], capture_output=True, text=True,
                                cwd=td, env={**os.environ, "PYTHONPATH": str(ROOT)})
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -173,19 +172,19 @@ import tempfile, pathlib
 other = pathlib.Path(tempfile.mkdtemp()) / "experiment"; other.mkdir()
 (other / "__init__.py").write_text("NAME='b'\\n")
 try:
-    exp.load(other)
+    fae.experiment._experiment.load(other)
     print("loaded")
 except RuntimeError as e:
     print("refused" if "one root, one experiment" in str(e) else e)
-exp.unload()
-print(exp.load(other).name, "experiment" in sys.modules)
+fae.experiment._experiment.unload()
+print(fae.experiment._experiment.load(other).name, "experiment" in sys.modules)
 ''')
         self.assertEqual(out.split(), ["refused", "b", "True"])
 
     def test_a_missing_definition_is_fatal(self):
         with tempfile.TemporaryDirectory() as td:
-            prog = ("import sys; sys.path.insert(0, %r)\nfrom fae import experiment as exp\n"
-                    "exp.load(%r)\n" % (str(ROOT), td))
+            prog = ("import sys; sys.path.insert(0, %r)\nimport fae.experiment\n"
+                    "fae.experiment._experiment.load(%r)\n" % (str(ROOT), td))
             r = subprocess.run([sys.executable, "-c", prog], capture_output=True, text=True)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("FATAL: no experiment definition", r.stderr)
@@ -206,9 +205,9 @@ class TestTheExperimentsOwnCommands(unittest.TestCase):
     experiment; it lists and runs what the definition's commands() declares."""
 
     def _with(self, commands):
-        d = shared.definition()
+        d = fae.experiment.exp().definition
         return mock.patch.object(type(d), "commands", new_callable=mock.PropertyMock,
-                                 return_value=commands), exp.Experiment()
+                                 return_value=commands), fae.experiment._experiment.Experiment()
 
     def test_a_named_command_gets_its_arguments_and_its_exit_code_is_returned(self):
         seen = []
@@ -238,7 +237,7 @@ class TestTheExperimentsOwnCommands(unittest.TestCase):
             e.verb("nosuch", [])
 
     def test_a_definition_without_commands_has_none(self):
-        self.assertEqual(shared.definition().commands, {})
+        self.assertEqual(fae.experiment.exp().definition.commands, {})
 
 
 class TestTheAgentsFile(unittest.TestCase):
@@ -249,14 +248,14 @@ class TestTheAgentsFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "agents.toml"
             f.write_text(text)
-            return exp.load_agents(f)
+            return fae.experiment._experiment.load_agents(f)
 
     def test_a_declared_agent_is_read(self):
         self.assertEqual(self.load('[agents.a]\ncli = "claude"\nmodel = "m-1"\neffort = "low"\n'),
                          {"a": {"cli": "claude", "model": "m-1", "effort": "low"}})
 
     def test_no_file_is_no_agents(self):
-        self.assertEqual(exp.load_agents("/nonexistent/agents.toml"), {})
+        self.assertEqual(fae.experiment._experiment.load_agents("/nonexistent/agents.toml"), {})
 
     def test_refusals_name_the_tag(self):
         for text, why in (('[agents.a]\ncli = "nope"\nmodel = "m"\n', "cli must be one of"),

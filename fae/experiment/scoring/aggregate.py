@@ -19,7 +19,7 @@ from collections import defaultdict
 from math import comb
 from pathlib import Path
 
-from fae import shared as _shared  # noqa: E402
+import fae.experiment  # noqa: E402
 from fae import paths as _paths  # noqa: E402
 
 OUT_CSV, OUT_JSON = "results.csv", "results.json"     # beside the cells
@@ -82,7 +82,7 @@ def rate(values: list) -> float | None:
 
 def _scored():
     """(cell, its score.json text) for every scored cell of the workspace."""
-    ws = _shared.workspace()
+    ws = fae.experiment.exp().workspace
     for cid in ws.cells():
         c = ws.cell(cid)
         rec = c.read_derived("score.json")
@@ -512,7 +512,7 @@ def table_columns(vs: str | None) -> list[tuple[str, int]]:
 def _definition():
     if str(_paths.ENGINE.parent) not in sys.path:
         sys.path.insert(0, str(_paths.ENGINE.parent))
-    return _shared.definition()
+    return fae.experiment.exp().definition
 
 
 def _pooled_models():
@@ -634,8 +634,8 @@ def main() -> int:
         base, _ = filter_cells(all_cells, variant, other, where)
         compare = baseline_compare(group_and_rank(cells), group_and_rank(base))
 
-    out_csv = _shared.workspace().path / OUT_CSV
-    out_json = _shared.workspace().path / OUT_JSON
+    out_csv = fae.experiment.exp().workspace.path / OUT_CSV
+    out_json = fae.experiment.exp().workspace.path / OUT_JSON
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with out_csv.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=CSV_COLUMNS)

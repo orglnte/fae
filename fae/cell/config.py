@@ -22,6 +22,7 @@ try:
 except ModuleNotFoundError:                       # py<3.11
     import tomli as tomllib                        # type: ignore
 
+import fae.experiment  # noqa: E402
 from fae import plane as _plane  # noqa: E402
 
 # The engine's own rig defaults; fae.toml [rig] overrides one with an
@@ -227,9 +228,7 @@ _KEY_ENV = (
 
 
 def _definition(root, env, toml):
-    from fae import experiment as _experiment
-    from fae import shared as _shared
-    return _experiment.for_config(experiment_dir(root, env, toml.get("paths", {})))
+    return fae.experiment._experiment.for_config(experiment_dir(root, env, toml.get("paths", {})))
 
 
 def load(root, env=None):
@@ -313,7 +312,7 @@ def _build(root, env, toml, definition=None):
     v["VERIFY_LOCK_DIR"] = env.get("VERIFY_LOCK_DIR") or str(_plane.locks(root) / "verify-lock")
 
     if smoke:
-        from fae.experiment import Experiment
+        from fae.experiment._experiment import Experiment
         v["WORKSPACES_DIR"] = env.get("SMOKE_WORKSPACES_DIR") or f"{root}/{Experiment.SMOKE_DIR}"
     else:
         v["WORKSPACES_DIR"] = env.get("WORKSPACES_DIR") or f"{root}/workspaces.nosync"
@@ -442,9 +441,7 @@ def stage_agent(conf, cli, dest, root):
         from fae import paths
         shutil.copy(paths.ENGINE / "testagent.py",
                     Path(dest) / "testagent.py")
-        from fae import experiment as _experiment
-        from fae import shared as _shared
-        for vid, cls in _shared.definition().variants.items():
+        for vid, cls in fae.experiment.exp().definition.variants.items():
             if cls.REFERENCE is not None and Path(cls.REFERENCE).is_dir():
                 shutil.copytree(cls.REFERENCE, Path(dest) / "reference" / vid)
         subprocess_chmod(dest)

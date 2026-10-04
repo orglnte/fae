@@ -9,6 +9,7 @@ cells.
 import unittest
 
 from _ctx import runs
+import fae.experiment
 
 
 class TestCellId(unittest.TestCase):
@@ -48,7 +49,7 @@ class TestParseCellId(unittest.TestCase):
             ("sonnet", "beta_apidocs", "T1", "1"))
 
     def test_round_trips_every_variant(self):
-        for variant in runs.shared.definition().ids:
+        for variant in runs.experiment.exp().definition.ids:
             for agent in ("sonnet", "haiku", "gemini", "opus", "dsv4f", "kimi"):
                 cid = runs.cell_id(agent, variant, 3)
                 with self.subTest(cid=cid):
@@ -158,6 +159,5 @@ class TestTheVariantIsTheExperiments(unittest.TestCase):
         self.assertIsNone(runs.parse_cell_id("sonnet_high_apidocs_T1_r1"))
 
     def test_the_variants_come_from_the_definition_not_a_regex(self):
-        from fae import shared as _shared
-        for vid in _shared.definition().ids:
+        for vid in fae.experiment.exp().definition.ids:
             self.assertEqual(runs.parse_cell_id(f"m_high_{vid}_T1_r1")[1], vid)

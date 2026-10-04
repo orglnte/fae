@@ -8,6 +8,7 @@ from unittest import mock
 
 from _ctx import runs, at_workspace
 
+import fae.experiment
 from fae.cell import ledger
 
 C = "c"
@@ -84,7 +85,7 @@ class TestValidateTaintsABrokenLedger(unittest.TestCase):
                     ("START", "attempt=3"), ("ITER", "fail", "attempt=3"), ("END", "green=false")))
             definition = mock.Mock(taint_rules=None)
             definition.report_text.return_value = ""
-            with mock.patch.object(runs.shared, "definition", return_value=definition), \
+            with mock.patch.object(fae.experiment._experiment.Experiment, "definition", new_callable=mock.PropertyMock, return_value=definition), \
                     at_workspace(Path(d), Path(d)):
                 doc = runs.validate_ws(ws)
         self.assertEqual(doc["verdict"], "TAINTED")

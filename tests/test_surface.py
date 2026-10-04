@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 from _ctx import ROOT  # noqa: F401  (sys.path)
+import fae.experiment
 from fae.cell.surface import MANIFEST, Surface, authorable
 
 
@@ -167,7 +168,7 @@ class TestTheSurfaceMustBeDeclared(unittest.TestCase):
     def _with_variant(self, cls):
         from unittest import mock
         from fae import experiment
-        return mock.patch.object(experiment.Definition, "variant", lambda self, vid: cls)
+        return mock.patch.object(fae.experiment._experiment.Definition, "variant", lambda self, vid: cls)
 
     def test_the_base_variant_declares_none(self):
         from fae.cell.variants.base import Variant

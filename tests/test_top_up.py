@@ -1,6 +1,6 @@
 """top-up: fill missing reps to a target, rep-outer, without double-queueing.
 
-Every test patches runs.shared.workspace().path and the scheduling plane to a TemporaryDirectory. Nothing here
+Every test patches runs.experiment.exp().workspace.path and the scheduling plane to a TemporaryDirectory. Nothing here
 starts a process: top_up only writes queue specs and never calls
 conduct.
 """
@@ -93,7 +93,7 @@ class TestOrderingAndScope(TopUpTestCase):
     def test_default_is_every_active_variant(self):
         runs.cli.top_up(ns(to_rep=1))
         self.assertEqual([s["variant"] for s in self.specs()],
-                         list(runs.shared.definition().active))
+                         list(runs.experiment.exp().definition.active))
 
     def test_specs_are_never_fresh(self):
         runs.cli.top_up(ns(variants=["beta_apidocs"]))

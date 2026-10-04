@@ -209,7 +209,7 @@ class TestFindZombiesTee(FindZombiesCase):
 
 class TestFindZombiesHeartbeat(FindZombiesCase):
     def test_a_dead_loop_file_is_a_corpse(self):
-        ws = runs.shared.workspace().path
+        ws = runs.experiment.exp().workspace.path
         cell = ws / "cid1"
         cell.mkdir()
         (cell / ".loop").write_text("x")
@@ -218,7 +218,7 @@ class TestFindZombiesHeartbeat(FindZombiesCase):
         self.assertIn(("heartbeat", str(cell), "cid1", "corpse file"), zs)
 
     def test_a_beating_loop_file_is_not_a_corpse(self):
-        ws = runs.shared.workspace().path
+        ws = runs.experiment.exp().workspace.path
         cell = ws / "cid1"
         cell.mkdir()
         (cell / ".loop").write_text("x")
@@ -229,7 +229,7 @@ class TestFindZombiesHeartbeat(FindZombiesCase):
 
 class TestFindZombiesWithoutAWorkspaceRoot(FindZombiesCase):
     def test_a_missing_workspace_root_has_no_zombies(self):
-        with at_workspace(runs.shared.workspace().path / "absent"):
+        with at_workspace(runs.experiment.exp().workspace.path / "absent"):
             self.assertEqual(zombies.find_zombies(), [])
 
 

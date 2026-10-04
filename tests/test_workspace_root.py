@@ -23,13 +23,13 @@ class TestThePythonOrchestratorKnob(unittest.TestCase):
 
     def test_ws_honors_the_environment(self):
         with mock.patch.dict(os.environ, {"WORKSPACES_DIR": "/x/ws-test.nosync"}):
-            w = runs.experiment.Workspace(Path("/r"))
+            w = runs.experiment._experiment.Workspace(Path("/r"))
         self.assertEqual(w.path, Path("/x/ws-test.nosync"))
 
     def test_the_lock_plane_does_not_follow(self):
         # the override moves cells, not the plane: that stays the root's
         with mock.patch.dict(os.environ, {"WORKSPACES_DIR": "/x/ws-test.nosync"}):
-            w = runs.experiment.Workspace(Path("/r"))
+            w = runs.experiment._experiment.Workspace(Path("/r"))
         self.assertEqual(w.plane, Path("/r/workspaces.nosync"))
         self.assertEqual((w.conduct, w.locks), (w.plane / ".conduct", w.plane / ".locks"))
         self.assertEqual(w.queues.base, w.plane / ".queues")
@@ -37,7 +37,7 @@ class TestThePythonOrchestratorKnob(unittest.TestCase):
     def test_without_the_environment_the_cells_live_on_the_plane(self):
         env = {k: v for k, v in os.environ.items() if k != "WORKSPACES_DIR"}
         with mock.patch.dict(os.environ, env, clear=True):
-            w = runs.experiment.Workspace(Path("/r"))
+            w = runs.experiment._experiment.Workspace(Path("/r"))
         self.assertEqual(w.path, Path("/r/workspaces.nosync"))
 
     def test_loop_pids_matches_the_active_root(self):

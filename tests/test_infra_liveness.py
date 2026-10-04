@@ -8,8 +8,8 @@ from unittest import mock
 
 from _ctx import ROOT
 
+import fae.experiment
 from fae.cell import cell
-from fae import shared as _shared
 from fae.cell.infra import base
 from fae.cell.variants.base import Variant
 from fae.cell.verify import Verdict
@@ -82,7 +82,7 @@ class TestTheTwoGates(unittest.TestCase):
         with mock.patch.object(cell, "run_verifier", runner), \
                 mock.patch.object(cell.Cell, "expected_fp", new_callable=mock.PropertyMock,
                                   return_value=""), \
-                mock.patch.object(_shared, "definition",
+                mock.patch.object(fae.experiment._experiment.Experiment, "definition", new_callable=mock.PropertyMock,
                                   return_value=mock.Mock(exclusive=None,
                                                          verifier_class=lambda: vcls)):
             r = self.c.verify(shape="A")
@@ -143,7 +143,7 @@ class TestACellNamesWhatItProvisions(unittest.TestCase):
 
         c = cell.Cell(cid, workspaces="/nonexistent", root="/nonexistent", locks="/nonexistent")
         with mock.patch.object(cell.Cell, "variant_cls", new_callable=mock.PropertyMock, return_value=V), \
-                mock.patch.object(_shared, "definition") as d:
+                mock.patch.object(fae.experiment._experiment.Experiment, "definition", new_callable=mock.PropertyMock) as d:
             d.return_value.verifier_class.return_value = Verifier
             got = c.provisions()
         self.assertEqual(got, [("cluster", f"cl-{cid}"), ("container", _image.verify_container(cid)),
