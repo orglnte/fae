@@ -24,7 +24,6 @@ would not expect, and names that collide, are in
 | Variant | One complete set of what the agent is given and how its work is judged | treatment, arm, condition | `Variant`, `variants/files.py` | comparability; one source per input |
 | Task | The skeleton every variant starts from, and its prompt | — | `Definition`, `prepare.py` | the problem held constant |
 | Agent | A tag naming a client, a model and an effort | model, lane (its queue) | `agents.toml`, `load_agents`, `AgentImage` | who authors |
-| Infra | What exists around a variant's program, for the cell and per arrangement | substrate | `Infra`, `DefaultInfra`, `secrunner`, `dind`, `kind` | provisioning; isolation |
 | Gate | The arrangements one attempt must all pass | shape gate | `Gate`, `cell/contrib/` (external) | what green means, structurally |
 | Fingerprint | The hash of everything a verdict depends on | verify surface | `rig.fp`, `Cell.expected_fp` | provenance |
 | **The cell** | | | | |
@@ -35,6 +34,7 @@ would not expect, and names that collide, are in
 | Verdict | The outcome of one arrangement: pass or fail, the stage, charged or refunded | void, refund, uncharged | `Verdict`, `VerifyResult` | rig faults vs authoring failures |
 | Ledger | The cell's append-only file of record | iterations.log | `ledger.py` via `Cell` | one truth; one parser |
 | Seal | Marks a finished cell's result immutable | — | `Cell` (sealing) | evidence that cannot drift |
+| Infra | What exists around a variant's program, kept by its cell, set up for the cell and per arrangement | substrate | `Infra`, `DefaultInfra`, `secrunner`, `dind`, `kind` | provisioning; isolation |
 | **The run** | | | | |
 | Queue | The specs waiting, running and done, one lane per agent | backlog, lane | `Queues` | what runs next; fairness |
 | Slot | A held place under a cap: work slots, and each variant lock's slots | arm slot, cap | `Queues`, `mutex` | concurrency bounds |
@@ -74,14 +74,10 @@ would not expect, and names that collide, are in
 4. **Agent.** Purpose: name who authors. State: a tag in `agents.toml`
    mapped to a client, a model and an effort. Principle: the tag is part of
    every cell id, so each agent's cells and queue are its own.
-5. **Infra.** Purpose: provide the world a variant's program runs in.
-   State: the infra class and the variant's parameters. Actions: cell
-   setup and teardown, verify setup and teardown, ok, alive. Principle: a
-   variant names its class; the verifier reaches the infra only through it.
-6. **Gate.** Purpose: define green as passing every arrangement. State: the
+5. **Gate.** Purpose: define green as passing every arrangement. State: the
    arrangements and whether the first rotates with the attempt. Principle:
    an attempt is green only when all arrangements pass.
-7. **Fingerprint.** Purpose: tie each verdict to exactly what judged it.
+6. **Fingerprint.** Purpose: tie each verdict to exactly what judged it.
    State: a hash over the experiment tree, the declared fingerprint trees
    and the engine's `fae/cell/` and `fae/experiment/`. Actions: pin at the
    cell process's start; compare at every verify. Principle: a change in
@@ -116,6 +112,11 @@ would not expect, and names that collide, are in
    `.sealed`. Principle: the result is immutable; derived files
    (validation, score) are regenerated; new evidence goes under
    `reverify/<ts>/`.
+8. **Infra.** Purpose: provide the world a variant's program runs in.
+   State: the infra class and the variant's parameters; one instance per
+   cell, kept by the cell. Actions: cell setup and teardown, verify setup
+   and teardown, ok, alive. Principle: a variant names its class; the
+   verifier reaches the infra only through it.
 
 ### The run
 
