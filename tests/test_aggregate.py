@@ -8,7 +8,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from _ctx import ROOT
+from _ctx import ROOT, at_workspace
 
 _spec = _ilu.spec_from_file_location("aggregate", Path(ROOT) / "fae" / "scoring" / "aggregate.py")
 aggregate = _ilu.module_from_spec(_spec)
@@ -308,12 +308,15 @@ class TestScoreboardCuts(unittest.TestCase):
     def test_impl_is_read_off_cell_env_for_old_records(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
-            ws = Path(d)
-            (ws / "cell.env").write_text("AGENT=x\nIMPL=py\n")
-            self.assertEqual(aggregate.impl_of(ws), "py")
-            (ws / "cell.env").write_text("AGENT=x\n")
-            self.assertEqual(aggregate.impl_of(ws), "bash")
-            self.assertEqual(aggregate.impl_of(ws / "nope"), "bash")
+            cid = "m_high_beta_apidocs_T1_r1"
+            (Path(d) / cid).mkdir()
+            (Path(d) / cid / "score.json").write_text(json.dumps({"cell_id": cid}))
+            (Path(d) / cid / "cell.env").write_text("AGENT=x\nIMPL=py\n")
+            with at_workspace(Path(d)):
+                self.assertEqual(aggregate.load_cells()[0][0]["impl"], "py")
+            (Path(d) / cid / "cell.env").write_text("AGENT=x\n")
+            with at_workspace(Path(d)):
+                self.assertEqual(aggregate.load_cells()[0][0]["impl"], "bash")
 
 
 class TestBaselineCompare(unittest.TestCase):
@@ -620,7 +623,7 @@ class TestTaintedCellsAreExcludedByDefault(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
             self.corpus(d)
-            with unittest.mock.patch.object(aggregate, "WORKSPACES", Path(d)):
+            with at_workspace(Path(d)):
                 cells, excluded = aggregate.load_cells()
         self.assertEqual(sorted(c["cell_id"][0] for c in cells), ["a", "c"])
         self.assertEqual(excluded, [("b_high_beta_apidocs_T1_r1", "rule 12: x")])
@@ -629,7 +632,7 @@ class TestTaintedCellsAreExcludedByDefault(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
             self.corpus(d)
-            with unittest.mock.patch.object(aggregate, "WORKSPACES", Path(d)):
+            with at_workspace(Path(d)):
                 cells, excluded = aggregate.load_cells(include_tainted=True)
         self.assertEqual(len(cells), 3)
         self.assertEqual(excluded, [])
@@ -667,7 +670,7 @@ class TestTheTaintWarningNamesCellsOnlyOnRequest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             TestTaintedCellsAreExcludedByDefault().corpus(d)
             out = io.StringIO()
-            with unittest.mock.patch.object(aggregate, "WORKSPACES", Path(d)), \
+            with at_workspace(Path(d)), \
                     unittest.mock.patch.object(sys, "argv", ["aggregate.py", "--tainted-cells-details"]), \
                     redirect_stdout(out):
                 rc = aggregate.main()
@@ -704,9 +707,7 @@ class TestTheScoreboardRunsEndToEnd(unittest.TestCase):
         for argv in (["aggregate"], ["aggregate", "--variant", "beta_apidocs"],
                      ["aggregate", "--where", "docs=apidocs"]):
             out = io.StringIO()
-            with unittest.mock.patch.object(aggregate, "WORKSPACES", root), \
-                 unittest.mock.patch.object(aggregate, "OUT_CSV", root / "results.csv"), \
-                 unittest.mock.patch.object(aggregate, "OUT_JSON", root / "results.json"), \
+            with at_workspace(root), \
                  unittest.mock.patch.object(sys, "argv", argv), redirect_stdout(out):
                 rc = aggregate.main()
             self.assertIn(rc, (0, None), argv)

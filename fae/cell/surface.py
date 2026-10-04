@@ -42,6 +42,19 @@ def authorable(vid):
     return tuple(exact), tuple(prefixes)
 
 
+def skeleton_shas(artifacts):
+    """{relpath: sha256} of every fixed file seeded into `artifacts`, from its
+    manifest; {} when there is none."""
+    manifest = Path(artifacts).parent / MANIFEST
+    out = {}
+    if manifest.is_file():
+        for line in manifest.read_text().splitlines():
+            parts = line.split("\t")
+            if len(parts) == 3:
+                out[parts[0]] = parts[2]
+    return out
+
+
 class Surface:
 
     def __init__(self, artifacts, vid):

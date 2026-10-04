@@ -137,17 +137,15 @@ class Slots:
 class Queues:
     """The queues under `base`. `cell_id(agent, variant, rep, task)` names a
     spec's cell and `refuse(cid)` returns why a cell may not be queued (None
-    when it may); both are needed only to enqueue. `workspaces` is where the
-    agents' attempt logs are read for the weekly cap."""
+    when it may); both are needed only to enqueue."""
 
     SEQ_START = SEQ_START
 
-    def __init__(self, base, *, locks=None, cell_id=None, refuse=None, workspaces=None):
+    def __init__(self, base, *, locks=None, cell_id=None, refuse=None):
         self.base = Path(base)
         self.lock = Path(locks or self.base.parent / ".locks") / "queues-lock"
         self._cell_id = cell_id
         self._refuse = refuse
-        self.workspaces = Path(workspaces) if workspaces else None
         self._held = 0
 
     @contextmanager
@@ -676,35 +674,35 @@ class Queues:
         self._weekly_book().write_text(json.dumps(st))
 
     @_changes
-    def weekly_cap_observe(self, st=None, now=None):
-        """Fold every seven_day rate_limit_event the agents logged since the
-        last scan into the book; the newest event (log mtime, then line
-        order) is the reading. `allowed_warning` carries `utilization`,
-        `rejected` is the cap itself, plain `allowed` says nothing."""
+    def weekly_cap_observe(self, logs, st=None, now=None):
+        """Fold every seven_day rate_limit_event the agents logged (`logs`,
+        their transcripts) since the last scan into the book; the newest event
+        (log mtime, then line order) is the reading. `allowed_warning` carries
+        `utilization`, `rejected` is the cap itself, plain `allowed` says
+        nothing."""
         st = self.weekly_load() if st is None else st
         now = time.time() if now is None else now
         newest = None
-        if self.workspaces is not None and self.workspaces.is_dir():
-            for log in self.workspaces.glob("*/agent.attempt-*.log"):
+        for log in logs:
+            try:
+                mt = log.stat().st_mtime
+            except OSError:
+                continue
+            if mt <= st["seen_at"]:
+                continue
+            try:
+                text = log.read_text(errors="replace")
+            except OSError:
+                continue
+            for i, m in enumerate(_WEEKLY_EVENT_RE.finditer(text)):
                 try:
-                    mt = log.stat().st_mtime
-                except OSError:
+                    info = json.loads(m.group(1))
+                except ValueError:
                     continue
-                if mt <= st["seen_at"]:
+                if info.get("rateLimitType") != "seven_day":
                     continue
-                try:
-                    text = log.read_text(errors="replace")
-                except OSError:
-                    continue
-                for i, m in enumerate(_WEEKLY_EVENT_RE.finditer(text)):
-                    try:
-                        info = json.loads(m.group(1))
-                    except ValueError:
-                        continue
-                    if info.get("rateLimitType") != "seven_day":
-                        continue
-                    if newest is None or (mt, i) > newest[0]:
-                        newest = ((mt, i), info, log.parent.name)
+                if newest is None or (mt, i) > newest[0]:
+                    newest = ((mt, i), info, log.parent.name)
         if newest is not None:
             (mt, _), info, cid = newest
             status = info.get("status")

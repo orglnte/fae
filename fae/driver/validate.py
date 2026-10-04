@@ -14,7 +14,7 @@ from pathlib import Path
 import csv
 from datetime import datetime, timezone
 
-from fae import archive as _archive
+from fae.cell import archive as _archive
 from fae import experiment as _experiment
 from fae.cell import faults
 from fae.experiment import parse_cell_id
@@ -34,8 +34,7 @@ def _validate_cell(ws):
     taints, warns = [], []
     cell = _experiment.current().cell(Path(ws).name, workspaces=Path(ws).parent)
     rc_text = _experiment.definition().report_text(ws)
-    v_log = ws / "verify.log"
-    v_text = v_log.read_text(errors="replace") if v_log.exists() else ""
+    v_text = cell.evidence_text("verify.log")
     it_text = cell.ledger_text()
     metrics = cell.read_metrics()
 
@@ -58,7 +57,7 @@ def _validate_cell(ws):
     for m in re.finditer(r"\tITER\t(?:fail|budget)\tattempt=(\d+)([^\n]*)", it_text):
         n = int(m.group(1))
         try:
-            text = (ws / f"agent.attempt-{n}.log").read_text(errors="replace")
+            text = cell.agent_log(n).read_text(errors="replace")
         except OSError:
             continue
         # A structured result line always decides. A plain transcript decides
@@ -69,7 +68,7 @@ def _validate_cell(ws):
             taints.append(f"attempt {n} charged on a provider {kind} wall: "
                           f"{faults.reason(text)[:80]}")
     try:
-        res = json.loads((ws / "resources.json").read_text())
+        res = json.loads(cell.evidence("resources.json").read_text())
     except (OSError, json.JSONDecodeError):
         res = None
     if res is not None and "reliable" in res and not res["reliable"]:
@@ -78,7 +77,7 @@ def _validate_cell(ws):
         warns.append(f"footprint unreliable (scope={res.get('scope')}, "
                      f"{res.get('unreliable_samples')} sample(s) disagreed: "
                      f"{'; '.join(res.get('cross_check_findings') or [])[:120]})")
-    warns += archive_warns(ws, it_text)
+    warns += archive_warns(cell.runs(), it_text)
     # the experiment's rules, and the fields it records beside the verdict
     rules = _experiment.definition().taint_rules
     verdict = cell.read_ledger()["verdict"]
@@ -128,13 +127,12 @@ def rig_output_findings(it_text):
 NOT_CHARGED_WARN_AT = 3
 
 
-def archive_warns(ws, it_text):
-    """What the archive's runs that were not charged, and the archive against
-    the ledger, say about the rig. Warnings: the verdict still stands, but a
-    rig that keeps refunding, or an archive that disagrees with the ledger,
-    is something to look at."""
+def archive_warns(runs, it_text):
+    """What the archived `runs` (Cell.runs) that were not charged, and the
+    archive against the ledger, say about the rig. Warnings: the verdict
+    still stands, but a rig that keeps refunding, or an archive that
+    disagrees with the ledger, is something to look at."""
     warns = []
-    runs = _archive.runs(ws)
     free = [r for r in runs if r.end_state in _archive.NOT_CHARGED]
     by_stage = {}
     for r in free:

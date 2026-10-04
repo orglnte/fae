@@ -208,9 +208,9 @@ def _agent_progressing(cid, io_now, book):
     return False, f"rx flat at {int(rx)}B"
 
 
-def _attempt_out(ws):
-    """(size, age_s) of the newest agent.attempt-*.log, or (None, None)."""
-    logs = sorted(ws.glob("agent.attempt-*.log"), key=lambda p: p.stat().st_mtime)
+def _attempt_out(cell):
+    """(size, age_s) of the cell's newest agent transcript, or (None, None)."""
+    logs = cell.agent_logs()
     if not logs:
         return None, None
     stt = logs[-1].stat()
@@ -357,14 +357,14 @@ def supervise_pass(alerts, dry=False, only=""):
             cid = st["cid"]
             if only and only not in cid:
                 continue
+            c = _experiment.current().cell(ws.name, workspaces=ws.parent)
             # Before every hands-off guard: a dead loop is a fact about the
             # world, and the agent has to learn it whatever the operator
             # intends for the cell. Writes one transition, nothing else.
             _reconcile_dead_loop(cid, parents.get(cid),
                                  host.agent_container(cid) in boxes,
-                                 _attempt_out(ws)[1], last_tr.get(cid), dry,
+                                 _attempt_out(c)[1], last_tr.get(cid), dry,
                                  terminal=st["state"] == "DONE")
-            c = _experiment.current().cell(ws.name, workspaces=ws.parent)
             if c.flagged:
                 continue                      # human-flagged: hands off
             if c.declared_intent()[0] != "run":
@@ -389,7 +389,7 @@ def supervise_pass(alerts, dry=False, only=""):
                              + (f" ({'; '.join(doc['taints'])})" if doc["taints"] else ""))
             loop_pid = parents.get(cid)
             in_box = host.agent_container(cid) in boxes
-            out_size, out_age = _attempt_out(ws)
+            out_size, out_age = _attempt_out(c)
             iter_age = records.awake_age(c.mtimes()["ledger"] / 1e9)
             # A cell still inside verify_lock_acquire (last transition
             # AcquireVerify, no later one yet) that has held it past the
@@ -583,8 +583,7 @@ def supervise_pass(alerts, dry=False, only=""):
                 # no exit. The log NAMES the cause, and named evidence is
                 # decided on immediately; the progress checks below are
                 # inference and wait for a second opinion.
-                _logs = sorted(ws.glob("agent.attempt-*.log"),
-                               key=lambda p: p.stat().st_mtime)
+                _logs = c.agent_logs()
                 _tail = _logs[-1].read_text(errors="replace")[-3000:] \
                     if _logs else ""
                 _line = next((l for l in _tail.splitlines()

@@ -1067,17 +1067,17 @@ class TestWeeklyBudgetLanes(ConductCase):
                  mtime=self.now - 100)
         self.log("opus_high_beta_apidocs_T1_r1",
                  self.WARN % (self.reset, "0.83"), mtime=self.now - 50)
-        st = runs.queues.weekly_cap_observe(now=self.now)
+        st = runs.queues.weekly_cap_observe(runs.Cell.all_agent_logs(self.ws), now=self.now)
         self.assertEqual(st["utilization"], 0.83)
         self.assertEqual(st["resets_at"], self.reset)
         self.assertEqual(st["source_cid"], "opus_high_beta_apidocs_T1_r1")
 
     def test_rejected_is_the_cap_and_five_hour_is_ignored(self):
         self.log("sonnet_high_beta_apidocs_T1_r1", self.REJECT % self.reset)
-        self.assertEqual(runs.queues.weekly_cap_observe(now=self.now)["utilization"], 1.0)
+        self.assertEqual(runs.queues.weekly_cap_observe(runs.Cell.all_agent_logs(self.ws), now=self.now)["utilization"], 1.0)
         self.log("sonnet_high_beta_apidocs_T1_r2", self.FIVE_H % self.reset,
                  mtime=self.now + 10)
-        st = runs.queues.weekly_cap_observe(now=self.now + 20)
+        st = runs.queues.weekly_cap_observe(runs.Cell.all_agent_logs(self.ws), now=self.now + 20)
         self.assertEqual(st["utilization"], 1.0, "a five_hour event is not a reading")
 
     def test_a_reading_from_before_the_reset_says_nothing(self):

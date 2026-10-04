@@ -88,19 +88,6 @@ def _sha256(p: Path) -> str:
     return h.hexdigest()
 
 
-def read_skeleton_manifest(artifacts_dir: Path) -> dict[str, str]:
-    """path -> sha256 for every FIXED skeleton file seeded at prepare time.
-    Lets us separate the agent-authored surface from the fixed skeleton."""
-    manifest = artifacts_dir.parent / ".skeleton_manifest"
-    out: dict[str, str] = {}
-    if manifest.is_file():
-        for line in manifest.read_text().splitlines():
-            parts = line.split("\t")
-            if len(parts) == 3:
-                out[parts[0]] = parts[2]
-    return out
-
-
 # Bump when scoring semantics change (sloc rules, surface filter, authored
 # logic): a stale cache would otherwise keep serving numbers computed under
 # the old rules.
@@ -131,12 +118,12 @@ def cached_input(cache: dict, key: str, mtime_ns, read):
     return data
 
 
-def author_surface(artifacts_dir: Path, cache: dict | None = None) -> dict:
+def author_surface(artifacts_dir: Path, skeleton: dict, cache: dict | None = None) -> dict:
     """Author-surface metric. Reports the TOTAL surface and — using the seeded
-    skeleton manifest — the AGENT-AUTHORED surface (files new or modified vs the
-    skeleton). The agent-authored numbers are the honest "how much did the
-    provisioning slice cost to author" proxy; the total is kept for context."""
-    skeleton = read_skeleton_manifest(artifacts_dir)
+    `skeleton` ({relpath: sha256}, Cell.skeleton) — the AGENT-AUTHORED surface
+    (files new or modified vs the skeleton). The agent-authored numbers are
+    the honest "how much did the provisioning slice cost to author" proxy;
+    the total is kept for context."""
     # Per-file incremental cache keyed on (mtime_ns, size): only files whose
     # stat changed are re-read/re-hashed; a stat-only sweep decides. The
     # binary sniff inside countable() reads content, so cache hits skip it
@@ -301,7 +288,7 @@ def score_one(cell_id: str, cell=None) -> int:
     cache = load_cache(cell)
     env = cell.env
     mt = cell.mtimes()
-    surface = author_surface(ws / "artifacts", cache)
+    surface = author_surface(cell.artifacts, cell.skeleton(), cache)
     iters = cached_input(cache, "iterations", mt["ledger"],
                          lambda: parse_iterations(cell.read_ledger()))
     metrics = cached_input(cache, "metrics", mt["metrics"], cell.read_metrics)

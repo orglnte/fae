@@ -7,7 +7,7 @@ from pathlib import Path
 
 from _ctx import ROOT  # noqa: F401  (sys.path)
 
-from fae import archive
+from fae.cell import archive
 from fae.driver.validate import archive_warns
 
 
@@ -47,13 +47,13 @@ class TestTheChecks(unittest.TestCase):
     def test_one_refund_is_quiet(self):
         ws = ws_with(("01-a1-A-refunded", {"stage": "verifier-timeout"}),
                      ("02-a1-A-green", {}))
-        self.assertEqual(archive_warns(ws, iters(("green", 1, ""))), [])
+        self.assertEqual(archive_warns(archive.runs(ws), iters(("green", 1, ""))), [])
 
     def test_a_repeated_refund_stage_warns(self):
         ws = ws_with(("01-a1-A-refunded", {"stage": "verifier-timeout"}),
                      ("02-a1-A-refunded", {"stage": "verifier-timeout"}),
                      ("03-a1-A-green", {}))
-        w = archive_warns(ws, iters(("green", 1, "")))
+        w = archive_warns(archive.runs(ws), iters(("green", 1, "")))
         self.assertEqual(w, ["2 verify run(s) not charged (verifier-timeoutx2)"])
 
     def test_many_refunds_of_any_stage_warn(self):
@@ -61,26 +61,26 @@ class TestTheChecks(unittest.TestCase):
                      ("02-a1-A-interrupted", {"stage": "interrupted"}),
                      ("03-a1-A-refunded", {"stage": "infra"}),
                      ("04-a1-A-green", {}))
-        self.assertIn("3 verify run(s) not charged", archive_warns(ws, iters(("green", 1, "")))[0])
+        self.assertIn("3 verify run(s) not charged", archive_warns(archive.runs(ws), iters(("green", 1, "")))[0])
 
     def test_the_archive_and_the_ledger_agreeing_is_quiet(self):
         ws = ws_with(("01-a1-A-charged", {}), ("02-a2-A-green", {}), ("03-a2-B-green", {}))
-        self.assertEqual(archive_warns(ws, iters(("fail", 1, " stage=e2e"), ("green", 2, ""))), [])
+        self.assertEqual(archive_warns(archive.runs(ws), iters(("fail", 1, " stage=e2e"), ("green", 2, ""))), [])
 
     def test_a_charged_attempt_with_no_judged_run_warns(self):
         ws = ws_with(("01-a1-A-refunded", {"stage": "verifier"}), ("02-a2-A-green", {}))
-        w = archive_warns(ws, iters(("fail", 1, " stage=e2e"), ("green", 2, "")))
+        w = archive_warns(archive.runs(ws), iters(("fail", 1, " stage=e2e"), ("green", 2, "")))
         self.assertEqual(w, ["archive/ledger mismatch at attempt 1: ledger charged, archive no judged run"])
 
     def test_a_judged_run_the_ledger_never_charged_warns(self):
         ws = ws_with(("01-a1-A-charged", {}))
-        self.assertEqual(archive_warns(ws, ""),
+        self.assertEqual(archive_warns(archive.runs(ws), ""),
                          ["archive/ledger mismatch at attempt 1: ledger no verdict, archive charged"])
 
     def test_no_edit_attempts_and_attempts_before_the_archive_are_skipped(self):
         ws = ws_with(("01-BBS", None), ("02-a3-A-green", {}))
         text = iters(("fail", 1, " stage=scaling"), ("fail", 2, " stage=no-edit"), ("green", 3, ""))
-        self.assertEqual(archive_warns(ws, text), [])
+        self.assertEqual(archive_warns(archive.runs(ws), text), [])
 
 
 if __name__ == "__main__":

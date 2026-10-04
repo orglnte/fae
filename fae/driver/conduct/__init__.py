@@ -586,7 +586,8 @@ class Conduct:
                         print(f"  [{hhmm()}] lane {m}: limit cooldown expired — "
                               f"{lifted} lock(s) lifted, retrying", flush=True)
                 self._lift_standdowns(agents, now_t)
-                qs.weekly_budget_apply(qs.weekly_cap_observe(now=now_t), now_t)
+                qs.weekly_budget_apply(qs.weekly_cap_observe(
+                    Cell.all_agent_logs(_experiment.workspace().path), now=now_t), now_t)
                 agents = [qs.lane_agent(d) for d in qs.lane_dirs()]   # a hold changes the lanes
                 pending = {m: len(qs.lane_specs(m)) for m in agents}
                 order = [m for m in agents if pending.get(m) and m not in frozen

@@ -383,7 +383,7 @@ class Workspace:
         from fae import plane as _plane
         from fae.queues import Queues
         return Queues(self.plane / _plane.QUEUES, locks=self.locks, cell_id=cell_id,
-                      refuse=self._refusal, workspaces=self.path)
+                      refuse=self._refusal)
 
     def _refusal(self, cid):
         # a sealed cell's spec could only ever be refused: a stuck queue entry

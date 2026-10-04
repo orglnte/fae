@@ -19,13 +19,10 @@ from collections import defaultdict
 from math import comb
 from pathlib import Path
 
+from fae import experiment as _experiment  # noqa: E402
 from fae import paths as _paths  # noqa: E402
 
-REPO_ROOT = _paths.ROOT
-WORKSPACES = next((REPO_ROOT / n for n in ("workspaces.nosync", "workspaces")
-                   if (REPO_ROOT / n).is_dir()), REPO_ROOT / "workspaces.nosync")
-OUT_CSV = WORKSPACES / "results.csv"
-OUT_JSON = WORKSPACES / "results.json"
+OUT_CSV, OUT_JSON = "results.csv", "results.json"     # beside the cells
 
 # Width of the LoC mean sub-field, so the -min/+max offsets that follow it start
 # at the same character on every row. 4 = the largest mean the corpus produces
@@ -83,24 +80,27 @@ def rate(values: list) -> float | None:
     return round(sum(bools) / len(bools), 4) if bools else None
 
 
-def _cell(ws: Path):
-    from fae.cell.cell import Cell
-    return Cell(ws.name, workspaces=ws.parent)
+def _scored():
+    """(cell, its score.json text) for every scored cell of the workspace."""
+    ws = _experiment.workspace()
+    for cid in ws.cells():
+        c = ws.cell(cid)
+        rec = c.read_derived("score.json")
+        if rec is not None:
+            yield c, rec
 
 
 def stale_records() -> list[tuple[str, str]]:
     """(cell, newer_source) for every score.json older than one of its inputs
-    (the cell's env, ledger or metrics). aggregate only globs the records, so
+    (the cell's env, ledger or metrics). aggregate only reads the records, so
     a table built from records that predate a scoring-rule change looks
     identical to a correct one; mtime is a coarse signal but a free one."""
     out = []
-    if not WORKSPACES.is_dir():
-        return out
-    for p in sorted(WORKSPACES.glob("*/score.json")):
-        rec_mtime = p.stat().st_mtime_ns
-        for src, mt in _cell(p.parent).mtimes().items():
+    for c, _rec in _scored():
+        rec_mtime = c.evidence("score.json").stat().st_mtime_ns
+        for src, mt in c.mtimes().items():
             if mt is not None and mt > rec_mtime:
-                out.append((p.parent.name, src))
+                out.append((c.cid, src))
                 break
     return out
 
@@ -110,24 +110,23 @@ def load_cells(include_tainted: bool = False) -> tuple[list[dict], list[tuple[st
     validator distrusts must not move a mean silently. Returns (cells,
     excluded) where excluded is (cell, first taint) for the caller to print."""
     cells, excluded = [], []
-    if WORKSPACES.is_dir():
-        for p in sorted(WORKSPACES.glob("*/score.json")):
-            c = json.loads(p.read_text())
-            if "impl" not in c:
-                c["impl"] = impl_of(p.parent)
-            taint = first_taint(p.parent)
-            if taint is not None and not include_tainted:
-                excluded.append((p.parent.name, taint))
-                continue
-            cells.append(c)
+    for cell, rec in _scored():
+        c = json.loads(rec)
+        if "impl" not in c:
+            c["impl"] = cell.impl or "bash"
+        taint = first_taint(cell)
+        if taint is not None and not include_tainted:
+            excluded.append((cell.cid, taint))
+            continue
+        cells.append(c)
     return cells, excluded
 
 
-def first_taint(ws: Path) -> str | None:
+def first_taint(cell) -> str | None:
     """The validator's verdict for the cell: None when VALID (or never
     validated), else the first taint's text."""
     try:
-        v = json.loads(_cell(ws).read_derived("validation.json") or "{}")
+        v = json.loads(cell.read_derived("validation.json") or "{}")
     except json.JSONDecodeError:
         return None
     if v.get("verdict") != "TAINTED":
@@ -137,12 +136,6 @@ def first_taint(ws: Path) -> str | None:
 
 
 PREVIOUS_IMPL = {"fae": "py", "py": "bash"}
-
-
-def impl_of(ws: Path) -> str:
-    """The cell driver from cell.env, for a score.json written before the
-    record carried it."""
-    return _cell(ws).impl or "bash"
 
 
 def filter_cells(cells: list[dict], variant: str | None = None,
@@ -519,10 +512,8 @@ def table_columns(vs: str | None) -> list[tuple[str, int]]:
 
 
 def _definition():
-    for p in (str(REPO_ROOT), str(_paths.ENGINE.parent)):
-        if p not in sys.path:
-            sys.path.insert(0, p)
-    from fae import experiment as _experiment
+    if str(_paths.ENGINE.parent) not in sys.path:
+        sys.path.insert(0, str(_paths.ENGINE.parent))
     return _experiment.definition()
 
 
@@ -647,8 +638,10 @@ def main() -> int:
         base, _ = filter_cells(all_cells, variant, other, where)
         compare = baseline_compare(group_and_rank(cells), group_and_rank(base))
 
-    OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
-    with OUT_CSV.open("w", newline="") as f:
+    out_csv = _experiment.workspace().path / OUT_CSV
+    out_json = _experiment.workspace().path / OUT_JSON
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    with out_csv.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
         w.writeheader()
         w.writerows(rows)
@@ -672,10 +665,10 @@ def main() -> int:
         **experiment_summary(cells, metrics),
     }
 
-    OUT_JSON.write_text(json.dumps({"cells": rows, "summary": summary}, indent=2) + "\n")
+    out_json.write_text(json.dumps({"cells": rows, "summary": summary}, indent=2) + "\n")
     
-    print(f"\n[OK] Wrote {len(rows)} cell records to: {OUT_CSV}")
-    print(f"[OK] Wrote aggregate summary to: {OUT_JSON}")
+    print(f"\n[OK] Wrote {len(rows)} cell records to: {out_csv}")
+    print(f"[OK] Wrote aggregate summary to: {out_json}")
     
     cols = table_columns(other if compare is not None else None)
     width = sum(w for _, w in cols) + 3 * (len(cols) - 1)

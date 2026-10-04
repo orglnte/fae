@@ -38,6 +38,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import archive
 from . import config as _config
 from . import faults
 from . import rig as _rig
@@ -1060,9 +1061,48 @@ class Cell:
         (home / ".credentials.json").write_bytes(creds.read_bytes())
         return True
 
+    # --- evidence: what the verify and the agent left -----------------------
+    # Paths to read; nothing outside fae/cell builds one, and nothing writes
+    # through them.
+
     def agent_logs(self):
         """The agent's transcripts, oldest first (by mtime)."""
         return sorted(self.ws.glob("agent.attempt-*.log"), key=lambda p: p.stat().st_mtime)
+
+    def agent_log(self, attempt):
+        """The agent's transcript of `attempt` (it may not exist)."""
+        return self.ws / f"agent.attempt-{attempt}.log"
+
+    @staticmethod
+    def all_agent_logs(workspaces):
+        """Every agent transcript of every cell under the root `workspaces`."""
+        root = Path(workspaces)
+        return root.glob("*/agent.attempt-*.log") if root.is_dir() else iter(())
+
+    def skeleton(self):
+        """{relpath: sha256} of every fixed file seeded into artifacts/."""
+        from .surface import skeleton_shas
+        return skeleton_shas(self.artifacts)
+
+    def evidence(self, name):
+        """The path of `name` in the cell's folder: a verify output or log, or
+        a file under artifacts/. It may not exist."""
+        return self.ws / name
+
+    def evidence_text(self, name):
+        """`name`'s text (evidence), "" when it cannot be read."""
+        try:
+            return (self.ws / name).read_text(errors="replace")
+        except OSError:
+            return ""
+
+    def runs(self):
+        """Every archived run (fae/cell/archive.py), in archive order."""
+        return archive.runs(self.ws)
+
+    def judged(self, name):
+        """`name` from every judged archived run that has it, in archive order."""
+        return archive.judged_files(self.ws, name)
 
     def console_log(self):
         """The cell's most recent story: the verify log if one exists, else the

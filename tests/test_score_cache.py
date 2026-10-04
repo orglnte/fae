@@ -35,7 +35,7 @@ class CacheCase(unittest.TestCase):
         return Cell(self.ws.name, workspaces=self.ws.parent)
 
     def surface(self, cache):
-        return sc.author_surface(self.art, cache)
+        return sc.author_surface(self.art, self.cell().skeleton(), cache)
 
     def _bump(self, p: Path, text):
         p.write_text(text)
