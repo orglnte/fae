@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 import re
 import ujson as json
-from pathlib import Path
 
 import csv
 from datetime import datetime, timezone
@@ -17,7 +16,6 @@ from datetime import datetime, timezone
 from fae.cell import archive as _archive
 from fae import experiment as _experiment
 from fae.cell import faults
-from fae.experiment import parse_cell_id
 
 # The rules this validator keeps are the engine's own: a provider wall
 # charged as an attempt, a reverify aborted on a rig fault, an unreliable
@@ -26,13 +24,13 @@ from fae.experiment import parse_cell_id
 # is the definition's `taint_rules` (experiment/taint.py).
 
 
-def _validate_cell(ws):
-    """All checks for one DONE cell. Returns the validation dict (also
-    written to $ws/validation.json, and its taints onto the seal).
-    Re-runnable: rules can improve and be re-applied retroactively — the file
-    records the rule set's verdict. Raises Busy while the cell is held."""
+def validate_cell(cell, workspace):
+    """All checks for one DONE `cell` of `workspace` (its siblings are the
+    experiment's rules' business). Returns the validation dict, also written
+    as the cell's validation.json and its taints onto the seal. Re-runnable:
+    the file records the verdict of the rule set that wrote it. Raises Busy
+    while the cell is held."""
     taints, warns = [], []
-    cell = _experiment.current().cell(Path(ws).name, workspaces=Path(ws).parent)
     rc_text = _experiment.definition().report_text(cell)
     v_text = cell.evidence_text("verify.log")
     it_text = cell.ledger_text()
@@ -86,24 +84,15 @@ def _validate_cell(ws):
     # the experiment's rules, and the fields it records beside the verdict
     rules = _experiment.definition().taint_rules
     verdict = cell.read_ledger()["verdict"]
-    xt, xw, fields = rules(cell, _experiment.workspace(), metrics, it_text, v_text, rc_text, verdict) \
+    xt, xw, fields = rules(cell, workspace, metrics, it_text, v_text, rc_text, verdict) \
         if rules else ([], [], {})
     taints += xt
     warns += xw
     doc = {"verdict": "TAINTED" if taints else "VALID",
            "taints": taints, "warns": warns,
            **fields,
-           # `ceilings_all_min_max` was always [x, x] — it aliased the single
-           # deciding ceiling while its NAME promised a range across attempts.
-           # A field that reports a range nothing measures is worse than no
-           # field: rule_set 3 drops it rather than keep publishing it.
-           # rule_set 5 adds the provider-wall rule above; rule_set 6 the
-           # rig<->framework junction rules 12-16 (the experiment's).
-           # rule_set 7 adds the archive checks (runs not charged, and the
-           # archive disagreeing with the ledger); rule_set 8 the integrity
-           # rule (a verify that changed the cell's record); rule_set 9 the
-           # rig-output rule (a verify that left a required output unwritten);
-           # rule_set 10 the ledger's lifecycle rules (Cell.ledger_violation).
+           # the rule set that wrote this file: bumped whenever a rule is
+           # added or changed, so a file from an older set is recognisable
            "rule_set": 10,
            "at": f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}"}
     with cell.changing():

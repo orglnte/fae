@@ -9,7 +9,7 @@ from unittest import mock
 from _ctx import runs, at_workspace, use_workspace
 
 from fae.cell import ledger
-from fae.driver.validate import rig_output_findings
+from fae.scoring.validate import rig_output_findings
 
 CID = "m_high_arm_cond_T1_r1"
 
@@ -62,7 +62,7 @@ class TestTheValidatorAppliesIt(unittest.TestCase):
         definition.report_text.return_value = ""
         with mock.patch.object(runs.experiment, "definition", return_value=definition), \
              at_workspace(ws.parent, ws.parent):
-            doc = runs.taint._validate_cell(ws)
+            doc = runs.validate_ws(ws)
         self.assertEqual((doc["verdict"], doc["rule_set"]), ("TAINTED", 10))
         self.assertEqual(json.loads((ws / "validation.json").read_text())["verdict"], "TAINTED")
 

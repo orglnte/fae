@@ -54,7 +54,7 @@ from fae import queues as _queues_module  # noqa: E402
 from fae import experiment as _experiment  # noqa: E402
 _experiment.load(_EXPERIMENT)
 exp1 = importlib.import_module("experiment.exp1") if (_EXPERIMENT / "exp1.py").is_file() else None
-from fae.driver import validate as taint            # noqa: E402
+from fae.scoring import validate as taint           # noqa: E402
 from fae import mutex  # noqa: E402
 from fae.experiment import cell_id, parse_cell_id  # noqa: E402
 from fae.cell import ledger  # noqa: E402
@@ -91,7 +91,16 @@ runs.host = host
 runs.records = records
 runs.Cell = _Cell
 runs.supervise = supervise
-runs.taint = taint          # driver.validate's own name is "validate"
+runs.taint = taint          # fae/scoring/validate.py: the engine's taint rules
+
+
+def _validate_ws(ws):
+    """Validate the cell in folder `ws` the way supervision does."""
+    exp = _experiment.current()
+    return exp.validate_cell(exp.cell(Path(ws).name, workspaces=Path(ws).parent))
+
+
+runs.validate_ws = _validate_ws
 runs.zombies = zombies
 runs.ROOT = _experiment.current().root
 runs.AUTH_HINTS = render.AUTH_HINTS

@@ -86,7 +86,7 @@ class TestValidateTaintsABrokenLedger(unittest.TestCase):
             definition.report_text.return_value = ""
             with mock.patch.object(runs.experiment, "definition", return_value=definition), \
                     at_workspace(Path(d), Path(d)):
-                doc = runs.taint._validate_cell(ws)
+                doc = runs.validate_ws(ws)
         self.assertEqual(doc["verdict"], "TAINTED")
         self.assertTrue(any(t.startswith("ledger rule 1 broken at line 4") for t in doc["taints"]),
                         doc["taints"])

@@ -3,8 +3,8 @@
 `validate` decides whether to BELIEVE a verdict; `score` calls it as a
 preamble (a scoreboard built on unexamined cells is worthless), which is why
 the two live in one module rather than splitting validate out to sit beside
-`fae/driver/validate.py`'s taint-rule engine (imported here as `taint` — the
-rules; this module is the CLI-verb wrapper around them).
+`fae/scoring/validate.py`'s taint-rule engine; this module is the CLI-verb
+wrapper around them).
 """
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ from fae.cell.cell import Busy
 from fae import experiment as _experiment
 from fae.driver import render
 from fae.driver.conduct import Conduct
-from fae.driver import validate as taint
 
 
 # --- post-DONE validation -----------------------------------------------------
@@ -56,7 +55,7 @@ def validate(args, quiet=False):
         if not st or st["state"] != "DONE" or st["why"] == "cancelled":
             continue
         try:
-            doc = taint._validate_cell(ws)
+            doc = _experiment.current().validate_cell(_experiment.workspace().cell(cid))
         except Busy:
             rows.append((cid, f"{st['why']}", "HELD", "held by another process: not validated"))
             continue
