@@ -7,7 +7,7 @@ from pathlib import Path
 
 from _ctx import ROOT  # noqa: F401  (sys.path)
 import fae.experiment
-from fae.cell import config as C
+from fae.experiment import config as C
 
 
 def _conf(cli):

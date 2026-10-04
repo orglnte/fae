@@ -49,7 +49,7 @@ class TestTheFilesAreGone(unittest.TestCase):
 class TestConfigAndCacheAreNativeNow(unittest.TestCase):
 
     def test_the_guarded_extras_name_only_files_that_exist(self):
-        from fae.cell import config as cfgmod
+        from fae.experiment import config as cfgmod
         cfgmod._cache.clear()
         extras = cfgmod.load(ROOT).values.get("FP_EXTRA_FILES", "").split()
         self.assertEqual([f for f in extras if not Path(f).is_file()], [])

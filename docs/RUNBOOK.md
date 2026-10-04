@@ -163,11 +163,12 @@ fae/conduct/        the scheduler: admission, supervision, the reaper,
 fae/host.py         the host's facts: process table, containers, memory,
                      the host-sleep book
 fae/experiment/     the experiment: Definition, Workspace, Experiment and
-                     its actions; check_exp.py its readiness check;
+                     its actions; config.py the root's configuration;
+                     check_exp.py its readiness check;
                      scoring/ its results (validate, score_cell, aggregate,
                      run_report, surface_filter, SCHEMA.md)
 fae/cell/           the Python cell driver: attempt loop, the Variant
-                     interface + registry, verify, config, the ledger (the
+                     interface + registry, verify, the ledger (the
                      one parser), the contract base, contrib/ and infra/ blocks
 fae/                the engine package: cli/, conduct/, experiment/, cell/,
                      mutex.py (the one flock),

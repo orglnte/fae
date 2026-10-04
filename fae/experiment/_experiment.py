@@ -365,13 +365,20 @@ class Experiment:
     @property
     def definition(self):
         """The definition this process runs: the one loaded, else this root's
-        (fae/cell/config.py: EXPERIMENT_DIR). One process, one experiment."""
+        (fae/experiment/config.py: EXPERIMENT_DIR). One process, one experiment."""
         if _loaded["def"] is not None:
             return _loaded["def"]
-        from fae.cell import config as _config
+        from fae.experiment import config as _config
         if str(self.root) not in sys.path:
             sys.path.insert(0, str(self.root))
         return load(_config.experiment_dir(self.root))
+
+    def config(self, agent=None):
+        """This root's machine-local configuration (fae.toml, the environment,
+        the definition's CONFIG keys), as the agent tagged `agent` sees it
+        when one is given (its credentials home)."""
+        from fae.experiment import config as _config
+        return _config.load(self.root, env=dict(os.environ, AGENT=agent) if agent else None)
 
     def prepare(self, agent, reps=1, task="T1", fresh=False):
         """Seed the matrix's workspaces for `agent` (`reps` reps of every
@@ -398,7 +405,7 @@ class Experiment:
         engine's keys, the caps for the locks the variants declare, the
         machine-local keys the experiment declares), then the operator edits
         it. Refuses to overwrite one. Returns the file written."""
-        from fae.cell import config as _config
+        from fae.experiment import config as _config
         target = self.root / _config.TOML
         if target.exists():
             sys.exit(f"init: {target} exists — set [paths] experiment_dir there (or "
@@ -545,7 +552,7 @@ class Experiment:
         env.setdefault("EFFORT", "high")
         if not full_gate:
             # gate_shapes reads SHAPE_GATE off the loaded config's raw values
-            # (fae/cell/config.py seeds it from this env var); anything but
+            # (fae/experiment/config.py seeds it from this env var); anything but
             # "all" is the single canonical arrangement.
             env["SHAPE_GATE"] = "one"
         empty = Path(tempfile.mkdtemp(prefix="stub-empty-"))

@@ -209,11 +209,11 @@ def _fp_extra_files(root, trees):
                                "fingerprint would silently shrink its guarded surface")
         parts += got
     # the engine's own cell package and the experiment package (the
-    # definition reader), wherever they are — never under the root: an experiment repo imports the engine and
-    # does not contain it
-    cell_pkg = Path(__file__).resolve().parent
-    parts += sorted(str(p) for p in cell_pkg.rglob("*.py"))
-    parts += sorted(str(p) for p in (cell_pkg.parent / "experiment").rglob("*.py"))
+    # definition reader and this config), wherever they are — never under the
+    # root: an experiment repo imports the engine and does not contain it
+    engine = Path(__file__).resolve().parent.parent
+    parts += sorted(str(p) for p in (engine / "cell").rglob("*.py"))
+    parts += sorted(str(p) for p in (engine / "experiment").rglob("*.py"))
     return " ".join(parts)
 
 
@@ -264,7 +264,7 @@ def _build(root, env, toml, definition=None):
 
     v = dict(_ENGINE_DEFAULTS)
     v.update({k: str(val) for k, val in rig.items() if k.isupper()})
-    from .cell import ATTEMPT_BUDGET
+    from fae.cell.cell import ATTEMPT_BUDGET
     v["ATTEMPT_BUDGET"] = str(ATTEMPT_BUDGET)
     # The gate is the experiment's (its GATE); only a smoke cell, a pipeline
     # check that is never scored, may cut it to the seed arrangement.

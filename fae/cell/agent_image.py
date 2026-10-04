@@ -137,7 +137,7 @@ class AgentImage:
     @property
     def conf(self):
         if self._conf is None:
-            from . import config as _config
+            from fae.experiment import config as _config
             self._conf = _config.load(self.root)
         return self._conf
 

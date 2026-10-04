@@ -314,7 +314,7 @@ class TestTheGateIsSixArrangementsByDefault(CellTestCase):
         environment expecting the single-arrangement pipeline check — this is
         the actual mechanism that must carry it into conf.values, not a
         direct .values mutation like the tests above."""
-        from fae.cell import config as cfgmod
+        from fae.experiment import config as cfgmod
         cfgmod._cache.clear()
         v = cfgmod.load(str(self.root), env=dict(os.environ, SHAPE_GATE="one", SMOKE="1"))
         self.assertEqual(v.values.get("SHAPE_GATE"), "one")
@@ -323,7 +323,7 @@ class TestTheGateIsSixArrangementsByDefault(CellTestCase):
         self.assertEqual(v.values.get("SHAPE_GATE"), "")
 
     def test_a_cut_gate_outside_a_smoke_cell_is_refused(self):
-        from fae.cell import config as cfgmod
+        from fae.experiment import config as cfgmod
         cfgmod._cache.clear()
         env = {k: v for k, v in os.environ.items() if k != "SMOKE"}
         with self.assertRaisesRegex(SystemExit, "only a smoke cell"):

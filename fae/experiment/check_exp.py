@@ -200,7 +200,7 @@ def _prerequisites(ctx):
 
 
 def _config(ctx):
-    from fae.cell import config as _cfg
+    from fae.experiment import config as _cfg
     out = []
     toml = ctx.root / _cfg.TOML
     exp_dir = _cfg.experiment_dir(ctx.root)
@@ -322,7 +322,8 @@ def _infra(ctx):
 
 def _invariants(ctx):
     from fae import mutex
-    from fae.cell import config as _config, rig as _rig, verify as _verify
+    from fae.experiment import config as _config
+    from fae.cell import rig as _rig, verify as _verify
     from fae.cell.cell import Cell
     from fae.cell.variants import files as _files
     from fae import host
@@ -378,7 +379,7 @@ def _leftovers(ctx):
 
 
 def _trace(ctx):
-    from fae.cell import config as _config
+    from fae.experiment import config as _config
     tool = tla_verify_path()
     if tool is None:
         return [Finding(False, "no TLA+ trace checker",

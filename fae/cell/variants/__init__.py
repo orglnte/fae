@@ -45,7 +45,7 @@ class _ShimCell:
     variant."""
 
     def __init__(self, cid, ws, root):
-        from .. import config as _config
+        from fae.experiment import config as _config
         self.cid = cid
         self.ws = Path(ws)
         self.root = Path(root)

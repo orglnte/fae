@@ -11,7 +11,7 @@ from unittest import mock
 from _ctx import ROOT, runs
 
 import fae.experiment
-from fae.cell import config as _config
+from fae.experiment import config as _config
 
 try:
     import tomllib

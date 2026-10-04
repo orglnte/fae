@@ -9,7 +9,7 @@ from pathlib import Path
 from _ctx import ROOT
 
 from fae.cell import cell as cellmod
-from fae.cell import config as _config
+from fae.experiment import config as _config
 from fae.queues import Book
 
 

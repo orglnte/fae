@@ -7,7 +7,7 @@ from pathlib import Path
 
 from _ctx import ROOT
 
-from fae.cell import config as _config  # noqa: E402
+from fae.experiment import config as _config  # noqa: E402
 from fae.cell import rig  # noqa: E402
 
 

@@ -8,7 +8,7 @@ from unittest import mock
 
 from _ctx import ROOT  # noqa: F401
 
-from fae.cell import config as _config
+from fae.experiment import config as _config
 from fae.cell import agent_image as _image
 from fae.cell import image as _cimage
 from fae.cell.variants.base import Variant
