@@ -50,7 +50,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config as _config
+from fae.experiment import config as _config
 
 import fae.experiment  # noqa: E402
 from fae import paths as _paths  # noqa: E402

@@ -364,13 +364,14 @@ class TestTheVerifySurfaceIsFingerprinted(unittest.TestCase):
     different verifies. The Python driver is a verify surface, so it is in it."""
 
     def fp(self):
-        from fae.cell import config as cfgmod, rig
+        from fae.experiment import config as cfgmod
+        from fae.cell import rig
         # load_config exports FP_EXTRA_FILES; the config cache is per process,
         # so the file list is read once and the hash is what moves.
         return rig.fp(ROOT, cfgmod.load(ROOT).values)
 
     def test_every_module_of_the_package_is_covered(self):
-        from fae.cell import config as cfgmod
+        from fae.experiment import config as cfgmod
         cfgmod._cache.clear()
         extras = cfgmod.load(ROOT).values.get("FP_EXTRA_FILES", "").split()
         listed = {Path(f).relative_to(PKG).as_posix() for f in extras if "/fae/cell/" in f}
@@ -379,7 +380,7 @@ class TestTheVerifySurfaceIsFingerprinted(unittest.TestCase):
     def test_an_experiment_root_without_the_engine_still_guards_the_engine(self):
         # the experiment repo imports the engine and does not contain it: the
         # cell modules are found where the engine is, never under the root
-        from fae.cell import config as cfgmod
+        from fae.experiment import config as cfgmod
         root = Path(tempfile.mkdtemp())
         self.addCleanup(__import__("shutil").rmtree, root, True)
         cfgmod._cache.clear()

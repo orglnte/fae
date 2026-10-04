@@ -35,7 +35,7 @@ class TestTheConstant(unittest.TestCase):
 
     def test_the_constant_wins_over_the_environment(self):
         # The behavioural claim: an inherited ATTEMPT_BUDGET cannot change it.
-        from fae.cell import config as cfgmod
+        from fae.experiment import config as cfgmod
         cfgmod._cache.clear()
         v = cfgmod.load(ROOT, env=dict(os.environ, ATTEMPT_BUDGET="3"))
         self.assertEqual(v.get("ATTEMPT_BUDGET"), "10")

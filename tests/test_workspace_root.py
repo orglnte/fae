@@ -5,7 +5,7 @@ harness-validation cells). The invariant these tests hold: only cell
 PLACEMENT follows the override — the scheduling plane (queues, locks, slots,
 transitions.log) serializes the one physical rig and stays global — and the
 safe_wipe boundary is per-root, so no root can reach into another's cells.
-The choke point is config.load (fae/cell/config.py resolves the workspace
+The choke point is config.load (fae/experiment/config.py resolves the workspace
 root through it); the wipe itself is fae/cell/prepare.py.
 """
 import os
@@ -16,7 +16,7 @@ from unittest import mock
 
 from _ctx import ROOT, runs, at_workspace, use_workspace
 
-from fae.cell import config as C
+from fae.experiment import config as C
 
 
 class TestThePythonOrchestratorKnob(unittest.TestCase):

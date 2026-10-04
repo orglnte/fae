@@ -71,7 +71,7 @@ def fp(root, env):
     every file in the experiment tree (EXPERIMENT_DIR: task package,
     variants, contracts, bring-ups, load profiles, instruments, daemon
     config), then the FP_EXTRA_FILES the config names (the SDK/daemon
-    sources, every module of fae/cell), in that order. Raises
+    sources, every module of fae/cell and fae/experiment), in that order. Raises
     RuntimeError when the experiment tree is empty or an FP_EXTRA_FILES
     entry is missing — a silently skipped file would quietly shrink the
     guarded surface."""

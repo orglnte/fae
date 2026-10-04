@@ -184,8 +184,8 @@ def agent_containers(boxes):
 
 
 def agent_container(cid):
-    """The agent container's name (fae/cell/config.py names it)."""
-    from fae.cell import config as _cellconfig
+    """The agent container's name (fae/experiment/config.py names it)."""
+    from fae.experiment import config as _cellconfig
     return _cellconfig.agent_container(cid)
 
 

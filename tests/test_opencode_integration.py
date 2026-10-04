@@ -1,7 +1,7 @@
 """opencode (OSS models via OpenRouter): the third agent CLI.
 
 The model map, the docker-run argv and the credential staging are Python now
-(fae/cell/config.py); these pin the opencode branch of each.
+(fae/experiment/config.py); these pin the opencode branch of each.
 """
 import os
 import tempfile
@@ -11,7 +11,7 @@ from pathlib import Path
 from _ctx import ROOT
 
 import fae.experiment
-from fae.cell import config as C
+from fae.experiment import config as C
 
 TOML = C._toml(str(ROOT))
 

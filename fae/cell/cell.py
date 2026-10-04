@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import archive
-from . import config as _config
+from fae.experiment import config as _config
 from . import faults
 from . import rig as _rig
 from . import variants as _variants
@@ -227,9 +227,16 @@ class Cell:
     def conf(self):
         """The cell's configuration, loaded on first use: reading a cell needs none."""
         if self._conf is None:
-            env = dict(os.environ, AGENT=self._agent_tag) if self._agent_tag else None
-            self._conf = _config.load(self.root, env=env)
+            self._conf = self._load_conf(self._agent_tag)
         return self._conf
+
+    def _load_conf(self, agent):
+        """The configuration of this cell's root as the agent `agent` sees it:
+        the experiment's when the cell lives on the experiment's root."""
+        x = fae.experiment.exp()
+        if Path(self.root).resolve() == Path(x.root).resolve():
+            return x.config(agent)
+        return _config.load(self.root, env=dict(os.environ, AGENT=agent) if agent else None)
 
     @conf.setter
     def conf(self, value):
@@ -1061,7 +1068,7 @@ class Cell:
         """Copy the agent's current credentials into this cell's own agent home,
         for a claude agent whose home the cell already staged."""
         agent = self.cid.split("_", 1)[0]
-        conf = _config.load(self.root, env=dict(os.environ, AGENT=agent))
+        conf = self._load_conf(agent)
         if conf.get("AGENT_CLI") != "claude":
             return False
         creds = Path(conf.get("AGENT_HOME", "")) / ".credentials.json"

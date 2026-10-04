@@ -143,7 +143,7 @@ class TestMinimalDefinition(unittest.TestCase):
                 return [conf["CALC_BIN"]]
         ''', '''
 import os
-from fae.cell import config
+from fae.experiment import config
 c = config.load(os.getcwd(), env={"EXPERIMENT_DIR": str(d.path), "CALC_MODE": "lax"})
 print(c.values["CALC_BIN"].endswith("/bin/calc"), c.values["CALC_CASES"] == str(d.path / "cases"),
       c.values["CALC_MODE"], sorted(k for k in c.exported if k.startswith("CALC_")))
@@ -194,7 +194,7 @@ class TestConfigReadsNoSubject(unittest.TestCase):
     def test_importing_the_config_loads_no_experiment(self):
         r = subprocess.run([sys.executable, "-c",
                             "import sys; sys.path.insert(0, %r)\n"
-                            "from fae.cell import config\n"
+                            "from fae.experiment import config\n"
                             "print('experiment' in sys.modules)" % str(ROOT)],
                            capture_output=True, text=True)
         self.assertEqual(r.stdout.strip(), "False", r.stderr)

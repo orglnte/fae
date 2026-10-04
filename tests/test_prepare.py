@@ -16,7 +16,7 @@ from _ctx import ROOT, runs
 
 ROOT = Path(ROOT)
 
-from fae.cell import config as cfgmod      # noqa: E402
+from fae.experiment import config as cfgmod      # noqa: E402
 from fae.cell import prepare               # noqa: E402
 
 
@@ -284,7 +284,7 @@ class TestOneImplementation(unittest.TestCase):
         self.assertNotIn("subprocess", body)
 
     def test_it_is_in_the_guarded_surface(self):
-        from fae.cell import config as cfgmod
+        from fae.experiment import config as cfgmod
         cfgmod._cache.clear()
         extras = cfgmod.load(ROOT).values.get("FP_EXTRA_FILES", "")
         self.assertIn("fae/cell/prepare.py", extras)

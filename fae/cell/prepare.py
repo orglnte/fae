@@ -19,7 +19,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config as _config
+from fae.experiment import config as _config
 from .surface import Surface
 
 import fae.experiment  # noqa: E402
