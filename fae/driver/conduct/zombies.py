@@ -176,8 +176,8 @@ def _fd_holders(path):
 # (found by loop_parents(), default root only) and the out-of-loop commands
 # that run a verify through a cell — an experiment's own command
 # (`cli.py experiment verb ...`, e.g. a reference benchmark in
-# smoke-workspaces), `cli.py cell reverify` (under <ws>/reverify/<ts>/) and
-# `cli.py experiment smoke` (stub cells in ws-test.nosync, invisible to
+# ws-smoke.nosync), `cli.py cell reverify` (under <ws>/reverify/<ts>/) and
+# `cli.py experiment smoke` (stub cells in ws-smoke.nosync, invisible to
 # loop_parents). Matched on the invoked argv, group token included.
 
 
@@ -219,7 +219,7 @@ def _is_driver_pid(pid):
     """The holder itself is a cell driver — the python cell (`-m fae.cell`)
     or a cli.py verb that verifies in-process — wherever its workspace
     lives. loop_parents() sees only the default root, so a cell run by hand
-    in a validation root (ws-test.nosync) is invisible to it; the lock it
+    in another root (WORKSPACES_DIR) is invisible to it; the lock it
     holds is not a leak."""
     cmd = host.sh(["ps", "-o", "command=", "-p", str(pid)])
     return "fae.cell" in cmd or bool(re.search(VERIFY_HOLDER_ARGV, cmd))
@@ -245,7 +245,7 @@ def find_zombies():
             age = _iter_age_s(cid)
             # UNKNOWN age gets the LONG grace, never none: _iter_age_s is None
             # for any cid without an iterations.log under WS — the normal case
-            # for verb/smoke cells, which live under smoke-workspaces.nosync —
+            # for verb/smoke cells, which live under ws-smoke.nosync —
             # and `zombies --reap` acts on a single sighting, so no grace here
             # means deleting a running benchmark's sidecar mid-measurement.
             grace = ZOMBIE_GRACE_S if age is not None else ZOMBIE_UNKNOWN_GRACE_S
@@ -426,7 +426,7 @@ def janitor_lines():
     NEVER deletes anything — deletion happens only after the operator reviews
     and explicitly confirms (SAFE DATA DELETION rule)."""
     out = []
-    for root in (_experiment.workspace().path, _experiment.current().reference_workspaces):
+    for root in (_experiment.workspace().path, _experiment.current().smoke_workspaces):
         tbd = root / ".to_be_deleted"
         if not tbd.is_dir():
             continue

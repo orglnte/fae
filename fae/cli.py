@@ -897,7 +897,7 @@ def experiment_smoke(variants: str = typer.Option("", "--variants",
                                              help="every arrangement of the gate per variant "
                                                   "(default: the canonical one)")):
     """Pipeline check: one reference cell per variant through the driver
-    (`-m fae.cell ... --stub`), in ws-test.nosync. Exit 0 iff all green."""
+    (`-m fae.cell ... --stub`), in ws-smoke.nosync. Exit 0 iff all green."""
     _experiment.current().smoke(variants=variants, only=only, rep=rep, full_gate=full_gate)
 
 

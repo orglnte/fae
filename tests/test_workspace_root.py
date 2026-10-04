@@ -70,7 +70,7 @@ class TestThePythonChokePoint(unittest.TestCase):
     def test_smoke_outranks_the_inbound_root(self):
         # a smoke test must never be able to point itself at a scored tree
         got = self._load({"WORKSPACES_DIR": "/x/ws-test.nosync", "SMOKE": "1"})
-        self.assertTrue(got.endswith("smoke-workspaces.nosync"), got)
+        self.assertTrue(got.endswith("ws-smoke.nosync"), got)
 
 
 class TestTheCellHonorsTheRoot(unittest.TestCase):
