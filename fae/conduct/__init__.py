@@ -7,8 +7,8 @@ it) rather than a second controller racing the first.
 A `Conduct` owns the scheduler's state: conduct.pid in .conduct/ and what the
 supervision pass has already reported. The CLI builds one for every operator
 verb that acts on the run as a whole (run, pause, resume, stop, diagnose,
-repair); only `run` loops. The fleet views (status, watch, monitor) are
-fae/driver/render.py's, reading through it.
+repair); only `run` loops. The host's facts about the fleet are fae/host.py,
+read by anyone; the leftovers of dead cells are the Conduct's (zombies.py).
 """
 from __future__ import annotations
 
@@ -138,53 +138,7 @@ class Conduct:
         except OSError:
             return None
 
-    # --- what the run sees: read-only, for every reader ----------------------
-    # The host's view of the fleet (host.py) and the leftovers it finds
-    # (zombies.py) are the run's; readers outside it ask here.
-
-    @staticmethod
-    def loop_parents():
-        """cid -> the pid of its running cell loop."""
-        return host.loop_parents()
-
-    @staticmethod
-    def loop_pids():
-        return host.loop_pids()
-
-    @staticmethod
-    def containers():
-        """The names of the running containers."""
-        return host.containers()
-
-    @staticmethod
-    def agent_containers(boxes):
-        """The names in `boxes` that are agent containers."""
-        prefix = host.agent_container("")
-        return [n for n in boxes if n.startswith(prefix)]
-
-    @staticmethod
-    def mem_pressure():
-        """The host's memory: the kernel's pressure band, and swap."""
-        return host.mem_pressure()
-
-    @staticmethod
-    def cell_state(ws, loops=None, boxes=None):
-        """The cell in `ws` as status shows it, with what the host knows."""
-        return host.cell_state(ws, loops or {}, boxes or set())
-
-    @staticmethod
-    def all_states(running_only=False):
-        return host.all_states(running_only)
-
-    @staticmethod
-    def heartbeat(ws, cell=None):
-        """The cell's declared liveness, when its loop is alive."""
-        return host.heartbeat(ws, cell)
-
-    @staticmethod
-    def queued(cid):
-        """Does the cell's spec wait in its lane?"""
-        return host.queued(cid)
+    # --- the leftovers of dead cells, as the run finds them ------------------
 
     @staticmethod
     def find_zombies():

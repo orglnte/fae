@@ -786,8 +786,8 @@ class Experiment:
         Every variable the replay needs, or a cell caught mid-flight by a reset
         is seeded into a state it cannot legally leave.
         """
-        from fae.conduct import Conduct
-        loops = Conduct.loop_parents()
+        from fae import host
+        loops = host.loop_parents()
         slot_holders, verify_holder = self.slot_holders(), self.verify_holder()
         out = []
         for cid in self.workspace.cells():
@@ -801,7 +801,7 @@ class Experiment:
                 intent = "run"
             slot = cid in slot_holders
             if cid in loops:
-                hb = Conduct.heartbeat(c.ws, c)
+                hb = host.heartbeat(c.ws, c)
                 loop = _loop_of_phase((hb or {}).get("phase") or "", slot)
             else:
                 loop = "none"

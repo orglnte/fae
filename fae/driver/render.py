@@ -4,7 +4,7 @@ backlog summary they all fold in.
 render() is the one table-builder every view (status, watch, monitor) prints
 through — a single source keeps the flat and grouped layouts consistent.
 queued_summary/_pending_kind read the backlog (fae/queues.py) and resolve
-each pending spec's cell (its status, through the Conduct's view) into the
+each pending spec's cell (its status, with the host's facts) into the
 QUEUED section's tags.
 """
 from __future__ import annotations
@@ -20,6 +20,7 @@ from fae.cell.cell import Cell
 from fae.cell.fsm import WAIT_PHASES
 from fae import experiment as _experiment
 from fae.cell import faults
+from fae import host
 from fae.conduct import Conduct
 
 
@@ -85,7 +86,7 @@ def _pending_kind(cid, live_loops):
         return "paused"
     if cid in live_loops:
         return "running"
-    st = Conduct.cell_state(ws)
+    st = host.cell_state(ws)
     if st and st["state"] == "DONE":
         return "done"
     if st and Cell.never_started(st):
@@ -104,7 +105,7 @@ def queued_summary():
     qs = _experiment.workspace().queues
     rows, total = [], 0
     kinds = collections.Counter()
-    live_loops = set(Conduct.loop_parents())
+    live_loops = set(host.loop_parents())
     # A parked lane is the operator's pause (`experiment pause M`): its specs are
     # untouched, so they are still backlog — shown here tagged rather than
     # vanishing from the fleet picture.
@@ -155,7 +156,7 @@ def queued_summary():
 def requeued(s):
     """A crashed cell whose spec waits in its lane: admission restarts it,
     nobody needs to act."""
-    return s["state"] == "CRASHED" and Conduct.queued(s["cid"])
+    return s["state"] == "CRASHED" and host.queued(s["cid"])
 
 
 def display_state(s):
@@ -166,8 +167,8 @@ def display_state(s):
 
 
 def render(flat=False, running_only=False):
-    states, loops, boxes = Conduct.all_states(running_only)
-    n_loops = len(Conduct.loop_parents())   # real loops — tees outlive theirs
+    states, loops, boxes = host.all_states(running_only)
+    n_loops = len(host.loop_parents())   # real loops — tees outlive theirs
     out = []
     if flat:
         rows = [(s["cid"],
@@ -203,7 +204,7 @@ def render(flat=False, running_only=False):
             # environment. loop_parents' own docstring says that text carries
             # agent credentials and must not be printed, and run_cell_pids
             # deliberately avoids -E for exactly that reason.)
-            hb = Conduct.heartbeat(_experiment.workspace().path / s["cid"])
+            hb = host.heartbeat(_experiment.workspace().path / s["cid"])
             phase = hb.get("phase") if hb else ""
             if s["state"] == "RUNNING" or (s["state"] == "WAITING" and phase not in ("", None)):
                 running_raw.append((s["cid"], vshort(s["agent"], s["agent_model"]),
@@ -274,10 +275,10 @@ def render(flat=False, running_only=False):
         qsec = queued_summary()
         if qsec:
             out.extend(qsec)
-        live = len(Conduct.agent_containers(boxes))
+        live = len(host.agent_containers(boxes))
         conduct_s = Conduct().run_line()
         out.append(f"\n{live} containers, {n_loops} loops, {conduct_s}, {datetime.now(timezone.utc):%H:%M:%S}Z")
-        _mp = Conduct.mem_pressure()
+        _mp = host.mem_pressure()
         if _mp["label"]:
             out.append(f"mem: {_mp['used_gb']:.1f}/{_mp['total_gb']:.1f}GB used "
                        f"({_mp['avail_pct']}% avail), pressure={_mp['label']}  ·  "
@@ -334,7 +335,7 @@ def monitor(args):
     _experiment.workspace().conduct.mkdir(parents=True, exist_ok=True)
     while True:
         try:
-            states, _, _ = Conduct.all_states()
+            states, _, _ = host.all_states()
             walls = []
             for s in states:
                 if not (s["state"] == "WAITING" and s["why"] == "limit"):

@@ -55,7 +55,6 @@ from fae import experiment as _experiment  # noqa: E402
 from fae.cell.cell import Busy  # noqa: E402
 from fae.driver import check, render  # noqa: E402
 from fae import conduct, host  # noqa: E402
-from fae.conduct import Conduct  # noqa: E402
 
 
 def _ns(**kw):
@@ -127,7 +126,7 @@ def spawn(args):
     # guard one identity while the cell process runs under another
     cid = _experiment.cell_id(args.agent, args.variant, rep, args.task,
                          smoke=bool(os.environ.get("SMOKE")))
-    live = Conduct.loop_parents()
+    live = host.loop_parents()
     if cid in live:
         print(f"refusing: loop already running for {cid} (pid {live[cid]}) — "
               f"two loops on one workspace corrupt its logs")
@@ -195,7 +194,7 @@ def stop_cells(args):
     if getattr(args, "dry_run", False):
         verb = "cancel" if cancel else "stop"
         for cid in cids:
-            st = Conduct.cell_state(_experiment.workspace().path / cid, Conduct.loop_pids(), Conduct.containers())
+            st = host.cell_state(_experiment.workspace().path / cid, host.loop_pids(), host.containers())
             print(f"would {verb} {cid}" + (f" ({st['state']}·{st['why']})" if st else ""))
         for cid in q_only:
             print(f"would drop queued spec {cid} (no workspace; backed up)")
@@ -203,7 +202,7 @@ def stop_cells(args):
         return None
     # never cancel a finished verdict: a stop halts runs, it does not relabel data
     done = [c for c in cids
-            if (st := Conduct.cell_state(_experiment.workspace().path / c, {}, set())) and st["state"] == "DONE"]
+            if (st := host.cell_state(_experiment.workspace().path / c, {}, set())) and st["state"] == "DONE"]
     cids = [c for c in cids if c not in set(done)]
     for c in done:
         print(f"  {c}: already DONE — left untouched")
@@ -230,11 +229,11 @@ def resume(args):
     matches = _experiment.workspace().select(*sels)
     _one_cell("resume", sels, len(matches))
     blanket = _experiment.is_blanket(sels)
-    parents = Conduct.loop_parents()
+    parents = host.loop_parents()
     run = conduct.Conduct()
     touched = 0
     for cid in matches:
-        st = Conduct.cell_state(_experiment.workspace().path / cid, Conduct.loop_pids(), Conduct.containers())
+        st = host.cell_state(_experiment.workspace().path / cid, host.loop_pids(), host.containers())
         if st is None:
             continue
         c = _experiment.current().cell(cid)
@@ -279,7 +278,7 @@ def resume(args):
         agent = cid.split("_", 1)[0]
         # the per-agent cap holds on resume too, unless --force
         if not getattr(args, "force", False):
-            live_m = sum(1 for x in Conduct.loop_parents() if x.startswith(agent + "_"))
+            live_m = sum(1 for x in host.loop_parents() if x.startswith(agent + "_"))
             if live_m >= conduct.PER_AGENT_CAP:
                 touched += 1
                 acts.append(f"respawn DEFERRED — {agent} already has {live_m} live loop(s) "
@@ -320,10 +319,10 @@ SEALABLE = {"green": "green", "failed": "budget", "revoked": "revoked"}
 def seal(args):
     """Make terminal cells read-only (.sealed). Dry by default: sealing has
     no inverse, so writing the markers is an explicit act (--apply)."""
-    loops, boxes, live = Conduct.loop_pids(), Conduct.containers(), Conduct.loop_parents()
+    loops, boxes, live = host.loop_pids(), host.containers(), host.loop_parents()
     todo, already, skipped = [], 0, {}
     for cid in _experiment.workspace().select(args.selector):
-        st = Conduct.cell_state(_experiment.workspace().path / cid, loops, boxes)
+        st = host.cell_state(_experiment.workspace().path / cid, loops, boxes)
         if st is None:
             continue
         if _experiment.current().cell(cid).sealed:
