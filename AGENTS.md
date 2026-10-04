@@ -141,7 +141,7 @@ a stranded reverify leaves the population.
   verify's numbers, so a loop killed mid-gate leaves a green `metrics.json`
   on a cell that is not green. `ITER green` is written only after the FULL
   gate passes, and is the one sufficient condition.
-- **`fae/metrics.py` is the one reader of `metrics.json`** for everything
+- **`fae/cell/metrics.py` is the one reader of `metrics.json`** for everything
   that computes with it (validation, scoring). It turns a count a verifier
   wrote as text (`"28114"`) into a number: a string there crashes the rules
   that divide it and drops the cell from the table's load-error rate, and a
