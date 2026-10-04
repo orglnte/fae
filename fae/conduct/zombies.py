@@ -69,18 +69,6 @@ def _infra_of(variant, cid):
     return list(cls.INFRA.identities(cid)) if cls is not None else []
 
 
-def _verifier_infra(cid):
-    """[(kind, ident)] the engine and the experiment's verifier provision
-    for a cell of any tech: the verify container and the cell network, then
-    the verifier's own (a store), named as they name them."""
-    from fae.cell import image as _image
-    out = [("container", _image.verify_container(cid)), ("network", _image.cell_network(cid))]
-    for pair in _experiment.definition().verifier_class().identities(cid):
-        if pair not in out:
-            out.append(pair)
-    return out
-
-
 def _containers_all():
     """Every container name, running or not. containers() is `docker ps` and
     its callers mean "running"; a STOPPED sidecar still owns its name."""
@@ -308,9 +296,7 @@ def find_zombies():
             continue
         if present is None:
             present = _containers_all() | set(host.sh(["kind", "get", "clusters"]).split())
-        parsed = parse_cell_id(owner)
-        named = [(k, i) for k, i in _infra_of(parsed[1] if parsed else "", owner)
-                 + _verifier_infra(owner) if i in present]
+        named = [(k, i) for k, i in _experiment.workspace().named_cell(owner).provisions() if i in present]
         if not named:
             # The sidecar outlived everything it named: nothing left to reap,
             # and keeping the note would re-report the same phantom every tick.

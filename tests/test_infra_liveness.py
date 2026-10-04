@@ -118,3 +118,33 @@ class TestTheTwoGates(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestACellNamesWhatItProvisions(unittest.TestCase):
+    """What a run of a cell provisions, for the reaper: its variant's infra,
+    then the verify container and cell network, then the verifier's own."""
+
+    def test_variant_infra_then_the_engines_then_the_verifiers(self):
+        from fae.cell import image as _image
+        cid = "m_high_v_T1_r1"
+
+        class Named(base.Infra):
+            @classmethod
+            def identities(cls, c):
+                return [("cluster", f"cl-{c}")]
+
+        class V(Variant):
+            INFRA = Named
+
+        class Verifier:
+            @staticmethod
+            def identities(c):
+                return [("container", f"store-{c}"), ("network", _image.cell_network(c))]
+
+        c = cell.Cell(cid, workspaces="/nonexistent", root="/nonexistent", locks="/nonexistent")
+        with mock.patch.object(cell.Cell, "variant_cls", new_callable=mock.PropertyMock, return_value=V), \
+                mock.patch.object(_experiment, "definition") as d:
+            d.return_value.verifier_class.return_value = Verifier
+            got = c.provisions()
+        self.assertEqual(got, [("cluster", f"cl-{cid}"), ("container", _image.verify_container(cid)),
+                               ("network", _image.cell_network(cid)), ("container", f"store-{cid}")])
