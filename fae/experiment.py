@@ -40,7 +40,7 @@ The definition's `__init__.py` declares, all optional:
                             what a rig fault looks like in this experiment's
                             evidence, read through the Cell; `workspace` (a
                             Workspace) holds its sibling cells
-                            (fae/driver/validate.py runs the engine's own
+                            (fae/scoring/validate.py runs the engine's own
                             rules beside it)
     report_text(cell)    -> the verifier's per-attempt reports, concatenated,
                             for the taint rules ("" by default)
@@ -664,6 +664,19 @@ class Experiment:
         print("  PIPELINE BROKE — see the per-variant VERDICT above; each names the "
               "log to read.", file=sys.stderr)
         sys.exit(1)
+
+    # --- results: actions on one workspace ----------------------------------
+
+    def _workspace_of(self, cell):
+        root = Path(cell.ws).parent
+        return self.workspace if root == self.workspace.path else self.beside(root)
+
+    def validate_cell(self, cell):
+        """Validate one DONE `cell` against the engine's and this experiment's
+        taint rules (fae/scoring/validate.py); the doc is also written as its
+        validation.json. Raises Busy while the cell is held."""
+        from fae.scoring import validate as _validate
+        return _validate.validate_cell(cell, self._workspace_of(cell))
 
     # --- the transitions log, re-anchored -----------------------------------
 

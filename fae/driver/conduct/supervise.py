@@ -19,7 +19,6 @@ from fae.cell.cell import Busy, Cell
 from fae.cell.fsm import LOOP_CLEARED_BY, WAIT_PHASES
 from fae import experiment as _experiment
 from fae.cell import faults
-from fae.driver import validate as taint
 
 from . import host, records, zombies
 
@@ -375,7 +374,7 @@ def supervise_pass(alerts, dry=False, only=""):
                 # one cell's evidence must never stop supervision of the fleet:
                 # the cell stays unvalidated, is reported once, and is retried
                 try:
-                    doc = taint._validate_cell(ws)
+                    doc = _experiment.current().validate_cell(c)
                 except Busy:
                     pass                      # its loop is ending: next pass
                 except Exception as e:

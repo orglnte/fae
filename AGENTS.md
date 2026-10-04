@@ -94,7 +94,7 @@ resource scaled 0↔1: `load_shape`, `trace`, `k6`, `law`; §7) and the
 infra blocks under `fae/cell/infra/` (`dind`, `kind`, `secrunner`).
 An experiment composes them with its own parameters. What a rig fault looks
 like in an experiment's evidence is its `taint_rules`, run by
-`fae/driver/validate.py` beside the engine's own rules.
+`fae/scoring/validate.py` beside the engine's own rules.
 
 ## 1. The unit of work is a cell
 

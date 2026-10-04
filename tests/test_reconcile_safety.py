@@ -603,7 +603,7 @@ class SweepCase(unittest.TestCase):
              mock.patch.object(runs.host, "containers", return_value=set(boxes)), \
              mock.patch.object(runs.ledger, "parse", return_value=doc), \
              mock.patch.object(runs.host, "sh", return_value=ps), \
-             mock.patch.object(runs.taint, "_validate_cell",
+             mock.patch.object(runs.taint, "validate_cell",
                                return_value={"verdict": "VALID", "taints": []},
                                side_effect=validate_error) as val, \
              mock.patch.object(runs.supervise, "subprocess") as sub, \
