@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import collections
 import contextlib
+import hashlib
 import json
+import locale
 import os
 import re
 import shutil
@@ -41,7 +43,6 @@ from pathlib import Path
 from . import archive
 from fae.experiment import config as _config
 from . import faults
-from . import rig as _rig
 from fae.experiment import variants as _variants
 from .checkpoints import Checkpoints
 from .surface import Surface, authorable
@@ -179,6 +180,37 @@ def agent_time_fields(attempt, runs, client_s):
             f"last_s={round(last)}",
             "client_s=" + ("-" if client_s is None else str(round(client_s))),
             f"check={check}"]
+
+def _sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _collated(names):
+    """Sorted the way a bash glob expands: locale collation from the
+    environment, not byte order — the fingerprint depends on this order."""
+    try:
+        locale.setlocale(locale.LC_COLLATE, "")
+        return sorted(names, key=locale.strxfrm)
+    except locale.Error:
+        return sorted(names)
+
+
+def _shasum_lines(paths):
+    """The `shasum -a 256 <files>` text: one "<hex>  <path>" line per readable
+    file, unreadable ones skipped (the shell pipeline sends those to
+    /dev/null and hashes what remains)."""
+    out = []
+    for p in paths:
+        try:
+            out.append(f"{_sha256_file(p)}  {p}\n")
+        except OSError:
+            pass
+    return "".join(out)
+
 
 class Cell:
     """Constructing a Cell READS; it never writes. That is what lets it be used
@@ -1367,9 +1399,32 @@ class Cell:
 
     # --- verify -----------------------------------------------------------
 
+    @staticmethod
+    def fingerprint(root, env):
+        """The verify-surface fingerprint: sha256 over the `shasum -a 256` text of
+        every file in the experiment tree (EXPERIMENT_DIR: task package,
+        variants, contracts, bring-ups, load profiles, instruments, daemon
+        config), then the FP_EXTRA_FILES the config names (the SDK/daemon
+        sources, every module of fae/cell and fae/experiment), in that order. Raises
+        RuntimeError when the experiment tree is empty or an FP_EXTRA_FILES
+        entry is missing — a silently skipped file would quietly shrink the
+        guarded surface."""
+        root = Path(root)
+        extras = str(env.get("FP_EXTRA_FILES", "")).split()
+        for f in extras:
+            if not Path(f).is_file():
+                raise RuntimeError(f"FATAL _fp: FP_EXTRA_FILES entry missing: {f}")
+        exp = Path(env.get("EXPERIMENT_DIR") or root / "experiment")
+        tree = _collated(str(p) for p in exp.rglob("*")
+                         if p.is_file() and "__pycache__" not in p.parts
+                         and p.suffix != ".pyc" and p.name != ".DS_Store")
+        if not tree:
+            raise RuntimeError(f"FATAL _fp: no experiment tree under {exp}")
+        return hashlib.sha256(_shasum_lines(tree + extras).encode()).hexdigest()
+
     def _fingerprint(self):
         try:
-            return _rig.fp(self.root, self.conf.child_env({"REPO_ROOT": self.root}))
+            return self.fingerprint(self.root, self.conf.child_env({"REPO_ROOT": self.root}))
         except (RuntimeError, OSError):
             return None
 

@@ -323,16 +323,15 @@ def _infra(ctx):
 def _invariants(ctx):
     from fae import mutex
     from fae.experiment import config as _config
-    from fae.cell import rig as _rig, verify as _verify
+    from fae.cell import verify as _verify
     from fae.cell.cell import Cell
     from fae.experiment.variants import files as _files
     from fae import host
     out = []
     missing = [f"{mod.__name__}.{name}"
-               for mod, names in ((_rig, ("fp", "free_port_from")),
-                                  (_verify, ("run_verifier", "call", "run_in_thread")),
+               for mod, names in ((_verify, ("run_verifier", "call", "run_in_thread")),
                                   (mutex, ("open_lock", "try_fd", "wait_fds")),
-                                  (Cell, ("prepare", "new")),
+                                  (Cell, ("prepare", "new", "fingerprint")),
                                   (_config, ("load", "opencode_key_file", "stage_agent")))
                for name in names if not callable(getattr(mod, name, None))]
     out.append(Finding(not missing, "the engine's own functions are all there" if not missing

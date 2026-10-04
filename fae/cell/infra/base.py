@@ -64,6 +64,18 @@ def host_ports(cid, ranges):
     return {role: r[slot] for role, r in ranges.items()}
 
 
+def free_port_from(port, span=200):
+    """First port at/after `port` with no listener on this host, or None. The
+    hash picks the start so a cell keeps a stable port across resumes when
+    it can."""
+    port = int(port)
+    for _ in range(span):
+        if not _ok(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"]):
+            return port
+        port += 1
+    return None
+
+
 def cksum(text):
     """POSIX cksum of the text, the number the shell hooks hashed cell ids
     with — ports and cluster names must not move under a cell that resumes,

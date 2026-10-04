@@ -681,7 +681,7 @@ every prior agent's memory — cross-run leakage invisible in the results.
   experiment declares through `fingerprint_trees`, and every `.py` of the
   engine's own `fae/cell/` and `fae/experiment/` packages, its `scoring/` included (found from the
   engine, never under the root) — are hashed, content and path, into the fingerprint
-  (`fae/cell/rig.py:fp()`) that pins a cell; a mismatch between a cell's
+  (`Cell.fingerprint()`) that pins a cell; a mismatch between a cell's
   start and any of its verifies voids that attempt. Edit them only with no
   cell running, apply multi-hunk patches whole, and run `cli.py experiment
   check` after. An empty experiment tree or a missing declared file is FATAL, never
