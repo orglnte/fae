@@ -162,31 +162,31 @@ class TestTheRunCommands(unittest.TestCase):
 class TestResultsScore(unittest.TestCase):
     def test_variant_filter_plumbs(self):
         (ns,), _ = invoke("results_score", ["results", "score", "--variant", "beta_apidocs"],
-                          mod=cli.render)
+                          mod=cli._render)
         self.assertEqual(ns.variant, "beta_apidocs")
         self.assertIsNone(ns.selector)
 
     def test_factor_and_impl_filters_plumb(self):
         (ns,), _ = invoke("results_score", ["results", "score", "--where", "docs=apidocs",
-                                    "--where", "tech=beta", "--impl", "py"], mod=cli.render)
+                                    "--where", "tech=beta", "--impl", "py"], mod=cli._render)
         self.assertEqual(ns.where, ["docs=apidocs", "tech=beta"])
         self.assertEqual(ns.impl, "py")
 
 
 class TestExperimentStatus(unittest.TestCase):
-    """status/watch/monitor live in fae/cli/render.py, not on a single verb
+    """status/watch/monitor live in fae/cli/_render.py, not on a single verb
     name — the generic invoke() helper (which patches <mod>.<fn_name>
-    directly) can't see the call, so these patch cli.render.status explicitly."""
+    directly) can't see the call, so these patch cli._render.status explicitly."""
 
     def test_status_flat(self):
-        with mock.patch.object(cli.render, "status") as m:
+        with mock.patch.object(cli._render, "status") as m:
             result = runner.invoke(cli.app, ["experiment", "status", "--flat"])
         self.assertEqual(result.exit_code, 0, result.output)
         (ns,), _ = m.call_args
         self.assertEqual(vars(ns), dict(flat=True, running_only=False))
 
     def test_status_default(self):
-        with mock.patch.object(cli.render, "status") as m:
+        with mock.patch.object(cli._render, "status") as m:
             result = runner.invoke(cli.app, ["experiment", "status"])
         self.assertEqual(result.exit_code, 0, result.output)
         (ns,), _ = m.call_args
@@ -195,7 +195,7 @@ class TestExperimentStatus(unittest.TestCase):
 
 class TestQueueCommands(unittest.TestCase):
     def test_list_takes_lanes_and_done(self):
-        (ns,), _ = invoke("queue_list", ["queue", "list", "opus", "--done"], mod=cli.render)
+        (ns,), _ = invoke("queue_list", ["queue", "list", "opus", "--done"], mod=cli._render)
         self.assertEqual(vars(ns), dict(agents=["opus"], done=True))
 
     def test_cancel_takes_selectors_and_dry_run(self):
