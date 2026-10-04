@@ -146,7 +146,7 @@ def queued(cid):
     return bool(parsed) and _experiment.workspace().queues.lane_has(parsed[0], cid)
 
 
-def cell_state(ws, loops, boxes):
+def cell_state(ws, loops=None, boxes=None):
     """The cell in `ws` as status shows it (Cell.status), with what the host
     knows: its live heartbeat, a loop the process table shows, its spec
     waiting in the lane. None for a folder that is not a prepared cell.
@@ -174,6 +174,12 @@ def all_states(running_only=False):
         if s:
             out.append(s)
     return out, loops, boxes
+
+
+def agent_containers(boxes):
+    """The names in `boxes` that are agent containers."""
+    prefix = agent_container("")
+    return [n for n in boxes if n.startswith(prefix)]
 
 
 def agent_container(cid):

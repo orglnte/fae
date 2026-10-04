@@ -323,7 +323,7 @@ def _invariants(ctx):
     from fae import mutex
     from fae.cell import config as _config, prepare as _prep, rig as _rig, verify as _verify
     from fae.cell.variants import files as _files
-    from fae.conduct import Conduct
+    from fae import host
     out = []
     missing = [f"{mod.__name__}.{name}"
                for mod, names in ((_rig, ("fp", "free_port_from")),
@@ -355,7 +355,7 @@ def _invariants(ctx):
         for ws in sorted(_experiment.workspace().path.iterdir()):
             if not ws.is_dir() or not _experiment.parse_cell_id(ws.name):
                 continue
-            st = Conduct.cell_state(ws)
+            st = host.cell_state(ws)
             if st and st["state"] == "DONE" and st["why"] in ("green", "failed", "revoked"):
                 if _experiment.current().cell(ws.name, workspaces=ws.parent).read_ledger()["verdict"] != st["why"]:
                     disagree.append(ws.name)

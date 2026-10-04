@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 from fae.cell.cell import ATTEMPT_BUDGET
 from fae import experiment as _experiment
-from fae.conduct import Conduct
+from fae import host
 
 
 def run_start() -> float | None:
@@ -59,7 +59,7 @@ def collect(since: float | None) -> tuple[dict, list]:
         c = _experiment.current().cell(d.name, workspaces=d.parent)
         if c.heartbeat() is not None and not c.sealed:
             L = c.read_ledger(gate_n=gate_n)
-            hb = Conduct.heartbeat(d, c)
+            hb = host.heartbeat(d, c)
             live.append((agent, variant, int(rep), L["att"],
                          (hb.get("phase") if hb else "") or "?"))
             continue

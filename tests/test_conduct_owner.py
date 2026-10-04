@@ -41,5 +41,17 @@ class TestTheConductOwnsSupervision(unittest.TestCase):
             self.assertEqual(offenders(Path(d)), [("fae/x.py", 1)])
 
 
+
+class TestTheHostIsNotTheConducts(unittest.TestCase):
+    """The host's facts are fae/host.py, read directly: reading them never
+    needs the scheduler."""
+
+    def test_the_conduct_relays_no_host_fact(self):
+        from fae.conduct import Conduct
+        for name in ("loop_parents", "loop_pids", "containers", "agent_containers",
+                     "mem_pressure", "cell_state", "all_states", "heartbeat", "queued"):
+            self.assertFalse(hasattr(Conduct, name), name)
+
+
 if __name__ == "__main__":
     unittest.main()
