@@ -185,9 +185,9 @@ def agent_containers(boxes):
 
 
 def agent_container(cid):
-    """The agent container's name (fae/experiment/config.py names it)."""
-    from fae.experiment import config as _cellconfig
-    return _cellconfig.agent_container(cid)
+    """The agent container's name (the Cell names it)."""
+    from fae.cell.cell import Cell
+    return Cell.agent_container(cid)
 
 
 def infra_containers(variant, cid):

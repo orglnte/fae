@@ -211,6 +211,18 @@ def _shasum_lines(paths):
     return "".join(out)
 
 
+def _agent_cpu_args(conf):
+    """The agent container's CPU ceiling and, when pinning is on, its cores."""
+    out = []
+    cpus = str(conf.get("AGENT_CPUS", _config.ENGINE_DEFAULTS["AGENT_CPUS"])).strip()
+    if cpus and cpus != "0":
+        out += [f"--cpus={cpus}"]
+    cpuset = str(conf.get("CPUSET_AGENT") or "").strip()
+    if cpuset:
+        out += [f"--cpuset-cpus={cpuset}"]
+    return out
+
+
 class Cell:
     """Constructing a Cell READS; it never writes. That is what lets it be used
     on the 470 sealed cells the bash implementation produced — their state is
@@ -887,7 +899,7 @@ class Cell:
                       cid=self.cid, task=self.task, variant=self.variant)
             run_teardown(ctx, self.infra, timeout_s=timeout_s, log_dir=self.ws)
         boxes = [i for k, i in self.variant_cls.INFRA.identities(self.cid) if k == "container"]
-        subprocess.run(["docker", "rm", "-f", "-v", _config.agent_container(self.cid), *boxes],
+        subprocess.run(["docker", "rm", "-f", "-v", self.agent_container(self.cid), *boxes],
                        capture_output=True)
         self.teardown()
 
@@ -969,7 +981,7 @@ class Cell:
         on resume is a designed path. Nothing when a loop runs."""
         if self.loop_pid():
             return
-        subprocess.run(["docker", "rm", "-f", _config.agent_container(self.cid)],
+        subprocess.run(["docker", "rm", "-f", self.agent_container(self.cid)],
                        capture_output=True)
         if self.heartbeat() is not None:
             self.clear_heartbeat()
@@ -1073,7 +1085,7 @@ class Cell:
             # A loop inside the agent command notices nothing until the command
             # returns; removing the agent's container (only that one) returns it.
             if unblock_agent:
-                subprocess.run(["docker", "rm", "-f", _config.agent_container(self.cid)],
+                subprocess.run(["docker", "rm", "-f", self.agent_container(self.cid)],
                                capture_output=True)
             if self._gone(pid, grace, poll=2):
                 outcome = "cooperative"
@@ -1091,7 +1103,7 @@ class Cell:
             boxes = [i for k, i in self.variant_cls.INFRA.identities(self.cid) if k == "container"]
         else:
             boxes = []
-        subprocess.run(["docker", "rm", "-f", "-v", _config.agent_container(self.cid), *boxes],
+        subprocess.run(["docker", "rm", "-f", "-v", self.agent_container(self.cid), *boxes],
                        capture_output=True)
         return outcome
 
@@ -2385,11 +2397,70 @@ class Cell:
             env = self.conf.child_env(base, extra_env)
             prompt = self._prompt(attempt)
             fb = self.ws / "feedback"
-            argv = _config.build_agent_argv(
+            argv = self.agent_argv(
                 self.conf, self.cid, self.artifacts, home, prompt,
                 ee.get("DOCKER_NET", ""), ee.get("KUBE_MOUNT", ""),
                 feedback=str(fb) if fb.is_dir() else "", image=self.agent_image())
             return self._run_bounded(argv, f, env)
+
+    AGENT_CONTAINER_PREFIX = "fae-agent-"
+
+    @staticmethod
+    def agent_container(cid):
+        """The name of `cid`'s agent container."""
+        return f"{Cell.AGENT_CONTAINER_PREFIX}{cid}"
+
+    @staticmethod
+    def agent_argv(conf, cid, art, home, prompt_file, docker_net="", kube_mount="",
+                   feedback="", image=None):
+        """The `docker run ...` argv for one agent invocation, built from the
+        config — no shell. The per-arm docker flags (network, kubeconfig mount) the
+        setup hook emitted are shlex-split in; the prompt is passed as one arg."""
+        import shlex
+        cli = conf.get("AGENT_CLI", "claude")
+        model = conf.get("AGENT_MODEL", "")
+        image = conf.get("AGENT_IMAGE") or image or "fae-agent:latest"
+        prompt = Path(prompt_file).read_text()
+        common = ["docker", "run", "--rm", "--name", Cell.agent_container(cid),
+                  *_agent_cpu_args(conf),
+                  "-v", f"{art}:/workspace", "-w", "/workspace"]
+        add_dirs = ["--add-dir", "/workspace"]
+        if feedback:
+            common += ["-v", f"{feedback}:/feedback:ro"]
+            add_dirs += ["--add-dir", "/feedback"]
+        net = shlex.split(docker_net) + shlex.split(kube_mount)
+
+        if cli == "agy":
+            return (common + ["-v", f"{home}:/home/node/.gemini"] + net
+                    + [image, "agy", "--sandbox", "--dangerously-skip-permissions",
+                       *add_dirs, "--model", model,
+                       "--print-timeout", "60m", "--print", prompt])
+        if cli == "opencode":
+            key = _config.opencode_key_file(conf.get("AGENT_HOME", "")).read_text().strip()
+            return (common + ["-v", f"{home}:/home/node/.config/opencode",
+                              "-e", f"OPENCODE_API_KEY={key}"] + net
+                    + [image, "opencode", "run", "--print-logs", "--log-level",
+                       "ERROR", "--model", model, prompt])
+        if cli == "testagent":
+            return (common + ["-v", f"{home}:/home/node/.testagent",
+                              "-e", "CELL_ID", "-e", "VARIANT", "-e", "TESTAGENT_PLAN", "-e", "SERVICE_PORT"] + net
+                    + [image, "python3", "/home/node/.testagent/testagent.py", prompt])
+        # claude
+        oauth = Path(conf.get("AGENT_HOME", "")) / ".oauth_token"
+        tok = []
+        if oauth.is_file() and oauth.stat().st_size:
+            tok = ["-e", f"CLAUDE_CODE_OAUTH_TOKEN={oauth.read_text().strip()}"]
+        effort = conf.get("EFFORT", "")
+        stream = conf.get("STREAM_AGENT", "")
+        tail = ["claude", "-p", "--dangerously-skip-permissions", "--model", model]
+        if feedback:
+            tail += ["--add-dir", "/feedback"]
+        if effort:
+            tail += ["--effort", effort]
+        if stream:
+            tail += ["--output-format", "stream-json", "--verbose"]
+        return (common + ["-v", f"{home}:/home/node/.claude"] + tok + net
+                + [image, *tail, prompt])
 
     def _agent_timeout_s(self):
         return int(self.conf.get("AGENT_TIMEOUT_S") or self.AGENT_TIMEOUT_S)
@@ -2401,7 +2472,7 @@ class Cell:
         try:
             return subprocess.run(argv, stdout=f, stderr=f, env=env, timeout=limit).returncode
         except subprocess.TimeoutExpired:
-            subprocess.run(["docker", "rm", "-f", _config.agent_container(self.cid)],
+            subprocess.run(["docker", "rm", "-f", self.agent_container(self.cid)],
                            capture_output=True)
             f.write(f"\n[fae] agent killed after {limit}s (AGENT_TIMEOUT_S)\n")
             f.flush()

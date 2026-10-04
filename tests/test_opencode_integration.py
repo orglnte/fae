@@ -11,6 +11,7 @@ from pathlib import Path
 from _ctx import ROOT
 
 import fae.experiment
+from fae.cell.cell import Cell
 from fae.experiment import config as C
 
 TOML = C._toml(str(ROOT))
@@ -60,7 +61,7 @@ class TestOpencodeContainment(unittest.TestCase):
         (home / "opencode.key").write_text("KEY123\n")
         prompt = home / "PROMPT.md"
         prompt.write_text("do the task\n")
-        return C.build_agent_argv(_opencode_conf(home), "cid1", "/ws/art",
+        return Cell.agent_argv(_opencode_conf(home), "cid1", "/ws/art",
                                   home / ".agent-opencode", prompt)
 
     def test_config_is_mounted_writable(self):

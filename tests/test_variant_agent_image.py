@@ -9,6 +9,7 @@ from unittest import mock
 from _ctx import ROOT  # noqa: F401
 
 from fae.experiment import config as _config
+from fae.cell.cell import Cell
 from fae.cell import agent_image as _image
 from fae.cell import image as _cimage
 from fae.experiment.variants.base import Variant
@@ -61,7 +62,7 @@ class TestTheArgv(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             prompt = Path(d) / "PROMPT.md"
             prompt.write_text("do it")
-            return _config.build_agent_argv(conf, "m_high_alpha_sealed_apidocs_T1_r1", d,
+            return Cell.agent_argv(conf, "m_high_alpha_sealed_apidocs_T1_r1", d,
                                             d, prompt, image=image)
 
     def test_the_cells_own_image_is_the_one_run(self):

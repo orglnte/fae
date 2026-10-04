@@ -8,6 +8,7 @@ from pathlib import Path
 from _ctx import ROOT  # noqa: F401  (sys.path)
 import fae.experiment
 from fae.experiment import config as C
+from fae.cell.cell import Cell
 
 
 def _conf(cli):
@@ -19,7 +20,7 @@ def _argv(cli, feedback):
     d = Path(tempfile.mkdtemp())
     prompt = d / "PROMPT.md"
     prompt.write_text("task\n")
-    return C.build_agent_argv(_conf(cli), "cid1", "/ws/art", d / "home", prompt,
+    return Cell.agent_argv(_conf(cli), "cid1", "/ws/art", d / "home", prompt,
                               feedback=feedback)
 
 
@@ -84,7 +85,7 @@ class TestTheAgentsCpuCeiling(unittest.TestCase):
         (d / "PROMPT.md").write_text("task\n")
         conf = C.Config({"AGENT_CLI": "claude", "AGENT_MODEL": "m", "AGENT_IMAGE": "img",
                          "AGENT_HOME": str(d), **values}, {})
-        return C.build_agent_argv(conf, "cid1", "/ws/art", d / "home", d / "PROMPT.md")
+        return Cell.agent_argv(conf, "cid1", "/ws/art", d / "home", d / "PROMPT.md")
 
     def test_one_core_by_default_and_no_pinning(self):
         a = self.argv()
