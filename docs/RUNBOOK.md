@@ -1,13 +1,13 @@
 # FAE operator runbook
 
 Running an experiment's fleet: prerequisites, the `cli.py` verbs, the
-backlog, the suites, scoring. What FAE is and a first run: [`README.md`](README.md).
+backlog, the suites, scoring. What FAE is and a first run: [`README.md`](../README.md).
 
 An experiment's `cli.py` puts the FAE checkout on `PYTHONPATH` and runs the
 engine with the experiment's repository as the root, so its `fae.toml`,
 `experiment/` and workspaces are its own (`[paths] experiment_dir` in
 `fae.toml`, default `experiment`). Cell anatomy, the ledger, locks and
-verdict rules: [`AGENTS.md`](AGENTS.md).
+verdict rules: [`AGENTS.md`](../AGENTS.md).
 
 ---
 
@@ -152,7 +152,8 @@ table and writes `workspaces.nosync/results.csv` + `results.json`
 
 ```
 README.md            what FAE is, a first run
-RUNBOOK.md           this runbook
+docs/                RUNBOOK.md (this runbook), HOWTO.md, DESIGN-fae.md,
+                     CONCEPTS-repo-fae.md, TODO-concepts.md
 AGENTS.md            rig contract: cells, ledger, locks, verdicts, delete rules,
                      and §0 the engine/experiment boundary
 cli.py               operator CLI (noun groups); the only entry point
