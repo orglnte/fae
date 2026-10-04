@@ -6,8 +6,9 @@ it) rather than a second controller racing the first.
 
 A `Conduct` owns the scheduler's state: conduct.pid in .conduct/ and what the
 supervision pass has already reported. The CLI builds one for every operator
-verb that acts on the run as a whole (run, pause, resume, stop, status,
-diagnose, repair); only `run` loops.
+verb that acts on the run as a whole (run, pause, resume, stop, diagnose,
+repair); only `run` loops. The fleet views (status, watch, monitor) are
+fae/driver/render.py's, reading through it.
 """
 from __future__ import annotations
 
@@ -295,10 +296,6 @@ class Conduct:
             return False
         self.respawn_count(cid, bump=True)
         return True
-
-    def status(self, args):
-        from fae.driver import render
-        return render.status(args)
 
     def diagnose(self, _args):
         """READ-ONLY one-shot: the conduct loop's judgment without waiting for

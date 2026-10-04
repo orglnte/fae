@@ -736,7 +736,7 @@ def experiment_status(
     elif watch:
         render.watch(_ns(interval=watch, flat=flat, running_only=running_only))
     else:
-        conduct.Conduct().status(_ns(flat=flat, running_only=running_only))
+        render.status(_ns(flat=flat, running_only=running_only))
 
 
 # --- results ----------------------------------------------------------------
