@@ -284,10 +284,8 @@ def cell_metrics(cells: list[dict]) -> dict:
                            for c in cells if c.get("green")]),
         "max_sloc": max_val([(c.get("author_surface") or {}).get("sloc")
                              for c in cells if c.get("green")]),
-        # Not printed. "How much code does a delivered solution take" (mean_lines,
-        # green-only) and "what did this arm cost in authored code, failures
-        # included" are different questions; the second was the original reading
-        # of this metric and is kept rather than dropped.
+        # Not printed: what an arm cost in authored code, failures included;
+        # mean_lines answers the green-only question.
         "mean_lines_all_cells": mean([(c.get("author_surface") or {}).get("lines")
                                       for c in cells]),
     }
@@ -587,11 +585,9 @@ def main() -> int:
         for line in taint_report(excluded, len(cells), details=True) or ["no TAINTED cell"]:
             print(line)
         return 0
-    # REFUSE rather than warn. A stale scoreboard is indistinguishable from a
-    # correct one, so a warning just relocates the bug to whoever is reading
-    # the scroll — which is how both of 2026-07-29's scoring fixes initially
-    # appeared to have "no effect". Exiting non-zero makes publishing a stale
-    # table impossible; --allow-stale is there for a deliberate quick look.
+    # Refuse, not warn: a stale scoreboard looks exactly like a correct one,
+    # so only a non-zero exit keeps it from being published. --allow-stale
+    # is for a deliberate quick look.
     stale = stale_records()
     if stale and "--allow-stale" not in sys.argv:
         print(f"REFUSING: {len(stale)} cell(s) have a score.json older than "
