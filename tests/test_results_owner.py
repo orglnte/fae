@@ -25,14 +25,19 @@ def _imports(path):
 class TestNoDriverOnTheResultsPath(unittest.TestCase):
 
     def test_the_scoring_modules_import_no_scheduler_or_cli(self):
-        for name in ("validate.py", "score_cell.py", "aggregate.py"):
-            bad = [m for m in _imports(ENGINE / "experiment" / "scoring" / name)
-                   if m.startswith(("fae.conduct", "fae.cli"))]
-            self.assertEqual(bad, [], name)
+        for path in sorted((ENGINE / "experiment" / "scoring").glob("*.py")):
+            bad = [m for m in _imports(path) if m.startswith(("fae.conduct", "fae.cli"))]
+            self.assertEqual(bad, [], path.name)
+
+    def test_no_experiment_module_imports_the_cli(self):
+        for path in sorted((ENGINE / "experiment").rglob("*.py")):
+            bad = [m for m in _imports(path) if m.startswith("fae.cli")]
+            self.assertEqual(bad, [], path.name)
 
     def test_the_experiment_results_methods_import_no_scheduler_or_cli(self):
         E = runs.experiment.Experiment
-        for name in ("validate_cell", "finished", "validate", "score", "aggregate", "_workspace_of"):
+        for name in ("validate_cell", "finished", "validate", "score", "aggregate",
+                     "run_report", "_workspace_of"):
             src = inspect.getsource(getattr(E, name))
             self.assertNotIn("fae.conduct", src, name)
             self.assertNotIn("fae.cli", src, name)

@@ -16,7 +16,7 @@ import time
 import ujson as json
 from datetime import datetime, timezone
 
-from fae.cell.cell import Cell
+from fae.cell.cell import ATTEMPT_BUDGET, Cell
 from fae.cell.fsm import WAIT_PHASES
 from fae import experiment as _experiment
 from fae.cell import faults
@@ -494,3 +494,35 @@ def results_aggregate(args):
         variant=getattr(args, "variant", None), where=getattr(args, "where", None) or (),
         impl=getattr(args, "impl", None), allow_stale=getattr(args, "allow_stale", False),
         **{s: getattr(args, s, False) for s in _experiment.Experiment.AGGREGATE_SWITCHES})
+
+
+# --- the run report ---------------------------------------------------------
+
+def parse_since(since):
+    """`--since` as epoch seconds: epoch seconds, or an ISO 8601 instant."""
+    try:
+        return float(since)
+    except ValueError:
+        return datetime.fromisoformat(since).timestamp()
+
+
+def run_report_text(done, live, since_ts):
+    """Experiment.run_report's (completed by variant, in progress) as the
+    two tables `results run-report` prints."""
+    when = (datetime.fromtimestamp(since_ts, timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+            if since_ts else "all time (no experiment run found)")
+    out = [f"— COMPLETED THIS RUN (since {when}) —"]
+    rows, tot_d, tot_g, tot_b = [], 0, 0, 0
+    for variant in sorted(done, key=lambda v: -done[v]["done"]):
+        b = done[variant]
+        itg = f"{sum(b['itg']) / len(b['itg']):.1f}" if b["itg"] else "-"
+        rows.append((variant, b["done"], b["green"], b["budget"], itg))
+        tot_d += b["done"]; tot_g += b["green"]; tot_b += b["budget"]
+    out.append(fmt_table(rows, ("VARIANT", "DONE", "GREEN", "BUDGET", "MEAN-ITG"))
+               if rows else "  (none)")
+    out.append(f"  total: {tot_d} done ({tot_g} green, {tot_b} budget)")
+    out.append(f"\n— IN PROGRESS ({len(live)}) —")
+    lrows = [(m, v, f"r{r}", f"{a}/{ATTEMPT_BUDGET}", ph) for m, v, r, a, ph in sorted(live)]
+    out.append(fmt_table(lrows, ("AGENT", "VARIANT", "REP", "ATTEMPT", "PHASE"))
+               if lrows else "  (none)")
+    return "\n".join(out)
