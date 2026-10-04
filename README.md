@@ -96,7 +96,7 @@ experiment/
 
 Three interfaces, one per part: the **definition** says what there is, a
 **variant** says what the agent writes and what it is given, the
-**verifier** turns one attempt into a verdict. [HOWTO.md](HOWTO.md) builds
+**verifier** turns one attempt into a verdict. [HOWTO.md](docs/HOWTO.md) builds
 one from an empty directory.
 
 ## A bigger example: Terraform vs Pulumi
@@ -162,8 +162,10 @@ two accounts), else the CLI's default:
 
 ## Where to go next
 
-- [HOWTO.md](HOWTO.md): your own experiment, from an empty directory.
-- [RUNBOOK.md](RUNBOOK.md): running a fleet (the scheduler, the backlog,
+- [HOWTO.md](docs/HOWTO.md): your own experiment, from an empty directory.
+- [RUNBOOK.md](docs/RUNBOOK.md): running a fleet (the scheduler, the backlog,
   pausing, scoring).
-- [DESIGN-fae.md](DESIGN-fae.md): what is measured and why.
+- [DESIGN-fae.md](docs/DESIGN-fae.md): what is measured and why.
+- [CONCEPTS-repo-fae.md](docs/CONCEPTS-repo-fae.md): the concepts, what each
+  is for and which objects implement it.
 - [AGENTS.md](AGENTS.md): the invariants the code keeps.
