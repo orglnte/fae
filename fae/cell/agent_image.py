@@ -24,7 +24,7 @@ from pathlib import Path
 import json
 
 from fae import mutex, plane
-from fae.queues import Book
+from fae.book import Book
 from . import image as _image
 
 CHECK_TTL_S = 3600

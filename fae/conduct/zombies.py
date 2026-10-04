@@ -26,7 +26,7 @@ from pathlib import Path
 import fae.experiment
 from fae.cell.cell import Cell
 from fae.experiment import parse_cell_id
-from . import _host
+from . import _host, _queues
 
 ZOMBIE_GRACE_S = int(os.environ.get("ZOMBIE_GRACE_S", 600))      # owned, recent
 
@@ -289,7 +289,7 @@ def find_zombies():
     # its holder dies. What can outlive a holder is INFRA, and an arm
     # slot's last-holder sidecar is the cheapest place to notice it.
     present = None                      # infra that exists, read once
-    q = fae.experiment.exp().workspace.queues
+    q = _queues.queues()
     for d in [s for lock in q.slot_pools() for s in q.slot_files(lock)]:
         owner = (q.slot_note(d) or ("",))[0]
         if not owner or owner in live or q.slot_held(d):

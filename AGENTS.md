@@ -164,7 +164,7 @@ a stranded reverify leaves the population.
 ## 3. Locks — what each one actually protects
 
 Every lock is **`flock(2)` on a file**, implemented once in
-**`fae/mutex.py`**; `fae/queues.py` (`Queues.try_slots`,
+**`fae/mutex.py`**; `fae/conduct/_queues.py` (`Queues.try_slots`,
 `Queues.adopt_slots`), `fae/cell` (`Cell.verify_lock_acquire`,
 `Cell.exclusive_acquire`) and `mutex.fs_lock` are its holders. Do not add a
 second mutex implementation.
@@ -246,7 +246,7 @@ the probe proves exclusion across a real second process. Probe by hand:
 | **variant lock** (`arm-<lock>` in the lock plane) | the `[infra] lock` a variant file names, N-ary; declared by variants whose agents hold a live infra | **cell lifetime, setup→teardown** | host contention: another live infra distorts load-test timing |
 | work slot | global semaphore, `WORK_SLOTS` | cell lifetime | total concurrent cells |
 | exclusive lock | global, the name a verifier declares in `EXCLUSIVE` (none: no lock) | one arrangement, on the cell's own fd around the verifier | whatever singleton infra a verifier declares |
-| queues-lock (`.locks/queues-lock`) | global | one change to `.queues/` (`fae/queues.py`), never while a cell waits for or holds a slot | two processes interleaving a multi-rename change: a lane renumber, a park, the weekly hold |
+| queues-lock (`.locks/queues-lock`) | global | one change to `.queues/` (`fae/conduct/_queues.py`), never while a cell waits for or holds a slot | two processes interleaving a multi-rename change: a lane renumber, a park, the weekly hold |
 
 **A cell's folder is changed only through its `Cell`** (`fae/cell/cell.py`):
 seal and its taint lines, `validation.json`, `score.json`, prepare, a
@@ -321,7 +321,7 @@ writes an `ALERT SETUP-FAILED` ledger line.
   (24 h) of the reset. A lane tag is covered only when it is listed.
   `experiment pause <agent> --admission-only` parks a lane by hand;
   `experiment resume` reverses it.
-- **A spec is a FILE and its state is the directory it sits in.** `fae/queues.py`
+- **A spec is a FILE and its state is the directory it sits in.** `fae/conduct/_queues.py`
   (`Queues`) is the only code that reads or writes `.queues/`.
   `.queues/queue/<agent>/<seq>.<cid>.json` pending (lane order is the sequence
   number), `.queues/running/<agent>/` claimed, `.queues/done/<agent>/` terminal,

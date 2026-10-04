@@ -54,7 +54,7 @@ from fae import conduct  # noqa: E402
 from fae.conduct import _host as host  # noqa: E402
 from fae.conduct import records, supervise, zombies  # noqa: E402
 from fae import cli as _cli     # noqa: E402
-from fae import queues as _queues_module  # noqa: E402
+from fae.conduct import _queues as _queues_module  # noqa: E402
 from fae import experiment as _experiment  # noqa: E402
 fae.experiment._experiment.load(_EXPERIMENT)
 exp1 = importlib.import_module("experiment.exp1") if (_EXPERIMENT / "exp1.py").is_file() else None
@@ -76,7 +76,7 @@ class _QueuesNow:
     a test set is always the one used."""
 
     def __getattr__(self, name):
-        return getattr(fae.experiment.exp().workspace.queues, name)
+        return getattr(conduct.queues(), name)
 
 
 runs.queues = _QueuesNow()

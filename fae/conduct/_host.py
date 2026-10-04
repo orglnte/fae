@@ -22,6 +22,7 @@ import time
 
 import fae.experiment
 from fae.cell.fsm import LOOP_UNCHANGED_BY
+from fae.conduct import _queues
 from fae import experiment as _experiment
 
 
@@ -144,7 +145,7 @@ def heartbeat(ws, cell=None):
 def queued(cid):
     """Does the cell's spec wait in its lane (admission resumes it)?"""
     parsed = _experiment.parse_cell_id(cid)
-    return bool(parsed) and fae.experiment.exp().workspace.queues.lane_has(parsed[0], cid)
+    return bool(parsed) and _queues.queues().lane_has(parsed[0], cid)
 
 
 def cell_state(ws, loops=None, boxes=None):

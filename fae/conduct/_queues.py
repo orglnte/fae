@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fae import mutex
+from fae.book import Book
 
 SEQ_START = 100000              # appends count up, front-inserts count down
 MAX_SLOTS, MAX_LOCK_SLOTS = 16, 8
@@ -48,11 +49,6 @@ _WEEKLY_EVENT_RE = re.compile(r'"type":"rate_limit_event","rate_limit_info":(\{[
 _SEQ_PREFIX = re.compile(r"^(?:\d+|tmp-\d+)\.")
 
 
-@contextmanager
-def _nothing():
-    yield
-
-
 def _changes(method):
     """The method changes .queues/: it runs under the queues-lock."""
     def held(self, *a, **k):
@@ -64,30 +60,6 @@ def _changes(method):
 
 def hhmm():
     return f"{datetime.now(timezone.utc):%H:%M:%S}"
-
-
-class Book:
-    """One JSON file of the queues. A missing or unreadable file reads as
-    `default`; a save replaces the file whole."""
-
-    def __init__(self, path, default=dict, changing=None):
-        self.path = Path(path)
-        self._default = default
-        self._changing = changing
-
-    def load(self):
-        try:
-            return json.loads(self.path.read_text())
-        except (OSError, ValueError):
-            return self._default()
-
-    def save(self, doc):
-        with (self._changing() if self._changing else _nothing()):
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.tmp")
-            tmp.write_text(json.dumps(doc, sort_keys=True))
-            os.replace(tmp, self.path)
-        return doc
 
 
 class Slots:
@@ -195,6 +167,11 @@ class Queues:
     def lane_agent(d):
         n = d.name
         return n[:-len(".parked")] if n.endswith(".parked") else n
+
+    @staticmethod
+    def lane_is_parked(d):
+        """Is the lane directory `d` (from lane_dirs) a parked one?"""
+        return Path(d).name.endswith(".parked")
 
     @staticmethod
     def _seq_key(p):
@@ -794,3 +771,14 @@ class Queues:
                 if resets and resets > now else "")
         hold = f" · hold: {', '.join(st['hold'])}" if st.get("hold") else ""
         return f"claude weekly: {what}{when}{hold}"
+
+
+def queues(workspace=None):
+    """The queues on `workspace`'s plane (the current experiment's when
+    None): the cell-id grammar names their specs, and a cell the workspace
+    refuses (a sealed one) is refused."""
+    import fae.experiment
+    from fae import plane as _plane
+    ws = workspace or fae.experiment.exp().workspace
+    return Queues(ws.plane / _plane.QUEUES, locks=ws.locks, cell_id=fae.experiment.cell_id,
+                  refuse=ws.refusal)

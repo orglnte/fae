@@ -292,17 +292,9 @@ class Workspace:
     def parse(self, cid):
         return (self._parse or parse_cell_id)(cid)
 
-    @property
-    def queues(self):
-        """The queues (fae/queues.py) the plane holds: the cell-id grammar
-        names their specs, and a sealed cell is refused."""
-        from fae import plane as _plane
-        from fae.queues import Queues
-        return Queues(self.plane / _plane.QUEUES, locks=self.locks, cell_id=cell_id,
-                      refuse=self._refusal)
-
-    def _refusal(self, cid):
-        # a sealed cell's spec could only ever be refused: a stuck queue entry
+    def refusal(self, cid):
+        """Why the queues must refuse `cid`'s spec, or None: a sealed cell's
+        spec could only ever be a stuck queue entry."""
         c = self.cell(cid)
         return f"SEALED — {c.seal_record().replace(chr(9), ' ') or 'sealed'}" if c.sealed else None
 
@@ -320,13 +312,15 @@ class Workspace:
     def queued_cells(self, *selectors):
         """The cells with a pending spec that any selector matches, with a
         folder here or not."""
-        return self.queues.pending_cids(lambda c: any(matches(c, s) for s in selectors))
+        import fae.conduct
+        return fae.conduct.queues(self).pending_cids(lambda c: any(matches(c, s) for s in selectors))
 
     def cell(self, cid, task=None, variant=None, rep=1, agent=None, reference=False):
         """The cell `cid` on this workspace's plane. Named by what it runs
         (`variant`), it may not exist yet: what a start prepares."""
+        import fae.conduct
         from fae.cell.cell import Cell
-        plane = dict(workspaces=self.path, root=self.root, queues=self.queues,
+        plane = dict(workspaces=self.path, root=self.root, queues=fae.conduct.queues(self),
                      locks=self.locks, transitions=self.transitions)
         if variant is None:
             return Cell(cid, **plane)
@@ -745,7 +739,8 @@ class Experiment:
 
     def slot_holders(self):
         """The cells holding a work slot now: the kernel says held, the note says who."""
-        q = self.workspace.queues
+        import fae.conduct
+        q = fae.conduct.queues(self.workspace)
         return {n[0] for n in (q.slot_note(s) for s in q.slot_files() if q.slot_held(s)) if n}
 
     def verify_holder(self):

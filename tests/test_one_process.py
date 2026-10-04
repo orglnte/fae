@@ -31,7 +31,7 @@ from _ctx import ROOT
 
 ROOT = Path(ROOT)
 PKG = ROOT / "fae" / "cell"
-QUEUES_SRC = (ROOT / "fae" / "queues.py").read_text()
+QUEUES_SRC = (ROOT / "fae" / "conduct" / "_queues.py").read_text()
 CONTRIB = ROOT / "fae" / "cell" / "contrib" / "elastic_resource"
 ENGINE_INSTRUMENTS = ROOT / "fae" / "cell" / "instruments"
 

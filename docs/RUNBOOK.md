@@ -171,8 +171,9 @@ fae/cell/           the Python cell driver: attempt loop, the Variant
                      interface + registry, verify, the ledger (the
                      one parser), the contract base, contrib/ and infra/ blocks
 fae/                the engine package: cli/, conduct/, experiment/, cell/,
-                     mutex.py (the one flock),
-                     queues.py (the only code touching .queues/),
+                     mutex.py (the one flock), book.py (a JSON file
+                     read and replaced whole), conduct/_queues.py (the
+                     only code touching .queues/),
                      plane.py (where the scheduling plane lives),
                      agent-container/
 tests/               the engine's unittest suite (locks, queues, scoring), on

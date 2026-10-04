@@ -170,7 +170,7 @@ def pause(args):
         print(f"no cells match {' '.join(sels)!r}")
         return None
     _one_cell("pause", sels, len(cids))
-    fae.experiment.exp().workspace.queues.request(cids[0], "pause", reason=args.reason, who="operator")
+    conduct.queues().request(cids[0], "pause", reason=args.reason, who="operator")
     print(f"pause requested [{args.reason}] for {cids[0]}")
     return cids[0]
 
@@ -208,7 +208,7 @@ def stop_cells(args):
     if not cids and not q_only:
         print("nothing to stop (all matches are DONE)")
         return None
-    qs = fae.experiment.exp().workspace.queues
+    qs = conduct.queues()
     n = sum(qs.shelve_cell(c, "cancelled" if cancel else "stopped") for c in q_only)
     if n:
         print(f"  {n} spec(s) out of the backlog (restore from .queues/backups/)")
@@ -223,7 +223,7 @@ def resume(args):
     flag cleared, its respawn budget reset, and its loop respawned without
     slots when it has none (never fresh). A blanket selection leaves standing
     operator decisions (roster/manual pauses, a cancel) alone."""
-    qs = fae.experiment.exp().workspace.queues
+    qs = conduct.queues()
     sels = _selectors(args)
     matches = fae.experiment.exp().workspace.select(*sels)
     _one_cell("resume", sels, len(matches))
@@ -418,7 +418,7 @@ def _variants(variants):
 
 def spawn_matrix(args):
     """Every active variant, --reps reps each, rep-outer."""
-    n, asked = fae.experiment.exp().workspace.queues.enqueue_matrix(args.agent, args.task, fae.experiment.exp().definition.active,
+    n, asked = conduct.queues().enqueue_matrix(args.agent, args.task, fae.experiment.exp().definition.active,
                                               args.reps, fresh=args.fresh)
     print(f"enqueued {n} runs for {args.agent} — `experiment run` admits them "
           f"(start it if not running: python3 cli.py experiment run)"
@@ -439,7 +439,7 @@ def top_up(args):
         c = fae.experiment.exp().cell(cid)
         ran = c.read_ledger()["iters"] or c.heartbeat() is not None
         (have if ran else unstarted).setdefault(p[1], set()).add(int(p[3]))
-    need, n = fae.experiment.exp().workspace.queues.top_up(args.agent, args.task, variants, args.to_rep, have,
+    need, n = conduct.queues().top_up(args.agent, args.task, variants, args.to_rep, have,
                                      dry_run=args.dry_run)
     for v in variants:
         idle = sorted(unstarted.get(v, set()) & set(need[v]))
@@ -457,12 +457,12 @@ def top_up(args):
 def cancel_pending(args):
     """Take pending specs out of the queue before admission (Queues.cancel_pending):
     moved aside, never deleted; running and done specs are never touched."""
-    hits = fae.experiment.exp().workspace.queues.cancel_pending(
+    hits = conduct.queues().cancel_pending(
         lambda cid: any(_experiment.matches(cid, s) for s in args.selectors), dry_run=args.dry_run)
     if not hits:
         print("cancel: no pending spec matches")
         return []
-    qs = fae.experiment.exp().workspace.queues
+    qs = conduct.queues()
     for agent, p, dest in hits:
         if dest is None:
             print(f"  would cancel  {agent:10s} {qs.spec_cid(p)}")

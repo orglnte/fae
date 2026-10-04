@@ -9,7 +9,7 @@ WHAT THIS FILE OWNS, and what it does not. It owns the cell's IDENTITY, its
 LIFECYCLE and its JUDGEMENT. Everything else is a collaborator:
 
     fsm.py           the state machine (pure; no files, no processes, no clock)
-    fae/queues.py    the slots it holds while it runs
+    the Conduct's Queues  the slots it holds while it runs
     checkpoints.py   per-attempt provenance (git tree hashes)
     surface.py       the authorable surface: manifest, seal, heal, check
     verify.py        the boundary to the experiment's verifier: Ctx out,
@@ -56,7 +56,6 @@ _mutex = _load_mutex()
 import fae.experiment  # noqa: E402
 from fae import paths as _paths  # noqa: E402
 from fae import plane as _plane  # noqa: E402
-from fae.queues import Queues  # noqa: E402
 
 HARNESS = _paths.ENGINE
 ROOT = _paths.ROOT
@@ -1892,9 +1891,12 @@ class Cell:
 
     @property
     def queues(self):
-        """The queues (fae/queues.py): this cell's slots live there. Whoever
-        admits the cell may hand it the queues it admits from."""
-        return self._queues or Queues(_plane.queues(self.root), locks=self.locks)
+        """The Conduct's queues: this cell's slots live there. Whoever admits
+        the cell may hand it the queues it admits from."""
+        if self._queues:
+            return self._queues
+        from fae.conduct import Queues
+        return Queues(_plane.queues(self.root), locks=self.locks)
 
     def verify_lock_acquire(self, poll=5.0):
         """The fleet-wide verify lock: gates are serialized WHOLE, so one

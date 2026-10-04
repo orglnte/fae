@@ -10,12 +10,12 @@ from pathlib import Path
 
 from _ctx import ROOT
 
-from fae.queues import Queues
+from fae.conduct import Queues
 
 WRITER = r"""
 import sys
 sys.path.insert(0, sys.argv[1])
-from fae.queues import Queues
+from fae.conduct import Queues
 q = Queues(sys.argv[2], cell_id=lambda a, v, r, t: f"{a}_high_{v}_{t}_r{r}")
 who, n = sys.argv[3], int(sys.argv[4])
 for i in range(n):
