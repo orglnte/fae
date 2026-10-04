@@ -4,8 +4,8 @@ FAE is a Framework for Agentic-authoring Evaluations. An experiment built
 on it runs coding agents against a task under a fixed attempt budget, judges
 every attempt with a deterministic verifier, and records how many attempts each agent needed, how
 much it authored and, optionally, graded defects. [`README.md`](README.md) is
-what FAE is and a first run, [`RUNBOOK.md`](RUNBOOK.md) the operator runbook, [`DESIGN-fae.md`](DESIGN-fae.md) the design,
-[`HOWTO.md`](HOWTO.md) the tutorial for a new experiment. This file records
+what FAE is and a first run, [`RUNBOOK.md`](docs/RUNBOOK.md) the operator runbook, [`DESIGN-fae.md`](docs/DESIGN-fae.md) the design,
+[`HOWTO.md`](docs/HOWTO.md) the tutorial for a new experiment. This file records
 what is load-bearing but not obvious from reading the code, each with the
 failure it prevents.
 
@@ -16,7 +16,7 @@ the source. Section 9 lists which change touches which section.
 
 ## How to author a new experiment
 
-Follow [`HOWTO.md`](HOWTO.md): it builds one from an empty directory, and
+Follow [`HOWTO.md`](docs/HOWTO.md): it builds one from an empty directory, and
 [fae-authoring-a-calculator](https://github.com/orglnte/fae-authoring-a-calculator) is the finished reference. The steps, and where each
 one's rules live:
 

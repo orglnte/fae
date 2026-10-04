@@ -29,7 +29,7 @@ from typing import Callable
 from fae import experiment as _experiment
 from fae import paths as _paths
 
-HOWTO = "HOWTO.md"
+HOWTO = "docs/HOWTO.md"
 
 
 # --- the host carries the variants: their infra and verify images ---------
