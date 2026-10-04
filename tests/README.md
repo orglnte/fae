@@ -9,9 +9,10 @@ installing it is plan-gated. Nothing here needs a third-party runner.
 
 ## Safety rule — these tests never touch the live fleet
 
-`fae/driver/common.py` computes `WS` (`workspaces.nosync/`) and the scheduling
-plane (`QUEUES`, `CONDUCT`, `LOCKS`, `TRANSITIONS_LOG`; `fae/plane.py`) at import
-time, and the fleet reads those paths while it runs. A test that wrote a pause file or a queue line
+The current Experiment (`fae.experiment.current()`) names the workspace
+(`workspaces.nosync/`) and the scheduling plane (`.queues/`, `.conduct/`,
+`.locks/`, `transitions.log`; `fae/plane.py`), and the fleet reads those paths
+while it runs. A test that wrote a pause file or a queue line
 under them would act on live cells.
 
 So: importing `runs` is safe (import is side-effect free — path construction,

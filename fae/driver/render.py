@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import collections
 import os
+import sys
 import time
 import ujson as json
 from datetime import datetime, timezone
@@ -393,3 +394,102 @@ def queue_list(args):
         print(f"done: {len(done)}")
         for p in done:
             print(f"  done     {p.parent.name:10s} {qs.spec_cid(p)}")
+
+
+# --- results: what the experiment's results actions found -------------------
+
+def results_validate(args, quiet=False):
+    """Validate the finished cells (the selector's, else all) and print the
+    verdicts. `quiet` prints a one-line summary instead of the per-cell
+    table; the TAINTED count always prints, since each needs an operator
+    decision and nothing is auto-requeued."""
+    _print_validation(_experiment.current().validate(getattr(args, "selector", None) or "all"),
+                      quiet)
+
+
+def _print_validation(results, quiet):
+    rows, tainted = [], []
+    for cid, why, doc in results:
+        if doc is None:
+            rows.append((cid, why, "HELD", "held by another process: not validated"))
+            continue
+        rows.append((cid, why, doc["verdict"], "; ".join(doc["taints"] + doc["warns"])[:60] or "-"))
+        if doc["verdict"] == "TAINTED":
+            tainted.append((cid, doc["taints"]))
+    if not rows:
+        print("no DONE cells match")
+        return
+    if quiet:
+        n_warn = sum(1 for r in rows if r[3] != "-" and r[2] == "VALID")
+        by = collections.Counter(r[1] for r in rows)
+        print(f"  {len(rows)} completed cell(s): "
+              + ", ".join(f"{n} {k}" for k, n in sorted(by.items()))
+              + f" | {len(rows) - len(tainted)} VALID, {len(tainted)} TAINTED"
+              + (f", {n_warn} with warnings" if n_warn else ""))
+    else:
+        print(fmt_table(rows, ("CELL", "VERDICT", "VALIDATION", "NOTES")))
+    if tainted and quiet:
+        print(f"  {len(tainted)} TAINTED — `score --tainted-cells-details` lists them")
+    elif tainted:
+        print("\nTAINTED — operator decision needed (rerun? exclude? both are "
+              "yours; nothing is auto-requeued):")
+        for cid, ts in tainted:
+            for t in ts:
+                print(f"  {cid}: {t}")
+
+
+def results_score(args):
+    """Validate, score and aggregate the cells the selector matches (all by
+    default), printing each phase. The per-cell validation table is hidden
+    unless --all-cells or a selector is given; the TAINTED count and the
+    scoring tally always print."""
+    if getattr(args, "tainted_cells_details", False):
+        results_aggregate(args)
+        return
+    selector = getattr(args, "selector", None)
+    verbose = bool(getattr(args, "all_cells", False) or selector)
+    print("Validating cells before scoring..." if verbose else
+          "Validating cells before scoring... (per-cell list hidden, see --help for filters)")
+    sys.stdout.flush()
+    # a progress bar on a TTY only, so a piped or logged run holds no \r frames;
+    # an error clears the bar first and lands on a line of its own
+    bar_on = sys.stdout.isatty()
+    seen = {"n": 0}
+
+    def validated(results):
+        _print_validation(results, quiet=not verbose)
+        print("\n--- Scoring --- (one record per cell: iterations-to-green, "
+              "authored surface -> <cell>/score.json, which the scoreboard reads)")
+        sys.stdout.flush()
+
+    def bar(i, n, cid):
+        seen["n"] = n
+        if bar_on:
+            fill = int(24 * i / n) if n else 24
+            sys.stdout.write(f"\r  [{'█' * fill}{'░' * (24 - fill)}] {i}/{n} {cid}"[:100].ljust(100))
+            sys.stdout.flush()
+
+    def failed(cid, line):
+        if bar_on:
+            sys.stdout.write("\r" + " " * 100 + "\r")
+        print(f"  ERROR scoring {cid}: {line}")
+
+    n_ok, errors = _experiment.current().score(selector, on_validated=validated, on_cell=bar,
+                                               on_failed=failed)
+    if bar_on:
+        bar(seen["n"], seen["n"], "done")
+        sys.stdout.write("\n")
+    print(f"  scored {n_ok} cell(s) -> score.json"
+          + (f", {len(errors)} FAILED" if errors else ""))
+    if not getattr(args, "no_aggregate", False):
+        print("\n--- Aggregate Scoreboard ---")
+        sys.stdout.flush()
+        results_aggregate(args)
+
+
+def results_aggregate(args):
+    """The scoreboard from the cells' score.json (fae/scoring/aggregate.py)."""
+    _experiment.current().aggregate(
+        variant=getattr(args, "variant", None), where=getattr(args, "where", None) or (),
+        impl=getattr(args, "impl", None), allow_stale=getattr(args, "allow_stale", False),
+        **{s: getattr(args, s, False) for s in _experiment.Experiment.AGGREGATE_SWITCHES})

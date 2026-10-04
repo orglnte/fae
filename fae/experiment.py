@@ -64,9 +64,12 @@ The definition's `__init__.py` declares, all optional:
 """
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import os
 import re
+import subprocess
 import sys
 import threading
 from dataclasses import dataclass
@@ -595,7 +598,6 @@ class Experiment:
         `full_gate` runs the whole gate. Exits 0 iff every variant is green;
         the per-variant verdict names the log to read.
         """
-        import subprocess
         import tempfile
         import time
         from fae.driver import check
@@ -677,6 +679,97 @@ class Experiment:
         validation.json. Raises Busy while the cell is held."""
         from fae.scoring import validate as _validate
         return _validate.validate_cell(cell, self._workspace_of(cell))
+
+    def finished(self, cell, workspace=None):
+        """`cell`'s outcome (green, failed, revoked) when it is DONE and not
+        cancelled, else None. Status ranks a recorded outcome above liveness,
+        so the host's facts (heartbeat, process table, queue) never change it."""
+        parsed = (workspace or self._workspace_of(cell)).parse(cell.cid)
+        if not parsed or not cell.has_ledger:
+            return None
+        st = cell.status(parsed, self.definition.gate.arity, None,
+                         looping=lambda: False, queued=lambda: False)
+        return st["why"] if st["state"] == "DONE" and st["why"] != "cancelled" else None
+
+    def validate(self, selector="all", workspace=None):
+        """Validate the finished cells of `workspace` (this experiment's by
+        default) that `selector` matches: [(cid, outcome, doc)], doc None for
+        a cell another process holds."""
+        from fae.cell.cell import Busy
+        from fae.scoring import validate as _validate
+        ws = workspace or self.workspace
+        out = []
+        for cid in ws.select(selector or "all"):
+            c = ws.cell(cid)
+            why = self.finished(c, ws)
+            if why is None:
+                continue
+            try:
+                doc = _validate.validate_cell(c, ws)
+            except Busy:
+                doc = None
+            out.append((cid, why, doc))
+        return out
+
+    def score(self, selector=None, workspace=None, on_validated=None, on_cell=None,
+              on_failed=None):
+        """Validate, then score the finished cells of `workspace` that
+        `selector` matches (all by default), each into its score.json
+        (fae/scoring/score_cell.py, in-process). `on_validated(results)` gets
+        validate()'s results before any cell is scored, `on_cell(i, n, cid)`
+        runs before each cell, `on_failed(cid, line)` after each failure.
+        Returns (scored, [(cid, one-line error)])."""
+        from fae.scoring import score_cell as _sc
+        ws = workspace or self.workspace
+        validated = self.validate(selector or "all", ws)
+        if on_validated:
+            on_validated(validated)
+        todo = [cid for cid, _why, _doc in validated]
+        n_ok, failed = 0, []
+        for i, cid in enumerate(todo):
+            if on_cell:
+                on_cell(i, len(todo), cid)
+            err = io.StringIO()
+            # one cell's scoring failure is that cell's, never the sweep's
+            try:
+                with contextlib.redirect_stderr(err):
+                    rc = _sc.score_one(cid, cell=ws.cell(cid))
+            except Exception as e:
+                rc = 1
+                err.write(f"{type(e).__name__}: {e}")
+            if rc == 0:
+                n_ok += 1
+                continue
+            tail = err.getvalue().strip().splitlines()
+            failed.append((cid, tail[-1][:100] if tail else "(no output)"))
+            if on_failed:
+                on_failed(*failed[-1])
+        return n_ok, failed
+
+    AGGREGATE_SWITCHES = ("include_tainted", "tainted_cells_details", "sort_discrepancy",
+                          "sort_significant")
+
+    def aggregate(self, workspace=None, variant=None, where=(), impl=None,
+                  allow_stale=False, **switches):
+        """Print the scoreboard of `workspace`'s scored cells
+        (fae/scoring/aggregate.py, a process of its own on that workspace).
+        `switches` are AGGREGATE_SWITCHES by name. Raises CalledProcessError
+        when aggregate refuses (a stale score.json, without allow_stale)."""
+        unknown = set(switches) - set(self.AGGREGATE_SWITCHES)
+        if unknown:
+            raise TypeError(f"unknown aggregate option(s): {', '.join(sorted(unknown))}")
+        ws = workspace or self.workspace
+        argv = [sys.executable, "-m", "fae.scoring.aggregate"]
+        if allow_stale:
+            argv.append("--allow-stale")
+        if variant:
+            argv += ["--variant", variant]
+        for w in where or ():
+            argv += ["--where", w]
+        if impl:
+            argv += ["--impl", impl]
+        argv += ["--" + s.replace("_", "-") for s in self.AGGREGATE_SWITCHES if switches.get(s)]
+        return subprocess.run(argv, check=True, env=dict(os.environ, WORKSPACES_DIR=str(ws.path)))
 
     # --- the transitions log, re-anchored -----------------------------------
 

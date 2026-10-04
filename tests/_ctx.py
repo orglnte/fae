@@ -47,7 +47,7 @@ os.environ.setdefault("REPO_ROOT", str(_TREE))    # one root, one experiment: th
 _EXPERIMENT = Path(os.environ.get("FAE_TEST_EXPERIMENT") or _TREE / "tests" / "fixture_experiment")
 os.environ["EXPERIMENT_DIR"] = str(_EXPERIMENT)
 
-from fae.driver import check, conduct, render, score  # noqa: E402
+from fae.driver import check, conduct, render  # noqa: E402
 from fae.driver.conduct import host, records, supervise, zombies  # noqa: E402
 from fae import cli as _cli     # noqa: E402
 from fae import queues as _queues_module  # noqa: E402
@@ -86,7 +86,6 @@ runs.queues_module = _queues_module
 runs.render = render
 runs.check = check
 runs.experiment = _experiment
-runs.score = score
 runs.host = host
 runs.records = records
 runs.Cell = _Cell
