@@ -9,7 +9,8 @@ records what happens.
 
 This document is the design as it stands. [`AGENTS.md`](../AGENTS.md) states
 the invariants the code must keep, [`RUNBOOK.md`](RUNBOOK.md) is the operator
-runbook, and [`HOWTO.md`](HOWTO.md) builds an experiment from nothing.
+runbook, [`HOWTO.md`](HOWTO.md) builds an experiment from nothing, and
+[`CONCEPTS-repo-fae.md`](CONCEPTS-repo-fae.md) defines every term used here.
 
 ## 1. What is measured
 
@@ -53,50 +54,27 @@ A cell yields:
    (`IMPL`), so populations run by different drivers can be compared rather
    than silently pooled.
 
-## 3. Vocabulary
+## 3. Infra
 
-- **Variant** — one complete set of what the agent is given and how its
-  work is judged: the code it starts from, what it may write, what it
-  reads, its tools, how the verifier runs what it wrote, and the infra
-  around both. Experimental design calls this a *treatment* (a
-  *condition* in psychology, an *arm* in clinical trials); "variant"
-  because more readers know the word. A variant is one file,
-  `<experiment>/variants/<id>.toml` (§5), and the file is the whole of it:
-  two variants differ exactly where their files differ.
-- **Factors** — what a variant is a level of, as data in its file (for
-  example `tech`, `access`, `docs`). The engine pools nothing by them;
-  results group by variant and by each factor (§9).
-- **Task** — the skeleton every variant's template starts from, and the
-  prompt. It is versioned together with the verifier, since the two are
-  correlated by construction.
-- **Arrangement** and **gate** — the verifier judges an attempt under
-  several arrangements (for example, orderings of load events); the gate
-  passes only if all of them pass. How many, and whether the first one
-  rotates with the attempt number, is the experiment's choice.
-- **Verdict** — pass or fail, the stage that failed, and whether the attempt
-  is charged. An uncharged failure is the rig's, and the attempt is refunded.
-- **Infra** — what exists around a variant's program, an object of its
-  own (an `Infra` class the variant file names, instantiated per cell with
-  the variant), described by four independent properties:
-  1. the *cell infra*, provisioned for the cell's lifetime;
-  2. *access*, whether the agent's container can reach it
-     (`access_infra` in the file);
-  3. the *cap*, how many live infra of that kind the host carries at
-     once (the variant's lock);
-  4. the *verify infra*, provisioned per arrangement inside the
-     verifier's container.
-  Variants that share an infra class share its code; what one variant
-  sets differently (its access, its parameters) the class reads from the
-  variant.
-- **Retired variant** — a variant that still names existing cells but is
-  never scheduled again (`retired = true`).
+What exists around a variant's program is described by four independent
+properties, each read from the variant file by its infra class:
+
+1. the *cell infra*, provisioned for the cell's lifetime;
+2. *access*, whether the agent's container can reach it (`access_infra`);
+3. the *cap*, how many live infra of that kind the host carries at once
+   (the variant's lock);
+4. the *verify infra*, provisioned per arrangement inside the verifier's
+   container.
+
+Variants that share an infra class share its code; what one variant sets
+differently the class reads from the variant.
 
 ## 4. Layers
 
 1. **The engine** (`fae/`) owns everything that is not an experiment's
    choice: cells and their lifecycle, the ledger, the locks, the scheduler
    and supervisor (`experiment run`), restore-and-judge, the gate loop, the seal,
-   the fingerprint, the image builder, the agent CLIs, grading, the taint
+   the fingerprint, the image builder, the agent CLIs, scoring, the taint
    framework, and conformance of the orchestration to its formal model. It
    names no experiment.
 2. **Contrib blocks** (`fae/cell/contrib/`, `fae/cell/infra/`) are
@@ -112,6 +90,10 @@ A cell yields:
 
 The host needs Python and a Docker daemon. Everything the agent authors and
 everything the verifier runs executes in containers.
+
+The engine's owners and what each owns are drawn from the code on an Objects
+Board ([objectsboard](https://github.com/orglnte/objectsboard-skill)); the
+concept map, [`CONCEPTS-repo-fae.md`](CONCEPTS-repo-fae.md), is laid over them.
 
 ## 5. The experiment definition
 
@@ -206,11 +188,11 @@ run or refund touches only (1).
 **The fingerprint** records provenance: this verdict came from exactly this
 task, verifier, variants and engine. It hashes the content and path of every
 file in the experiment tree, the declared fingerprint trees and the engine's
-cell package. It is pinned when a cell's driver starts, and a mismatch at a
+`fae/cell/` and `fae/experiment/` packages. It is pinned when a cell's driver starts, and a mismatch at a
 verify voids that verify. It hashes content rather than git objects, so an
 uncommitted edit changes it too, and an empty tree or a missing declared
 file is fatal rather than a quietly smaller surface. Hence the **drain
-rule**: the experiment tree and the engine's cell package change only in a
+rule**: the experiment tree and those two packages change only in a
 drain window, with no cell running (`experiment pause all`, edit, `experiment
 resume all`); a resumed cell pins the new fingerprint.
 
@@ -231,33 +213,15 @@ experiment's layer. The base keeps the clients at their upstream versions,
 since providers gate new models on a minimum client version, and the layer
 is rebuilt whenever its content or the base changes.
 
-## 8. Orchestration
+## 8. Reporting
 
-`experiment run` is the only scheduler and the only supervisor. The backlog is a
-directory tree with one file per spec, moved from queue to running to done
-by atomic renames. The run admits specs round-robin across agent lanes under
-a global cap and a per-lane cap; stands cells down on provider walls and
-cools their lane; holds budget lanes near a weekly usage cap; repairs
-crashed or hung cells by requeuing them; validates finished cells; and reaps
-orphaned infra by the names the infra classes and verifiers declare.
+The scoreboard compares each (model, variant) row against a baseline with a
+significance test, groups by each factor the variant files declare, and can
+cut the table to one driver (`IMPL`) to compare it with its predecessor. The
+engine's table names no experiment's variants or metrics; the experiment's
+`report_summary` adds its own reading.
 
-Every lock is a `flock(2)` on a file held by the driver's own descriptor, so
-recovery after any crash is the kernel's. The orchestration's state machine
-is specified in `.tla/Runs.tla`; every live transition is logged and can be
-replayed against the specification. A wiped workspace retires its cell id in
-that log, so a reused id is a new cell rather than a contradiction.
-
-## 9. Reporting
-
-`cli.py results score` validates every finished cell, writes its
-`score.json`, and prints the ranked table: per (model, variant), the green
-rate, attempts to green, authored lines and error rates, with significance
-against a baseline; the aggregate also groups by each factor the variant
-files declare. It can cut the table to one driver and compare it with its
-predecessor. The engine's table names no experiment's variants or metrics;
-the experiment's `report_summary` adds its own reading.
-
-## 10. Trust and limits
+## 9. Trust and limits
 
 1. **The verifier is trusted.** It runs with the operator's uid and access
    to the Docker daemon, so that it can provision infra. Its container
@@ -272,7 +236,7 @@ the experiment's `report_summary` adds its own reading.
    through is voided, and a load shape is tuned to each host's store before
    scored cells run.
 
-## 11. Validation
+## 10. Validation
 
 What the repository can show about the method, and what it cannot yet.
 Each check below names where to run or read it.
