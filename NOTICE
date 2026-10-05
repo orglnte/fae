@@ -1,0 +1,7 @@
+fae: a Framework for Agentic-authoring Evaluations
+Copyright 2026 the authors of https://github.com/orglnte/fae
+
+This product includes fae: https://github.com/orglnte/fae
+
+This product includes PlusPy (https://github.com/tlaplus/PlusPy),
+Copyright (c) 2020 TLA+, under the MIT License: fae/utils/pluspy/LICENSE.

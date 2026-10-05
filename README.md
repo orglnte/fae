@@ -169,3 +169,10 @@ two accounts), else the CLI's default:
 - [CONCEPTS-repo-fae.md](docs/CONCEPTS-repo-fae.md): the concepts, what each
   is for and which objects implement it.
 - [AGENTS.md](AGENTS.md): the invariants the code keeps.
+
+## License and citation
+
+Apache-2.0: see [LICENSE](LICENSE). Redistributions carry [NOTICE](NOTICE).
+The bundled TLA+ interpreter, PlusPy, keeps its MIT license
+([fae/utils/pluspy/LICENSE](fae/utils/pluspy/LICENSE)). To cite fae, use
+[CITATION.cff](CITATION.cff) (GitHub's "Cite this repository").

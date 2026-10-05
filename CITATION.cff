@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use fae or results measured with it, please cite it as below."
+title: "fae: a Framework for Agentic-authoring Evaluations"
+abstract: "The engine that runs coding agents against a task and judges every attempt."
+type: software
+authors:
+  - name: "The fae authors"
+    website: "https://github.com/orglnte/fae"
+repository-code: "https://github.com/orglnte/fae"
+url: "https://github.com/orglnte/fae"
+license: Apache-2.0
+date-released: "2026-10-05"
+keywords:
+  - coding agents
+  - evaluation
+  - agentic authoring
+  - benchmarking
