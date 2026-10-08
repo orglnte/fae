@@ -243,9 +243,10 @@ class Queues:
         return False
 
     @_changes
-    def enqueue(self, agent, spec, front=False):
+    def enqueue(self, agent, spec, front=False, dry_run=False):
         """Add a spec to a lane. Returns its path, or None when the lane
-        already holds that cid or the cell may not be queued (refuse)."""
+        already holds that cid or the cell may not be queued (refuse). A dry
+        run makes the same checks and returns the cid instead, writing nothing."""
         cid = self._cell_id(agent, spec["variant"], spec.get("rep", 1), spec.get("task", "T1"))
         if self.lane_has(agent, cid):
             return None
@@ -253,6 +254,8 @@ class Queues:
         if why:
             print(f"skipping {cid}: {why}")
             return None
+        if dry_run:
+            return cid
         d = self._writable_lane(agent)
         d.mkdir(parents=True, exist_ok=True)
         p = d / f"{self._next_seq(d, front):06d}.{cid}.json"
@@ -412,10 +415,13 @@ class Queues:
         return len(specs)
 
     @_changes
-    def enqueue_matrix(self, agent, task, variants, reps, fresh=False):
-        """`reps` reps of every variant, rep-outer. (enqueued, asked)."""
+    def enqueue_matrix(self, agent, task, variants, reps, fresh=False, dry_run=False):
+        """`reps` reps of every variant, rep-outer. (enqueued, asked); a dry
+        run enqueues nothing and its first element lists the cids it would."""
         specs = [dict(task=task, variant=v, rep=rep, fresh=fresh)
                  for rep in range(1, reps + 1) for v in variants]
+        if dry_run:
+            return [c for c in (self.enqueue(agent, s, dry_run=True) for s in specs) if c], len(specs)
         return sum(self.enqueue(agent, s) is not None for s in specs), len(specs)
 
     @_changes
