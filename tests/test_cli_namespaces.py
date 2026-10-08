@@ -124,7 +124,7 @@ class TestTheRunCommands(unittest.TestCase):
         (ns,), _ = invoke("spawn_matrix", ["queue", "add", "opus",
                                            "--matrix", "--reps", "5"], mod=cli)
         self.assertEqual(vars(ns), dict(agent="opus", reps=5, task="T1",
-                                        fresh=False))
+                                        fresh=False, dry_run=False))
 
     def test_queue_add_to_rep(self):
         (ns,), _ = invoke("top_up", ["queue", "add", "opus",

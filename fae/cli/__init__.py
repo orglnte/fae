@@ -418,6 +418,15 @@ def _variants(variants):
 
 def spawn_matrix(args):
     """Every active variant, --reps reps each, rep-outer."""
+    if args.dry_run:
+        would, asked = conduct.queues().enqueue_matrix(
+            args.agent, args.task, fae.experiment.exp().definition.active, args.reps,
+            fresh=args.fresh, dry_run=True)
+        for cid in would:
+            print(f"  would enqueue  {cid}")
+        print(f"[dry-run] would enqueue {len(would)} spec(s) for {args.agent}"
+              + (f"; {asked - len(would)} already pending" if len(would) < asked else ""))
+        return
     n, asked = conduct.queues().enqueue_matrix(args.agent, args.task, fae.experiment.exp().definition.active,
                                               args.reps, fresh=args.fresh)
     print(f"enqueued {n} runs for {args.agent} — `experiment run` admits them "
@@ -580,7 +589,7 @@ def queue_add(
     fresh: bool = typer.Option(False, "--fresh",
                               help="WIPES each workspace before running it"),
     dry_run: bool = typer.Option(False, "--dry-run",
-                                 help="with --to-rep: print the plan, enqueue nothing"),
+                                 help="print the plan, enqueue nothing"),
 ):
     """Add work to the queue.
 
@@ -594,7 +603,7 @@ def queue_add(
         top_up(_ns(agent=agent, to_rep=to_rep, variants=list(variant),
                        task=task, dry_run=dry_run))
         return
-    spawn_matrix(_ns(agent=agent, reps=reps, task=task, fresh=fresh))
+    spawn_matrix(_ns(agent=agent, reps=reps, task=task, fresh=fresh, dry_run=dry_run))
 
 
 @queue_app.command("list")

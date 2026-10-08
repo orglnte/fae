@@ -370,6 +370,20 @@ class TestCancelAndList(OrchTmpCase):
         self.assertEqual(len(runs.queues.lane_specs("aaa")), 1)
         self.assertFalse((self.queues / ".to_be_deleted").exists())
 
+    def test_a_matrix_dry_run_enqueues_nothing_and_names_what_it_would(self):
+        self.spec("aaa", "aaa_high_beta_apidocs_T1_r1")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            runs.cli.spawn_matrix(runs.argparse.Namespace(agent="aaa", reps=1, task="T1",
+                                                          fresh=False, dry_run=True))
+        self.assertEqual([runs.queues.spec_cid(p) for p in runs.queues.lane_specs("aaa")],
+                         ["aaa_high_beta_apidocs_T1_r1"])
+        active = runs.cli.fae.experiment.exp().definition.active
+        self.assertIn(f"would enqueue {len(active) - 1} spec(s) for aaa; 1 already pending",
+                      out.getvalue())
+        self.assertIn("would enqueue  aaa_high_alpha_apidocs_T1_r1", out.getvalue())
+        self.assertNotIn("would enqueue  aaa_high_beta_apidocs_T1_r1", out.getvalue())
+
     def test_a_running_spec_is_not_cancelled(self):
         p = self.spec("aaa", "aaa_high_beta_apidocs_T1_r1")
         runs.queues.claim("aaa", p)
