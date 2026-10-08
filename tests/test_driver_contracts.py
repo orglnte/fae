@@ -323,6 +323,21 @@ class TestWallsAreNotBuilds(DriverCase):
         self.assertIn("auth-wall", (c.ws / "iterations.log").read_text())
         self.assertEqual(self.transitions()[-1], "Crash")
 
+    def test_an_unconfined_agent_halts_the_cell_without_an_attempt(self):
+        c = self.cell()
+        c._breach = "tools ['WebSearch']"
+        self._agent_script(c, [("init\n", cell.Cell.AGENT_UNCONFINED, False)])
+        with self.assertRaises(cell.Halt) as cm:
+            c.run(ignore_slots=True, verify=self.green)
+        self.assertEqual(cm.exception.code, 42)
+        self.assertIn("WebSearch", str(cm.exception))
+        ev = self.events(c)
+        self.assertNotIn("ITER", ev)
+        log = (c.ws / "iterations.log").read_text()
+        self.assertIn("unconfined", log)
+        self.assertIn("AGENT-UNCONFINED tools ['WebSearch']", log)
+        self.assertEqual(self.transitions()[-1], "Crash")
+
     def test_a_pause_during_the_wait_stands_down_not_crashes(self):
         from fae.testagent import LIMIT429_LINES
         wall = "\n".join(LIMIT429_LINES) + "\n"
@@ -402,3 +417,49 @@ class TestTheDriverKeepsTheHostAwake(DriverCase):
             self.assertEqual(c.run(ignore_slots=True, stub_overlay=self.overlay, verify=self.green), "green")
         self.assertEqual(calls, [os.getpid()])
         self.assertEqual(ended, [True])
+
+
+class TestTheClaudeAgentIsCheckedBeforeItRuns(DriverCase):
+    """_agent's claude path: the token reaches the docker client's environment,
+    the staged home and the stream are checked, and an AGENT_CMD is alerted."""
+
+    def claude_cell(self, stream="1", token=None):
+        from fae.cell import confinement
+        c = self.cell()
+        creds = self.root / "creds"
+        creds.mkdir(exist_ok=True)
+        (creds / ".oauth_token").write_text((token or confinement.TOKEN_PREFIX + "abc") + "\n")
+        c.conf.values.update(AGENT_CLI="claude", AGENT_HOME=str(creds), STREAM_AGENT=stream)
+        home = c.ws / ".agent-claude"
+        home.mkdir(exist_ok=True)
+        confinement.stage(home)
+        (c.ws / "PROMPT.md").write_text("task\n")
+        c.agent_image = lambda: "img"
+        c._prompt = lambda attempt: c.ws / "PROMPT.md"
+        runs = []
+        c._run_bounded = lambda argv, f, env, watch=None: runs.append((argv, env, watch)) or 0
+        return c, runs
+
+    def test_the_token_goes_to_the_clients_environment_and_the_transcript_is_watched(self):
+        from fae.cell import confinement
+        c, runs = self.claude_cell()
+        self.assertEqual(c._agent(1), 0)
+        argv, env, watch = runs[0]
+        self.assertEqual(env[confinement.TOKEN_ENV], confinement.TOKEN_PREFIX + "abc")
+        self.assertNotIn(confinement.TOKEN_PREFIX + "abc", " ".join(argv))
+        self.assertEqual(watch, c.ws / "agent.attempt-1.log")
+
+    def test_no_stream_a_bad_token_or_an_edited_home_never_starts_the_agent(self):
+        for stream, token, edit in (("", None, False), ("1", "sk-ant-api03-x", False),
+                                    ("1", None, True)):
+            with self.subTest(stream=stream, token=token, edit=edit):
+                c, runs = self.claude_cell(stream=stream, token=token)
+                if edit:
+                    (c.ws / ".agent-claude" / "settings.json").write_text("{}")
+                self.assertEqual(c._agent(1), cell.Cell.AGENT_UNCONFINED)
+                self.assertEqual(runs, [])
+
+    def test_an_agent_cmd_override_on_a_claude_cell_is_alerted(self):
+        c, runs = self.claude_cell()
+        c._agent(1, agent_cmd="true")
+        self.assertIn("AGENT-CMD override", (c.ws / "iterations.log").read_text())

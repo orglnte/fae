@@ -286,8 +286,6 @@ def resume(args):
                 continue
         if run.reset_respawn_budgets([cid]):
             acts.append("respawn budget reset")
-        for other in fae.experiment.exp().workspace.select(agent):
-            fae.experiment.exp().cell(other).refresh_creds()
         # claim before spawning: claim() is one rename and refuses an existing
         # claim, so the run cannot admit the same spec meanwhile
         claimed = None

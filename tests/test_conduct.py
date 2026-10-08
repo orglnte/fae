@@ -224,7 +224,6 @@ class TestFinishedSpecsAreRetired(ConductCase):
         with contextlib.redirect_stdout(io.StringIO()), \
                 runs.patch_host("loop_parents", return_value={}), \
                 runs.patch_host("containers", return_value=set()), \
-                mock.patch.object(Cell, "refresh_creds"), \
                 mock.patch.object(runs.conduct.Conduct, "_spawn", return_value=None):
             runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
         self.assertEqual(runs.queues.lane_specs(m), [], "spec still in the lane")
@@ -243,7 +242,6 @@ class TestFinishedSpecsAreRetired(ConductCase):
         with contextlib.redirect_stdout(io.StringIO()), \
                 runs.patch_host("loop_parents", return_value={}), \
                 runs.patch_host("containers", return_value=set()), \
-                mock.patch.object(Cell, "refresh_creds"), \
                 mock.patch.object(runs.conduct.Conduct, "_spawn", return_value=3):
             runs.cli.resume(SimpleNamespace(selectors=[cid], force=False))
         self.assertEqual(len(runs.queues.lane_specs(m)), 1, "spec was not returned")

@@ -938,7 +938,6 @@ class TestResumeRespectsPerModelCap(OperatorTestCase):
              runs.patch_host("cell_state",
                                return_value=dict(cid=cid, state="CRASHED",
                                                  why="loop")), \
-             mock.patch.object(Cell, "refresh_creds"), \
              mock.patch.object(runs.conduct.Conduct, "respawn") as rs:
             runs.cli.resume(args)
         return rs

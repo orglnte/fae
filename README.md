@@ -67,11 +67,12 @@ python3 cli.py experiment smoke      # one cell per language, the known answer i
 
 That ran the whole pipeline (a sealed workspace, the verifier in its
 container, the ledger) with no agent and no tokens. Now a real agent: build
-the agent image once, log Claude in inside it, and start one cell.
+the agent image once, make a Claude token inside it, and start one cell.
 
 ```sh
 bash ../fae/fae/agent-container/build.sh
-docker run -it --rm -v "$PWD/.agent-home/.claude:/home/node/.claude" fae-agent:latest claude auth login
+docker run -it --rm fae-agent:latest claude setup-token   # prints the token
+mkdir -p .agent-home/.claude && pbpaste > .agent-home/.claude/.oauth_token && chmod 600 .agent-home/.claude/.oauth_token
 python3 cli.py cell spawn sonnet zig --rep 1
 python3 cli.py experiment status   # its phase, its attempt, its verdict
 python3 cli.py results score  # the table
@@ -148,13 +149,14 @@ The agents an experiment compares are part of the experiment, in git:
 `agents.toml` beside its variants, one `[agents.<tag>]` per agent naming its
 CLI and model id. The tag (`sonnet`, `gemini`, `dsv4f`, …) names every cell
 id. Each agent signs in through a credentials home on this machine, never
-through a config value, and each cell gets a fresh copy of it. The home is
+through a config value, and each cell gets its own copy of it (a claude
+token reaches the agent through its environment instead). The home is
 `fae.toml`'s `[agents.<tag>] home` when set (two agents of one CLI can use
 two accounts), else the CLI's default:
 
 | CLI | default home | what it must hold |
 |---|---|---|
-| `claude` | `.agent-home/.claude` | `.credentials.json`: `claude auth login` inside the agent image, as above |
+| `claude` | `.agent-home/.claude` | `.oauth_token`: the token `claude setup-token` prints inside the agent image (`chmod 600`); a login (`.credentials.json`) is refused, since it carries the account's connectors |
 | `opencode` | `.agent-home/.opencode` | `opencode.key`: the API key, written by you (`chmod 600`) |
 | `agy` | `.agent-home/.gemini` | a signed-in agy home: sign in once inside the agent image with it mounted at `/home/node/.gemini` |
 
