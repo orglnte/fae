@@ -277,11 +277,11 @@ def render(flat=False, running_only=False):
             out.extend(qsec)
         head = footer(loops, boxes)
         bar = " " * head.index("|") + "| "      # the lines below hang off the state's bar
-        out.append("\n" + head)
+        out.append("\n\n" + head)
         _mp = fae.conduct.mem_pressure()
         if _mp["label"]:
             out.append(f"{bar}mem: {_mp['used_gb']:.1f}/{_mp['total_gb']:.1f}GB used "
-                       f"({_mp['avail_pct']}% avail), pressure={_mp['label']}  ·  "
+                       f"({_mp['avail_pct']}% avail), pressure={_mp['label']}, "
                        f"swap {_mp['swap_used_mb']:.0f}/{_mp['swap_total_mb']:.0f}MB")
         weekly = fae.conduct.queues().weekly_line()
         if weekly:
