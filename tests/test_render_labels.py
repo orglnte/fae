@@ -25,6 +25,7 @@ class TestTheVariantLabels(unittest.TestCase):
              runs.patch_host("loop_parents", return_value={}), \
              runs.patch_host("heartbeat", return_value=None), \
              mock.patch.object(runs.zombies, "find_zombies", return_value=[]), \
+             mock.patch.object(runs.zombies, "cell_containers", return_value=[]), \
              mock.patch.object(runs.render, "queued_summary", return_value=[]), \
              mock.patch.object(runs.queues_module.Queues, "weekly_line", return_value=""), \
              mock.patch.object(fae.experiment._experiment.Experiment, "definition", new_callable=mock.PropertyMock) as d:

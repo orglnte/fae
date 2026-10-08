@@ -126,15 +126,16 @@ class Conduct:
             return None
 
     def run_line(self):
-        """`run: UP (cap=N)`, `run: DOWN`, or `run: DOWN (stale pidfile)`."""
+        """`exp: RUNNING (cap=N)` while the run is up, else `exp: PAUSED`,
+        with `(stale pidfile)` when the run died."""
         if not self.pidfile.exists():
-            return "run: DOWN"
+            return "exp: PAUSED"
         try:
             pid_s, _, cap = self.pidfile.read_text().partition(" ")
             os.kill(int(pid_s), 0)
-            return f"run: UP ({cap.strip() or '?'})"
+            return f"exp: RUNNING ({cap.strip() or '?'})"
         except (OSError, ValueError):
-            return "run: DOWN (stale pidfile)"
+            return "exp: PAUSED (stale pidfile)"
 
     # --- the leftovers of dead cells, as the run finds them ------------------
 
@@ -142,6 +143,11 @@ class Conduct:
     def find_zombies():
         """Leftovers of dead cells: [(kind, ident, owner, note)]."""
         return zombies.find_zombies()
+
+    @staticmethod
+    def cell_containers(boxes):
+        """The names in `boxes` a cell owns."""
+        return zombies.cell_containers(boxes)
 
     @staticmethod
     def janitor_lines():
