@@ -42,6 +42,7 @@ from pathlib import Path
 
 from . import archive
 from fae.experiment import config as _config
+from . import confinement
 from . import faults
 from fae.experiment import variants as _variants
 from .checkpoints import Checkpoints
@@ -1107,20 +1108,6 @@ class Cell:
                        capture_output=True)
         return outcome
 
-    def refresh_creds(self):
-        """Copy the agent's current credentials into this cell's own agent home,
-        for a claude agent whose home the cell already staged."""
-        agent = self.cid.split("_", 1)[0]
-        conf = self._load_conf(agent)
-        if conf.get("AGENT_CLI") != "claude":
-            return False
-        creds = Path(conf.get("AGENT_HOME", "")) / ".credentials.json"
-        home = self.ws / self.AGENT_HOMES["claude"][0]
-        if not creds.is_file() or not home.is_dir():
-            return False
-        (home / ".credentials.json").write_bytes(creds.read_bytes())
-        return True
-
     # --- evidence: what the verify and the agent left -----------------------
     # Paths to read; nothing outside fae/cell builds one, and nothing writes
     # through them.
@@ -2075,8 +2062,8 @@ class Cell:
                    "claude": (".agent-claude", "stage_agent_claude")}
 
     def stage_agent(self):
-        """Give the cell its own agent home, holding credentials and nothing
-        else. One per cell: a shared home would let each agent read every prior
+        """Give the cell its own agent home, holding its credentials or, for
+        claude, its confinement settings, nothing else. One per cell: a shared home would let each agent read every prior
         agent's memory and transcripts.
 
         Returns the staged path, or None when the agent needs no CLI.
@@ -2145,13 +2132,16 @@ class Cell:
     DOCKER_RUN_FAILED = 125
     AGENT_TIMEOUT_S = 3 * 3600
     AGENT_TIMED_OUT = -9      # _agent's return when the wall-clock limit killed it
+    AGENT_UNCONFINED = -1001  # _agent's return when confinement failed; no signal's rc
+    UNCONFINED = "unconfined"  # the attempt loop's: a breach halts the cell
+    _breach = ""
     AUTH_WALL = "auth-wall"      # credentials/config: systemic halt
 
     def agent_with_retries(self, attempt, stub_overlay=None, agent_cmd=None,
                            extra_env=None, pre=None):
         """Run the agent until it produces a build, a fault budget runs out, or
         the operator pauses. Returns True when the attempt may be judged, else
-        one of PAUSED / AGENT_FAULT / AUTH_WALL.
+        one of PAUSED / AGENT_FAULT / AUTH_WALL / AGENT_CONTAINER / UNCONFINED.
 
         A transient fault retries the SAME attempt indefinitely — a usage wall
         is not a failed build, and charging it as one corrupts
@@ -2189,6 +2179,10 @@ class Cell:
                 self._append("AGENT", *agent_time_fields(attempt, runs, None), client)
                 (self.ws / "timeout.last").write_text("1\n")
                 return True
+            if rc == self.AGENT_UNCONFINED:
+                self._append("HALT", f"attempt={attempt}", "unconfined")
+                self._append("ALERT", f"attempt={attempt}", f"AGENT-UNCONFINED {self._breach}")
+                return self.UNCONFINED
             if rc == self.DOCKER_RUN_FAILED and self._docker_refused(log):
                 self._append("HALT", f"attempt={attempt}", "agent-container")
                 return self.AGENT_CONTAINER
@@ -2384,6 +2378,9 @@ class Cell:
         override = agent_cmd or os.environ.get("AGENT_CMD")
         with log.open("w") as f:
             if override:
+                if cli == "claude":
+                    self._append("ALERT", f"attempt={attempt}",
+                                 "AGENT-CMD override: the agent's confinement is not checked")
                 env = self.conf.child_env(
                     {**base, "PROMPT_FILE": self._prompt(attempt),
                      "REPO_ROOT": self.root, "ARTIFACTS": self.artifacts,
@@ -2395,13 +2392,24 @@ class Cell:
                           'eval "$AGENT_CMD"\n')
                 return self._run_bounded(["bash", "-c", script], f, env)
             env = self.conf.child_env(base, extra_env)
+            watch = None
+            if cli == "claude":
+                try:
+                    env[confinement.TOKEN_ENV] = confinement.token(self.conf.get("AGENT_HOME", ""))
+                    confinement.check_home(home)
+                    if not self.conf.get("STREAM_AGENT", ""):
+                        raise confinement.Breach("stream_agent is off: the init line "
+                                                 "that proves confinement is never written")
+                except confinement.Breach as e:
+                    return self._unconfined(f, str(e))
+                watch = log
             prompt = self._prompt(attempt)
             fb = self.ws / "feedback"
             argv = self.agent_argv(
                 self.conf, self.cid, self.artifacts, home, prompt,
                 ee.get("DOCKER_NET", ""), ee.get("KUBE_MOUNT", ""),
                 feedback=str(fb) if fb.is_dir() else "", image=self.agent_image())
-            return self._run_bounded(argv, f, env)
+            return self._run_bounded(argv, f, env, watch=watch)
 
     AGENT_CONTAINER_PREFIX = "fae-agent-"
 
@@ -2446,13 +2454,12 @@ class Cell:
                               "-e", "CELL_ID", "-e", "VARIANT", "-e", "TESTAGENT_PLAN", "-e", "SERVICE_PORT"] + net
                     + [image, "python3", "/home/node/.testagent/testagent.py", prompt])
         # claude
-        oauth = Path(conf.get("AGENT_HOME", "")) / ".oauth_token"
-        tok = []
-        if oauth.is_file() and oauth.stat().st_size:
-            tok = ["-e", f"CLAUDE_CODE_OAUTH_TOKEN={oauth.read_text().strip()}"]
+        # the token's value is in the docker client's environment, never its argv
+        tok = ["-e", confinement.TOKEN_ENV]
         effort = conf.get("EFFORT", "")
         stream = conf.get("STREAM_AGENT", "")
-        tail = ["claude", "-p", "--dangerously-skip-permissions", "--model", model]
+        tail = ["claude", "-p", "--dangerously-skip-permissions", *confinement.CLI_LIMITS,
+                "--model", model]
         if feedback:
             tail += ["--add-dir", "/feedback"]
         if effort:
@@ -2465,18 +2472,60 @@ class Cell:
     def _agent_timeout_s(self):
         return int(self.conf.get("AGENT_TIMEOUT_S") or self.AGENT_TIMEOUT_S)
 
-    def _run_bounded(self, argv, f, env):
+    def _run_bounded(self, argv, f, env, watch=None):
         """Run the agent under the wall-clock limit. Killing the docker client
-        leaves its container running, so the container goes too."""
+        leaves its container running, so the container goes too. With `watch`
+        (the transcript), the session's init line is read as soon as it is
+        written, and an agent it shows unconfined is killed."""
         limit = self._agent_timeout_s()
+        deadline = time.monotonic() + limit
+        w = confinement.Watch(watch) if watch else None
+        p = subprocess.Popen(argv, stdout=f, stderr=f, env=env)
         try:
-            return subprocess.run(argv, stdout=f, stderr=f, env=env, timeout=limit).returncode
-        except subprocess.TimeoutExpired:
+            while True:
+                try:
+                    rc = p.wait(timeout=1 if w else max(0.0, deadline - time.monotonic()))
+                except subprocess.TimeoutExpired:
+                    rc = None
+                if w:
+                    init = w.poll()
+                    if init is not None:
+                        why = confinement.breach(init)
+                        if why:
+                            self._kill_agent(p)
+                            return self._unconfined(f, why)
+                        w = None
+                    elif (rc is not None and rc != self.DOCKER_RUN_FAILED
+                          and self._produced_output(Path(watch))):
+                        return self._unconfined(f, "the agent ran without writing an init line")
+                if rc is not None:
+                    return rc
+                if time.monotonic() >= deadline:
+                    self._kill_agent(p)
+                    f.write(f"\n[fae] agent killed after {limit}s (AGENT_TIMEOUT_S)\n")
+                    f.flush()
+                    return self.AGENT_TIMED_OUT
+        except BaseException:
+            self._kill_agent(p)
+            raise
+
+    def _kill_agent(self, p):
+        """The docker client first, then its container, which outlives it."""
+        if p.poll() is None:
+            p.kill()
+        try:
             subprocess.run(["docker", "rm", "-f", self.agent_container(self.cid)],
                            capture_output=True)
-            f.write(f"\n[fae] agent killed after {limit}s (AGENT_TIMEOUT_S)\n")
-            f.flush()
-            return self.AGENT_TIMED_OUT
+        except OSError:
+            pass
+        p.wait()
+
+    def _unconfined(self, f, why):
+        """Record why the agent is not confined; the attempt loop halts the cell."""
+        self._breach = why
+        f.write(f"\n[fae] agent unconfined, not run or killed: {why}\n")
+        f.flush()
+        return self.AGENT_UNCONFINED
 
     def _restore_fixed(self):
         """Revert out-of-surface edits before judging (Surface.heal). The
@@ -2618,6 +2667,13 @@ class Cell:
                                f"{self.cid} attempt {attempt} — no wait "
                                f"lifts it; fix the credential/model and "
                                f"re-run (cell resumes here)", 42)
+                if outcome == self.UNCONFINED:
+                    self.apply(T.CRASH, "agent-unconfined")
+                    raise Halt(f"HALT[agent]: the agent at {self.cid} attempt "
+                               f"{attempt} is not confined ({self._breach}) — "
+                               f"agent.attempt-{attempt}.log; fix the credential "
+                               f"or limits (fae/cell/confinement.py) before it "
+                               f"runs again", 42)
                 if outcome == self.AGENT_CONTAINER:
                     self.apply(T.CRASH, "agent-container")
                     raise Halt(f"HALT[agent]: docker could not start the agent "

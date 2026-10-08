@@ -330,8 +330,9 @@ def _refuse(dest, suffix):
 
 
 def stage_agent(conf, cli, dest, root):
-    """Give the cell its own agent home holding credentials and nothing else —
-    a shared home would let each agent read prior agents' memory/transcripts."""
+    """Give the cell its own agent home holding its credentials or, for
+    claude, its confinement settings, nothing else — a shared home would let
+    each agent read prior agents' memory/transcripts."""
     import shutil
     dest = str(dest)
     home = Path(conf.get("AGENT_HOME", ""))
@@ -379,15 +380,15 @@ def stage_agent(conf, cli, dest, root):
     _refuse(dest, "/.agent-claude")
     shutil.rmtree(dest, ignore_errors=True)
     os.makedirs(dest)
-    cred = home / ".credentials.json"
-    if not cred.is_file():
+    # The token stays out of the cell's home: it reaches the agent by env.
+    from fae.cell import confinement
+    try:
+        confinement.token(home)
+    except confinement.Breach as e:
         raise RuntimeError(
-            f"no .credentials.json under {home} — agent not authenticated "
-            f"(docker run -it --rm -v {home}:/home/node/.claude "
-            f"{conf.get('AGENT_IMAGE') or '<the agent base image>'} claude auth login)")
-    d = Path(dest) / ".credentials.json"
-    shutil.copy(cred, d)
-    os.chmod(d, 0o600)
+            f"{e} (docker run -it --rm {conf.get('AGENT_IMAGE') or '<the agent base image>'} "
+            f"claude setup-token, its token saved as {home / confinement.TOKEN_FILE})") from e
+    confinement.stage(dest)
 
 
 def subprocess_chmod(dest):
