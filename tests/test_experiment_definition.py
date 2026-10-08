@@ -241,8 +241,8 @@ class TestTheExperimentsOwnCommands(unittest.TestCase):
 
 
 class TestTheAgentsFile(unittest.TestCase):
-    """agents.toml: what the experiment compares; a malformed entry is refused
-    with its tag named, never half-read."""
+    """agents.toml: the agents (a CLI, one credential each) and the models
+    they run; a malformed entry is refused with its name, never half-read."""
 
     def load(self, text):
         with tempfile.TemporaryDirectory() as d:
@@ -250,19 +250,26 @@ class TestTheAgentsFile(unittest.TestCase):
             f.write_text(text)
             return fae.experiment._experiment.load_agents(f)
 
-    def test_a_declared_agent_is_read(self):
-        self.assertEqual(self.load('[agents.a]\ncli = "claude"\nmodel = "m-1"\neffort = "low"\n'),
-                         {"a": {"cli": "claude", "model": "m-1", "effort": "low"}})
+    def test_an_agent_and_the_models_it_runs_are_read(self):
+        agents, models = self.load('[agents.claude]\n\n[agents.g]\ncli = "agy"\n\n'
+                                   '[models.a]\nagent = "claude"\nmodel = "m-1"\neffort = "low"\n\n'
+                                   '[models.b]\nagent = "g"\nmodel = "m-2"\n')
+        self.assertEqual(agents, {"claude": {"cli": "claude"}, "g": {"cli": "agy"}})
+        self.assertEqual(models, {"a": {"agent": "claude", "cli": "claude", "model": "m-1", "effort": "low"},
+                                  "b": {"agent": "g", "cli": "agy", "model": "m-2"}})
 
     def test_no_file_is_no_agents(self):
-        self.assertEqual(fae.experiment._experiment.load_agents("/nonexistent/agents.toml"), {})
+        self.assertEqual(fae.experiment._experiment.load_agents("/nonexistent/agents.toml"), ({}, {}))
 
-    def test_refusals_name_the_tag(self):
-        for text, why in (('[agents.a]\ncli = "nope"\nmodel = "m"\n', "cli must be one of"),
-                          ('[agents.a]\ncli = "claude"\n', "no model"),
-                          ('[agents.a]\ncli = "claude"\nmodel = "m"\nhome = "/x"\n', "unknown key"),
-                          ('[models]\na = 1\n', "unknown top-level")):
-            with self.assertRaisesRegex(ValueError, why):
+    def test_refusals_name_the_entry(self):
+        for text, why in (('[agents.nope]\n', "cli 'nope' is not one of"),
+                          ('[agents.claude]\nmodel = "m"\n', "a model goes under"),
+                          ('[agents.claude]\n[models.a]\nagent = "claude"\n', "no model"),
+                          ('[agents.claude]\n[models.a]\nagent = "x"\nmodel = "m"\n', "agent 'x' is not"),
+                          ('[agents.claude]\n[models.a]\nagent = "claude"\nmodel = "m"\nhome = "/x"\n',
+                           "unknown key"),
+                          ('[tags]\na = 1\n', "unknown top-level")):
+            with self.subTest(why=why), self.assertRaisesRegex(ValueError, why):
                 self.load(text)
 
 

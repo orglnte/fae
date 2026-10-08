@@ -33,12 +33,14 @@ class TestAgentCliSelection(unittest.TestCase):
     def test_an_undeclared_tag_runs_no_agent(self):
         self.assertEqual(C.agent_for("some-unlisted-id", self.definition(), {}), ("", "", None, ""))
 
-    def test_the_home_is_the_cli_default_unless_the_machine_names_one(self):
+    def test_the_home_is_the_agents_shared_by_its_models_unless_the_machine_names_one(self):
         d = self.definition()
         self.assertEqual(C.agent_for("sonnet", d, {})[3], ".agent-home/.claude")
         self.assertEqual(C.agent_for("dsv4f", d, {})[3], ".agent-home/.opencode")
-        toml = {"agents": {"sonnet": {"home": "/creds/second-account"}}}
+        self.assertEqual(C.agent_for("gemini", d, {})[3], ".agent-home/.gemini")
+        toml = {"agents": {"claude": {"home": "/creds/second-account"}}}
         self.assertEqual(C.agent_for("sonnet", d, toml)[3], "/creds/second-account")
+        self.assertEqual(C.agent_for("opus", d, toml)[3], "/creds/second-account")
 
     def test_the_effort_is_the_agents_own_when_it_declares_one(self):
         self.assertEqual(C.agent_for("opus", self.definition(), {})[2], "high")
@@ -74,10 +76,10 @@ class TestOpencodeContainment(unittest.TestCase):
     def test_mutable_state_is_never_mounted(self):
         self.assertNotIn(".local/share/opencode", " ".join(self._argv()))
 
-    def test_the_key_is_injected_from_the_key_file(self):
+    def test_the_key_is_named_on_the_command_line_never_its_value(self):
         argv = self._argv()
-        self.assertIn("-e", argv)
-        self.assertTrue(any(a == "OPENCODE_API_KEY=KEY123" for a in argv))
+        self.assertEqual(argv[argv.index("-e") + 1], "OPENCODE_API_KEY")
+        self.assertFalse(any("KEY123" in a for a in argv), argv)
 
     def test_container_keeps_the_kill_handle_name(self):
         self.assertIn("fae-agent-cid1", self._argv())
@@ -89,10 +91,17 @@ class TestStaging(unittest.TestCase):
             C.stage_agent(_opencode_conf(Path("/nowhere")), "opencode",
                           "/tmp/not-a-cell-home", ROOT)
 
+    def test_a_missing_key_halts_at_staging_not_at_the_agents_start(self):
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        with self.assertRaisesRegex(RuntimeError, "no API key"):
+            C.stage_agent(_opencode_conf(d), "opencode", str(d / ".agent-opencode"), ROOT)
+
     def test_staged_config_pins_temperature_zero_and_no_sharing(self):
         d = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
         dest = d / ".agent-opencode"
+        (d / "opencode.key").write_text("KEY123\n")
         C.stage_agent(_opencode_conf(d), "opencode", str(dest), ROOT)
         body = (dest / "opencode.json").read_text()
         self.assertIn('"temperature": 0', body)

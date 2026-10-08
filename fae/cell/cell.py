@@ -2056,6 +2056,7 @@ class Cell:
             return False
         return True
 
+    OPENCODE_KEY_ENV = "OPENCODE_API_KEY"
     AGENT_HOMES = {"agy": (".agent-gemini", "stage_agent_gemini"),
                    "opencode": (".agent-opencode", "stage_agent_opencode"),
                    "testagent": (".agent-testagent", "stage_agent_testagent"),
@@ -2393,6 +2394,9 @@ class Cell:
                 return self._run_bounded(["bash", "-c", script], f, env)
             env = self.conf.child_env(base, extra_env)
             watch = None
+            if cli == "opencode":
+                env[self.OPENCODE_KEY_ENV] = _config.opencode_key_file(
+                    self.conf.get("AGENT_HOME", "")).read_text().strip()
             if cli == "claude":
                 try:
                     env[confinement.TOKEN_ENV] = confinement.token(self.conf.get("AGENT_HOME", ""))
@@ -2444,9 +2448,9 @@ class Cell:
                        *add_dirs, "--model", model,
                        "--print-timeout", "60m", "--print", prompt])
         if cli == "opencode":
-            key = _config.opencode_key_file(conf.get("AGENT_HOME", "")).read_text().strip()
+            # the key's value is in the docker client's environment, never its argv
             return (common + ["-v", f"{home}:/home/node/.config/opencode",
-                              "-e", f"OPENCODE_API_KEY={key}"] + net
+                              "-e", Cell.OPENCODE_KEY_ENV] + net
                     + [image, "opencode", "run", "--print-logs", "--log-level",
                        "ERROR", "--model", model, prompt])
         if cli == "testagent":
@@ -2508,6 +2512,38 @@ class Cell:
         except BaseException:
             self._kill_agent(p)
             raise
+
+    @classmethod
+    def trial(cls, conf, cid, workdir):
+        """Start one claude agent of `conf` in `workdir` the way a cell does
+        (staged home, the confinement limits, the init line watched) and ask
+        it for one word. Empty when it answered confined, else why not; the
+        transcript stays in `workdir`."""
+        workdir = Path(workdir)
+        (workdir / "art").mkdir(parents=True, exist_ok=True)
+        home = workdir / cls.AGENT_HOMES["claude"][0]
+        _config.stage_agent(conf, "claude", home, workdir)
+        prompt = workdir / "PROMPT.md"
+        prompt.write_text("Reply with just the word ok.\n")
+        argv = cls.agent_argv(conf, cid, str(workdir / "art"), home, prompt)
+        cell = cls.__new__(cls)
+        cell.cid, cell.conf = cid, conf
+        env = {**os.environ, confinement.TOKEN_ENV: confinement.token(conf.get("AGENT_HOME", ""))}
+        log = workdir / "agent.attempt-1.log"
+        with log.open("w") as f:
+            rc = cell._run_bounded(argv, f, env, watch=log)
+        if rc == cls.AGENT_UNCONFINED:
+            return f"unconfined: {cell._breach} ({log})"
+        events = []
+        for line in log.read_text(errors="replace").splitlines():
+            try:
+                events.append(json.loads(line))
+            except ValueError:
+                continue
+        results = [e for e in events if isinstance(e, dict) and e.get("type") == "result"]
+        if rc != 0 or not results or results[-1].get("is_error"):
+            return f"the agent did not answer (rc={rc}; {log})"
+        return ""
 
     def _kill_agent(self, p):
         """The docker client first, then its container, which outlives it."""

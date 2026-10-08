@@ -1,29 +1,41 @@
-# The agents this fixture experiment compares; the tag names every cell id.
-[agents.haiku]
-cli = "claude"
+# The agents and the models this experiment compares.
+# An agent is a CLI with one credential, shared by every model it runs
+# (`cli.py experiment credentials AGENT`; its home is machine-local, fae.toml
+# [agents.<name>] home, else the CLI's default). `cli` defaults to the name.
+# A model is what one agent runs; its tag names every cell id
+# (<tag>_<effort>_<variant>_<task>_r<n>).
+
+[agents.claude]
+
+[agents.agy]
+
+[agents.opencode]
+
+[models.haiku]
+agent = "claude"
 model = "claude-haiku-4-5-20251001"
 
-[agents.sonnet]
-cli = "claude"
+[models.sonnet]
+agent = "claude"
 model = "claude-sonnet-5"
 
-[agents.opus]
-cli = "claude"
+[models.opus]
+agent = "claude"
 model = "claude-opus-5"
 effort = "high"
 
-[agents.gemini]
-cli = "agy"
+[models.gemini]
+agent = "agy"
 model = "Gemini 3.1 Pro (High)"
 
-[agents.dsv4f]
-cli = "opencode"
+[models.dsv4f]
+agent = "opencode"
 model = "opencode-go/deepseek-v4-flash"
 
-[agents.dsv4p]
-cli = "opencode"
+[models.dsv4p]
+agent = "opencode"
 model = "opencode-go/deepseek-v4-pro"
 
-[agents.kimi]
-cli = "opencode"
+[models.kimi]
+agent = "opencode"
 model = "opencode-go/kimi-k3"

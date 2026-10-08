@@ -20,14 +20,13 @@ verdict rules: [`AGENTS.md`](../AGENTS.md).
    layer the experiment declares. Whatever else an experiment needs on the
    host is its definition's to declare and `experiment infra` to report.
    New experiment: [`HOWTO.md`](HOWTO.md).
-2. Agent CLIs you plan to run: `claude` (logged in), `agy`, and/or `opencode`.
-   For opencode the operator writes the API key **themselves** to
-   `.agent-home/.opencode/opencode.key` (chmod 600, gitignored; the
-   opencode Go key), or into the home `fae.toml` names for that agent
-   (`[agents.<tag>] home`). Never commit keys; `fae.toml` is gitignored —
-   never put secrets in it either (the agent authenticates through its
-   credentials home, not a config value). The agents themselves are the
-   experiment's `agents.toml`, in git.
+2. Agents you plan to run (`claude`, `agy`, `opencode`): set up each one's
+   credential with `python3 cli.py experiment credentials AGENT` (a hidden
+   prompt, written owner-only into its credentials home, `.agent-home/` or
+   `fae.toml`'s `[agents.<name>] home`; claude takes a `claude setup-token`
+   token, never a login). `experiment run` checks them all first. Never
+   commit keys; `fae.toml` is gitignored — never put secrets in it either.
+   The agents and models are the experiment's `agents.toml`, in git.
 3. From the experiment root (the directory holding the experiment; `REPO_ROOT` in the environment overrides), `python3 cli.py experiment init [--experiment DIR]` writes `fae.toml` (every key at its default, pointed at `DIR`); set the
    machine-local rig paths under `[paths]`. The engine is the `fae` package
    at this root: `python3 cli.py …` runs it uninstalled, and `pip install -e .`

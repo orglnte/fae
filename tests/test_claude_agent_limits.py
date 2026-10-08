@@ -210,5 +210,28 @@ class TestABreachInterruptsTheAgent(Case):
         self.assertIsNotNone(procs[0].poll())
 
 
+
+class TestATrialProvesTheCredential(Case):
+    """Cell.trial: one agent started as a cell starts it, judged on its init
+    line and its answer; a script stands in for the docker client."""
+
+    def trial(self, script):
+        home = self.home(**{".oauth_token": TOKEN})
+        with mock.patch.object(Cell, "agent_argv", return_value=["bash", "-c", script]):
+            return Cell.trial(self.conf(home), "credcheck", self.d / "trial")
+
+    def test_a_confined_agent_that_answers_passes(self):
+        result = json.dumps({"type": "result", "is_error": False, "result": "ok"})
+        self.assertEqual(self.trial(f"echo '{json.dumps(CONFINED)}'; echo '{result}'"), "")
+
+    def test_an_unconfined_agent_fails_naming_what_it_saw(self):
+        init = json.dumps({**CONFINED, "mcp_servers": [{"name": "claude.ai Gmail"}]})
+        self.assertIn("claude.ai Gmail", self.trial(f"echo '{init}'; sleep 20"))
+
+    def test_an_agent_that_does_not_answer_fails(self):
+        error = json.dumps({"type": "result", "is_error": True, "result": "401"})
+        self.assertIn("did not answer", self.trial(f"echo '{json.dumps(CONFINED)}'; echo '{error}'"))
+
+
 if __name__ == "__main__":
     unittest.main()

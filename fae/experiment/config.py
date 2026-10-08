@@ -151,11 +151,11 @@ def render_default_toml(definition, experiment_dir=None):
         for name, default, key in items:
             out.append(f"# {key}: declared by the experiment")
             out.append(f'{name} = "{default}"')
-    out += ["", "# Where each agent's credentials live on this machine (the cell copies",
-            "# them into a home of its own). The agents themselves are the",
-            "# experiment's agents.toml. Default per CLI: " + ", ".join(
-                f"{c} {h}" for c, h in AGENT_HOME_DEFAULT.items() if h) + ".",
-            "# [agents.sonnet]",
+    out += ["", "# Where each agent's credentials live on this machine, shared by every",
+            "# model it runs; `cli.py experiment credentials AGENT` sets them up. The",
+            "# agents and models are the experiment's agents.toml. Default per CLI: "
+            + ", ".join(f"{c} {h}" for c, h in AGENT_HOME_DEFAULT.items() if h) + ".",
+            "# [agents.claude]",
             '# home = ".agent-home/.claude"']
     return "\n".join(out) + "\n"
 
@@ -170,17 +170,23 @@ def experiment_dir(root, env=None, paths=None):
     return Path(rel if os.path.isabs(rel) else f"{root}/{rel}")
 
 
+def agent_home(name, definition, toml):
+    """The credentials home of the agent `name`, as this machine's fae.toml
+    says it (`[agents.<name>] home`), else its CLI's default; relative to
+    the root. Every model the agent runs shares it."""
+    home = ((toml.get("agents") or {}).get(name) or {}).get("home")
+    return home if home is not None else AGENT_HOME_DEFAULT[definition.agents[name]["cli"]]
+
+
 def agent_for(tag, definition, toml):
-    """(cli, model id, effort, credentials home) of the agent `tag`: the
+    """(cli, model id, effort, credentials home) of the model `tag`: the
     experiment declares the first three (agents.toml), this machine's
-    fae.toml the home (`[agents.<tag>] home`, else the CLI's default). A tag
-    the experiment does not declare runs no agent (a stub or reference
-    cell): ("", "", None, "")."""
-    a = definition.agents.get(tag)
-    if not a:
+    fae.toml its agent's home (agent_home). A tag the experiment does not
+    declare runs no agent (a stub or reference cell): ("", "", None, "")."""
+    m = definition.models.get(tag)
+    if not m:
         return "", "", None, ""
-    home = ((toml.get("agents") or {}).get(tag) or {}).get("home")
-    return a["cli"], a["model"], a.get("effort"), home if home is not None else AGENT_HOME_DEFAULT[a["cli"]]
+    return m["cli"], m["model"], m.get("effort"), agent_home(m["agent"], definition, toml)
 
 
 def _fp_extra_files(root, trees):
@@ -351,6 +357,9 @@ def stage_agent(conf, cli, dest, root):
         return
     if cli == "opencode":
         _refuse(dest, "/.agent-opencode")
+        key = opencode_key_file(home)
+        if not (key.is_file() and key.read_text().strip()):
+            raise RuntimeError(f"no API key in {key} (cli.py experiment credentials AGENT)")
         shutil.rmtree(dest, ignore_errors=True)
         os.makedirs(dest)
         model = conf.get("AGENT_MODEL", "")
@@ -385,9 +394,7 @@ def stage_agent(conf, cli, dest, root):
     try:
         confinement.token(home)
     except confinement.Breach as e:
-        raise RuntimeError(
-            f"{e} (docker run -it --rm {conf.get('AGENT_IMAGE') or '<the agent base image>'} "
-            f"claude setup-token, its token saved as {home / confinement.TOKEN_FILE})") from e
+        raise RuntimeError(f"{e} (cli.py experiment credentials AGENT)") from e
     confinement.stage(dest)
 
 

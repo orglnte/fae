@@ -545,26 +545,30 @@ about its sandbox are in the cell's `.agent-testagent/findings.json`.
 
 ## 10. Run a cell with a real agent
 
-The agents an experiment compares are its own, in git:
-`<experiment>/agents.toml`, one `[agents.<tag>]` per agent with its `cli`
-(`claude`, `agy`, `opencode`), its `model` and optionally its `effort`. The
-tag names every cell id. Each agent authenticates through a credentials
-home on this machine, never through a config value: `fae.toml`
-`[agents.<tag>] home`, else the CLI's default (`.agent-home/.claude`,
-`.agent-home/.gemini`, `.agent-home/.opencode`). Log the CLI in once and the
-engine stages a fresh per-cell copy before every attempt. `README.md` has
-the per-CLI details.
+What an experiment compares is its own, in git: `<experiment>/agents.toml`.
+An agent is a CLI with one credential, `[agents.<name>]` (`claude`, `agy`,
+`opencode`; `cli` defaults to the name). A model is what one agent runs,
+`[models.<tag>]` with its `agent`, its `model` id and optionally its
+`effort`; the tag names every cell id. Each agent authenticates through a
+credentials home on this machine, shared by all its models, never through a
+config value: `fae.toml` `[agents.<name>] home`, else its CLI's default
+(`.agent-home/.claude`, `.agent-home/.gemini`, `.agent-home/.opencode`).
+`python3 cli.py experiment credentials claude` sets it up and proves it.
+`README.md` has the per-CLI details.
 
 ```toml
 # shout/agents.toml
-[agents.sonnet]
-cli = "claude"
+[agents.claude]
+
+[models.sonnet]
+agent = "claude"
 model = "claude-sonnet-5"
 ```
 
 Start one cell in the background and watch it:
 
 ```sh
+EXPERIMENT_DIR=shout python3 cli.py experiment credentials claude
 EXPERIMENT_DIR=shout python3 cli.py cell spawn sonnet python --rep 1
 EXPERIMENT_DIR=shout python3 cli.py experiment status
 EXPERIMENT_DIR=shout python3 cli.py cell tail sonnet_high_python_T1_r1
