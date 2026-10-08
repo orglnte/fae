@@ -1156,16 +1156,16 @@ class TestWeeklyBudgetLanes(ConductCase):
         self.assertIn("cleared", out[0])
 
     def test_the_status_line(self):
-        self.assertEqual(runs.queues.weekly_line(self.now), "claude weekly: unknown")
+        self.assertEqual(runs.queues.weekly_line(self.now), "claude weekly limit: unknown")
         runs.queues.weekly_save(dict(utilization=0.83, resets_at=self.reset, seen_at=1,
                               event_at=1, hold=["fable"]))
         line = runs.queues.weekly_line(self.now)
-        self.assertIn("claude weekly: 83%", line)
+        self.assertIn("claude weekly limit: 83%", line)
         self.assertIn("resets", line)
         self.assertIn("hold: fable", line)
         runs.queues.weekly_save(dict(utilization=None, resets_at=None, seen_at=1,
                               event_at=1, hold=[]))
-        self.assertEqual(runs.queues.weekly_line(self.now), "claude weekly: <75%")
+        self.assertEqual(runs.queues.weekly_line(self.now), "claude weekly limit: <75%")
 
 
 class TestMemoryPressureMonitor(unittest.TestCase):
@@ -1218,6 +1218,37 @@ class TestMemoryPressureMonitor(unittest.TestCase):
             out = runs.render.render()
         self.assertIn("pressure=WARN", out)
         self.assertIn("9.6/16.0GB used (40% avail)", out)
+
+
+class TestStatusFooter(OrchTmpCase):
+
+    def test_the_footer_counts_queued_specs_working_loops_and_every_cell_container(self):
+        for agent, rep in (("aaa", 1), ("aaa", 2), ("bbb", 1)):
+            runs.queues.enqueue(agent, {"task": "T1", "variant": "beta_apidocs",
+                                        "rep": rep, "budget": 10, "fresh": False})
+        boxes = {"fae-agent-a", "fae-agent-b", "fae-verify-a", "fae-secrun-a", "postgres"}
+        phases = {"a": "verify-lock", "b": "agent", "c": None}
+        with runs.patch_host("loop_parents", return_value={"a": 1, "b": 2, "c": 3}), \
+             runs.patch_host("heartbeat",
+                             side_effect=lambda ws: phases[ws.name] and {"phase": phases[ws.name]}):
+            line = runs.render.footer(runs.conduct.loop_parents(), boxes)
+        self.assertRegex(line, r"^exp: PAUSED \| 3 queued, 2 running loops, "
+                               r"4 total containers \| \d\d:\d\d:\d\dZ$")
+
+    def test_the_state_is_running_only_while_the_runs_pid_is_alive(self):
+        conduct = runs.conduct.Conduct()
+        conduct.pidfile.parent.mkdir(parents=True, exist_ok=True)
+        conduct.pidfile.write_text(f"{runs.os.getpid()} cap=8")
+        self.assertEqual(conduct.run_line(), "exp: RUNNING (cap=8)")
+        conduct.pidfile.write_text("999999 cap=8")
+        self.assertEqual(conduct.run_line(), "exp: PAUSED (stale pidfile)")
+        conduct.pidfile.unlink()
+        self.assertEqual(conduct.run_line(), "exp: PAUSED")
+
+    def test_every_container_a_cells_infra_names_counts_and_no_other(self):
+        owned = [p + "x" for kind, p in runs.zombies._prefixes() if kind != "network"]
+        self.assertEqual(sorted(runs.conduct.Conduct.cell_containers(owned + ["postgres", "fae-net-x"])),
+                         sorted(owned))
 
 
 if __name__ == "__main__":

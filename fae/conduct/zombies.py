@@ -115,6 +115,13 @@ def _prefixes():
     return out
 
 
+def cell_containers(boxes):
+    """The names in `boxes` a cell owns: its agent, verify and run containers
+    and every container or cluster node its infra provisions."""
+    pfxs = tuple(p for kind, p in _prefixes() if kind != "network")
+    return [n for n in boxes if n.startswith(pfxs)]
+
+
 def _docker_net_age_s(name):
     out = _host.sh(["docker", "network", "inspect", "-f", "{{.Created}}", name]).strip()
     try:

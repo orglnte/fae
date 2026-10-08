@@ -88,7 +88,7 @@ python3 cli.py experiment run        # THE scheduler AND supervisor, FOREGROUND:
                                   # is run again. The narration is the monitor.
 python3 cli.py experiment diagnose   # READ-ONLY: supervision dry run + zombies
                                   # + per-lane admission preview, no waiting
-python3 cli.py experiment status       # fleet table; footer shows the run: UP
+python3 cli.py experiment status       # fleet table; footer shows exp: RUNNING
 python3 cli.py results score      # validate -> per-cell score.json -> table
 ```
 

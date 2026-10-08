@@ -770,7 +770,7 @@ class Queues:
         when = (f" (resets {datetime.fromtimestamp(resets, timezone.utc):%a %H:%M}Z)"
                 if resets and resets > now else "")
         hold = f" · hold: {', '.join(st['hold'])}" if st.get("hold") else ""
-        return f"claude weekly: {what}{when}{hold}"
+        return f"claude weekly limit: {what}{when}{hold}"
 
 
 def queues(workspace=None):

@@ -168,7 +168,7 @@ def display_state(s):
 
 def render(flat=False, running_only=False):
     states, loops, boxes = fae.conduct.all_states(running_only)
-    n_loops = len(fae.conduct.loop_parents())   # real loops — tees outlive theirs
+    loops = fae.conduct.loop_parents()   # real loops — tees outlive theirs
     out = []
     if flat:
         rows = [(s["cid"],
@@ -199,7 +199,7 @@ def render(flat=False, running_only=False):
         for s in states:
             # (a `live = loop_parents()` sat here, inside the per-cell loop, and
             # was never read — the name is rebound below and the loop count
-            # comes from n_loops. It cost one full `ps -axww -E` sweep PER CELL
+            # comes from `loops`. It cost one full `ps -axww -E` sweep PER CELL
             # per refresh: 60+ per `status`, each dumping every process's
             # environment. loop_parents' own docstring says that text carries
             # agent credentials and must not be printed, and run_cell_pids
@@ -275,16 +275,37 @@ def render(flat=False, running_only=False):
         qsec = queued_summary()
         if qsec:
             out.extend(qsec)
-        live = len(fae.conduct.agent_containers(boxes))
-        conduct_s = Conduct().run_line()
-        out.append(f"\n{live} containers, {n_loops} loops, {conduct_s}, {datetime.now(timezone.utc):%H:%M:%S}Z")
+        head = footer(loops, boxes)
+        bar = " " * head.index("|") + "| "      # the lines below hang off the state's bar
+        out.append("\n" + head)
         _mp = fae.conduct.mem_pressure()
         if _mp["label"]:
-            out.append(f"mem: {_mp['used_gb']:.1f}/{_mp['total_gb']:.1f}GB used "
+            out.append(f"{bar}mem: {_mp['used_gb']:.1f}/{_mp['total_gb']:.1f}GB used "
                        f"({_mp['avail_pct']}% avail), pressure={_mp['label']}  ·  "
                        f"swap {_mp['swap_used_mb']:.0f}/{_mp['swap_total_mb']:.0f}MB")
-        out.append(fae.conduct.queues().weekly_line())
+        weekly = fae.conduct.queues().weekly_line()
+        if weekly:
+            out.append(bar + weekly)
     return "\n".join(out)
+
+
+def queued_total():
+    """Pending specs across every lane, parked ones included."""
+    qs = fae.conduct.queues()
+    return sum(len(qs.specs_in(d)) for d in qs.lane_dirs(include_parked=True))
+
+
+def footer(loops, boxes):
+    """`exp: STATE | N queued, N running loops, N total containers | HH:MM:SSZ`. A
+    running loop is one not blocked on a wait phase; the containers are every
+    cell-owned one."""
+    ws = fae.experiment.exp().workspace.path
+    working = sum(1 for cid in loops
+                  if (fae.conduct.heartbeat(ws / cid) or {}).get("phase") not in WAIT_PHASES)
+    total = len(Conduct.cell_containers(boxes))
+    return (f"{Conduct().run_line()} | {queued_total()} queued, "
+            f"{working} running loops, {total} total containers | "
+            f"{datetime.now(timezone.utc):%H:%M:%S}Z")
 
 
 def status(args):
