@@ -67,12 +67,11 @@ python3 cli.py experiment smoke      # one cell per language, the known answer i
 
 That ran the whole pipeline (a sealed workspace, the verifier in its
 container, the ledger) with no agent and no tokens. Now a real agent: build
-the agent image once, make a Claude token inside it, and start one cell.
+the agent image once, set up Claude's credential, and start one cell.
 
 ```sh
 bash ../fae/fae/agent-container/build.sh
-docker run -it --rm fae-agent:latest claude setup-token   # prints the token
-mkdir -p .agent-home/.claude && pbpaste > .agent-home/.claude/.oauth_token && chmod 600 .agent-home/.claude/.oauth_token
+python3 cli.py experiment credentials claude
 python3 cli.py cell spawn sonnet zig --rep 1
 python3 cli.py experiment status   # its phase, its attempt, its verdict
 python3 cli.py results score  # the table
@@ -145,20 +144,35 @@ python3 cli.py results score
 
 ## Agents
 
-The agents an experiment compares are part of the experiment, in git:
-`agents.toml` beside its variants, one `[agents.<tag>]` per agent naming its
-CLI and model id. The tag (`sonnet`, `gemini`, `dsv4f`, …) names every cell
-id. Each agent signs in through a credentials home on this machine, never
-through a config value, and each cell gets its own copy of it (a claude
-token reaches the agent through its environment instead). The home is
-`fae.toml`'s `[agents.<tag>] home` when set (two agents of one CLI can use
-two accounts), else the CLI's default:
+What an experiment compares is part of it, in git: `agents.toml` beside its
+variants. An **agent** is a CLI with one credential, `[agents.<name>]` (its
+`cli` is the name unless stated: `[agents.agy]`, or `[agents.work]` with
+`cli = "claude"`). A **model** is what one agent runs, `[models.<tag>]` with
+its `agent`, its `model` id and optionally its `effort`; the tag (`sonnet`,
+`gemini`, `dsv4f`, …) names every cell id.
+
+```toml
+[agents.claude]
+
+[models.sonnet]
+agent = "claude"
+model = "claude-sonnet-5"
+```
+
+Each agent signs in through a credentials home on this machine, never
+through a config value, shared by every model it runs: `fae.toml`'s
+`[agents.<name>] home` when set, else its CLI's default.
+`python3 cli.py experiment credentials AGENT` sets it up (the secret from a
+hidden prompt, written owner-only) and proves it; `--check` proves it only.
+`experiment run` checks every agent's credential before it admits anything,
+offers to set up a missing one when you are at the terminal, and otherwise
+refuses to start unless that agent is passed as `--exclude-agent AGENT`.
 
 | CLI | default home | what it must hold |
 |---|---|---|
-| `claude` | `.agent-home/.claude` | `.oauth_token`: the token `claude setup-token` prints inside the agent image (`chmod 600`); a login (`.credentials.json`) is refused, since it carries the account's connectors |
-| `opencode` | `.agent-home/.opencode` | `opencode.key`: the API key, written by you (`chmod 600`) |
-| `agy` | `.agent-home/.gemini` | a signed-in agy home: sign in once inside the agent image with it mounted at `/home/node/.gemini` |
+| `claude` | `.agent-home/.claude` | `.oauth_token`: a `claude setup-token` token; a login (`.credentials.json`) is refused, since it carries the account's connectors. It reaches the agent through its environment; the agent runs confined (no MCP, no web), checked on its init line |
+| `opencode` | `.agent-home/.opencode` | `opencode.key`: the API key |
+| `agy` | `.agent-home/.gemini` | a signed-in agy home |
 
 `.agent-home/` and `fae.toml` are gitignored. Keep secrets out of `fae.toml`.
 

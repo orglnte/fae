@@ -100,6 +100,39 @@ class TestRetiredCommands(unittest.TestCase):
 
 
 class TestTheRunCommands(unittest.TestCase):
+    def setUp(self):
+        p = mock.patch.object(cli, "_credentials_left", return_value={})
+        self.left = p.start()
+        self.addCleanup(p.stop)
+
+    def test_run_starts_nothing_while_a_credential_is_missing(self):
+        self.left.return_value = {"opencode": "no API key"}
+        with mock.patch.object(cli.conduct.Conduct, "run") as run:
+            result = runner.invoke(cli.app, ["experiment", "run"])
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("opencode: no API key", result.output)
+        run.assert_not_called()
+
+    def test_run_passes_the_excluded_agents_to_the_check(self):
+        invoke("run", ["experiment", "run", "--exclude-agent", "agy",
+                       "--exclude-agent", "opencode"], mod=cli.conduct.Conduct)
+        self.left.assert_called_with(["agy", "opencode"])
+
+    def test_credentials_check_proves_without_setting_up(self):
+        cred = mock.Mock(proven=mock.Mock(return_value=""), home="/h")
+        with mock.patch.object(cli, "_credentials", return_value={"claude": cred}):
+            result = runner.invoke(cli.app, ["experiment", "credentials", "claude", "--check"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        cred.setup.assert_not_called()
+        cred.proven.assert_called_once()
+        self.assertIn("claude: ready", result.output)
+
+    def test_credentials_of_an_unknown_agent_is_refused(self):
+        with mock.patch.object(cli, "_credentials", return_value={"claude": mock.Mock()}):
+            result = runner.invoke(cli.app, ["experiment", "credentials", "sonnet"])
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("no agent 'sonnet'", result.output)
+
     def test_run(self):
         (ns,), _ = invoke("run", ["experiment", "run", "-n", "5",
                                       "--per-agent", "2", "--interval", "10"], mod=cli.conduct.Conduct)

@@ -18,36 +18,58 @@ PACKAGE = "experiment"
 
 AGENTS_FILE = "agents.toml"
 AGENT_CLIS = ("claude", "agy", "opencode", "testagent")
-AGENT_KEYS = {"cli", "model", "effort"}
-BUILTIN_AGENTS = {"testagent": {"cli": "testagent", "model": "testagent"}}
+AGENT_KEYS = {"cli"}
+MODEL_KEYS = {"agent", "model", "effort"}
+BUILTIN_AGENTS = {"testagent": {"cli": "testagent"}}
+BUILTIN_MODELS = {"testagent": {"agent": "testagent", "cli": "testagent", "model": "testagent"}}
 
 
 def load_agents(path):
-    """{tag: entry} from an agents file's `[agents.<tag>]` tables; none when
-    the file is absent. A malformed entry is refused, naming the tag."""
+    """(agents, models) from an agents file; both empty when it is absent.
+
+    An agent is a CLI with one credential, `[agents.<name>]`, its `cli` the
+    name unless stated. A model is what one agent runs, `[models.<tag>]`:
+    its `agent`, its `model` id, optionally its `effort`; the tag names
+    every cell id. A malformed entry is refused, naming it."""
     try:
         import tomllib
     except ModuleNotFoundError:          # Python < 3.11
         import tomli as tomllib
     path = Path(path)
     if not path.is_file():
-        return {}
+        return {}, {}
     with path.open("rb") as f:
         doc = tomllib.load(f)
-    extra = set(doc) - {"agents"}
+    extra = set(doc) - {"agents", "models"}
     if extra:
-        raise ValueError(f"{path}: unknown top-level key(s) {sorted(extra)}; agents go under [agents.<tag>]")
-    out = {}
-    for tag, entry in (doc.get("agents") or {}).items():
+        raise ValueError(f"{path}: unknown top-level key(s) {sorted(extra)}; "
+                         f"[agents.<name>] and [models.<tag>] only")
+    builtin = sorted(set(doc.get("agents") or {}) & set(BUILTIN_AGENTS)
+                     | set(doc.get("models") or {}) & set(BUILTIN_MODELS))
+    if builtin:
+        raise ValueError(f"{path}: {builtin} is the engine's own; choose another name")
+    agents = dict(BUILTIN_AGENTS)
+    for name, entry in (doc.get("agents") or {}).items():
         unknown = set(entry) - AGENT_KEYS
         if unknown:
-            raise ValueError(f"{path}: agent {tag!r}: unknown key(s) {sorted(unknown)}")
-        if entry.get("cli") not in AGENT_CLIS:
-            raise ValueError(f"{path}: agent {tag!r}: cli must be one of {AGENT_CLIS}")
+            raise ValueError(f"{path}: agent {name!r}: unknown key(s) {sorted(unknown)}"
+                             + ("; a model goes under [models.<tag>]" if "model" in unknown else ""))
+        cli = entry.get("cli", name)
+        if cli not in AGENT_CLIS:
+            raise ValueError(f"{path}: agent {name!r}: cli {cli!r} is not one of {AGENT_CLIS}")
+        agents[name] = {"cli": cli}
+    models = {}
+    for tag, entry in (doc.get("models") or {}).items():
+        unknown = set(entry) - MODEL_KEYS
+        if unknown:
+            raise ValueError(f"{path}: model {tag!r}: unknown key(s) {sorted(unknown)}")
+        if entry.get("agent") not in agents:
+            raise ValueError(f"{path}: model {tag!r}: agent {entry.get('agent')!r} is not "
+                             f"one of the [agents.<name>] {sorted(agents)}")
         if not entry.get("model"):
-            raise ValueError(f"{path}: agent {tag!r}: no model")
-        out[tag] = dict(entry)
-    return out
+            raise ValueError(f"{path}: model {tag!r}: no model")
+        models[tag] = {**entry, "cli": agents[entry["agent"]]["cli"]}
+    return {n: a for n, a in agents.items() if n not in BUILTIN_AGENTS}, models
 
 
 @dataclass(frozen=True)
@@ -75,14 +97,23 @@ class Definition:
         self._subjects = None
         self._agents = None
 
+    def _load_agents(self):
+        if self._agents is None:
+            agents, models = load_agents(self.path / AGENTS_FILE)
+            self._agents = ({**BUILTIN_AGENTS, **agents}, {**BUILTIN_MODELS, **models})
+        return self._agents
+
     @property
     def agents(self):
-        """{tag: {"cli", "model"[, "effort"]}}: the agents the experiment
-        compares, from `<experiment>/agents.toml`, plus the engine's scripted
-        agent. The tag names every cell id."""
-        if self._agents is None:
-            self._agents = {**BUILTIN_AGENTS, **load_agents(self.path / AGENTS_FILE)}
-        return self._agents
+        """{name: {"cli"}}: the agents, each a CLI with one credential, from
+        `<experiment>/agents.toml`, plus the engine's scripted agent."""
+        return self._load_agents()[0]
+
+    @property
+    def models(self):
+        """{tag: {"agent", "cli", "model"[, "effort"]}}: what the experiment
+        compares, each run by one agent. The tag names every cell id."""
+        return self._load_agents()[1]
 
     @property
     def variants(self):

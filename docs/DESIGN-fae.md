@@ -200,11 +200,12 @@ resume all`); a resumed cell pins the new fingerprint.
 
 An agent is a command-line client run in the sealed container — `claude`,
 `opencode` or `agy` — plus a scripted `testagent` that exercises a cell
-without a model. The experiment's `agents.toml` maps each agent's tag to a
-client and the model id it receives; the tag is part of every cell id, so
-lanes write to disjoint workspaces. Credentials are restaged from the
-agent's credentials home (machine-local, `fae.toml`) before
-every attempt. The vocabulary of provider faults (rate and quota walls with
+without a model. The experiment's `agents.toml` declares the agents and the
+models each runs; a model's tag is part of every cell id, so lanes write to
+disjoint workspaces. One credential per agent, in its credentials home
+(machine-local, `fae.toml`), shared by its models and checked before every
+attempt; a claude agent runs confined (no MCP, no web) on a setup-token
+token, checked on its init line (`fae/cell/confinement.py`). The vocabulary of provider faults (rate and quota walls with
 their reset hints, authentication walls, transient errors) decides whether a
 failed run is retried, refunded, or stood down with its lane cooled.
 

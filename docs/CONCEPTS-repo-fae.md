@@ -23,7 +23,8 @@ would not expect, and names that collide, are in
 | Experiment | One root's definition and workspace, and the actions on them as a whole | root | `Experiment`, `Definition` (`fae/experiment/`) | what is compared; run-wide actions |
 | Variant | One complete set of what the agent is given and how its work is judged | treatment, arm, condition | `Variant`, `variants/files.py` | comparability; one source per input |
 | Task | The skeleton every variant starts from, and its prompt | — | `Definition`, `prepare.py` | the problem held constant |
-| Agent | A tag naming a client, a model and an effort | model, lane (its queue) | `agents.toml`, `load_agents`, `AgentImage` | who authors |
+| Agent | A CLI with one credential, shared by the models it runs | client, CLI | `agents.toml`, `load_agents`, `credentials.py`, `confinement.py`, `AgentImage` | who authors, and with what access |
+| Model | A tag naming an agent, a model id and an effort | lane (its queue) | `agents.toml` `[models.<tag>]`, `Definition.models` | what is compared |
 | Gate | The arrangements one attempt must all pass | shape gate | `Gate`, `cell/contrib/` (external) | what green means, structurally |
 | Fingerprint | The hash of everything a verdict depends on | verify surface | `Cell.fingerprint`, `Cell.expected_fp` | provenance |
 | **The cell** | | | | |
@@ -70,9 +71,13 @@ would not expect, and names that collide, are in
 3. **Task.** Purpose: hold the problem constant across variants. State: the
    skeleton and the prompt. Principle: every variant's template starts from
    the same task, versioned with the verifier.
-4. **Agent.** Purpose: name who authors. State: a tag in `agents.toml`
-   mapped to a client, a model and an effort. Principle: the tag is part of
-   every cell id, so each agent's cells and queue are its own.
+4. **Agent.** Purpose: name who authors and with what access. State: a CLI
+   in `agents.toml` and its one credential on this machine. Principle: every
+   model the agent runs shares its credential, and a claude agent runs
+   confined. **Model.** Purpose: name what is compared. State: a tag in
+   `agents.toml` mapped to an agent, a model id and an effort. Principle:
+   the tag is part of every cell id, so each model's cells and queue are its
+   own.
 5. **Gate.** Purpose: define green as passing every arrangement. State: the
    arrangements and whether the first rotates with the attempt. Principle:
    an attempt is green only when all arrangements pass.

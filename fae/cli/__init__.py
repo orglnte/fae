@@ -641,7 +641,12 @@ def experiment_run(limit: int = typer.Option(7, "-n", "--limit",
                 supervise_interval: int = typer.Option(300, "--supervise-interval",
                                                        help="seconds between supervision "
                                                             "sweeps (repair-requeue, DONE "
-                                                            "validation, zombie reap); 0 off")):
+                                                            "validation, zombie reap); 0 off"),
+                exclude_agent: list[str] = typer.Option([], "--exclude-agent",
+                                                        help="AGENT whose credential is not "
+                                                             "checked (repeatable); its "
+                                                             "cells halt at staging if it is "
+                                                             "missing")):
     """THE scheduler AND supervisor — the only thing that turns queued specs
     into cells, and the only controller: every --supervise-interval it
     repairs crashed/hung cells (by REQUEUING them at the lane front — its
@@ -666,9 +671,61 @@ def experiment_run(limit: int = typer.Option(7, "-n", "--limit",
             raise typer.BadParameter(
                 f"--per-agent-override wants AGENT=N, got {part!r}")
         overrides[agent.strip()] = int(n)
+    left = _credentials_left(exclude_agent)
+    if left:
+        for name, why in left.items():
+            typer.echo(f"  {name}: {why}", err=True)
+        typer.echo("not started: agent credentials missing — `python3 cli.py "
+                   "experiment credentials AGENT`, or --exclude-agent AGENT", err=True)
+        raise typer.Exit(1)
     conduct.Conduct().run(_ns(limit=limit, per_agent=per_agent,
                         per_agent_override=overrides, interval=interval,
                         supervise_interval=supervise_interval))
+
+
+def _credentials():
+    from fae.cell import agent_image
+    from fae.experiment import config as _config, credentials
+    exp = fae.experiment.exp()
+    return credentials.of(exp.definition, exp.root, _config._toml(exp.root),
+                          agent_image.base_tag(exp.definition, exp.root))
+
+
+def _credentials_left(exclude):
+    from fae.experiment import credentials
+    try:
+        return credentials.ensure(_credentials(), exclude=exclude)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+
+
+@experiment_app.command("credentials")
+def experiment_credentials(agent: str,
+                           check: bool = typer.Option(False, "--check",
+                                                      help="set nothing up: prove the "
+                                                           "credential (claude: one confined "
+                                                           "agent start)")):
+    """Set up AGENT's credential (an agent is a CLI: claude, agy, opencode;
+    every model it runs shares it), then prove it. The secret is read from a
+    hidden prompt and written owner-only into the agent's credentials home."""
+    creds = _credentials()
+    if agent not in creds:
+        raise typer.BadParameter(f"no agent {agent!r}; the agents are {sorted(creds)}")
+    cred = creds[agent]
+    if not check:
+        why = cred.setup()
+        if why:
+            typer.echo(f"{agent}: {why}", err=True)
+            raise typer.Exit(1)
+    exp = fae.experiment.exp()
+    model = next((m["model"] for m in exp.definition.models.values() if m["agent"] == agent), "")
+    log_dir = exp.root / "tmp"
+    log_dir.mkdir(exist_ok=True)
+    why = cred.proven(model, log_dir) if model else cred.missing()
+    if why:
+        typer.echo(f"{agent}: NOT ready — {why}", err=True)
+        raise typer.Exit(1)
+    print(f"{agent}: ready ({cred.home})")
 
 
 @experiment_app.command("diagnose")
