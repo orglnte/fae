@@ -1,0 +1,1 @@
+{"concepts": "docs/CONCEPTS-repo-fae.md", "root_owns": true, "group_unowned": true, "exclude": ["fae/utils/pluspy"], "arrows": "detailed"}
