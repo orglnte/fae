@@ -556,6 +556,19 @@ class TestConductResume(OperatorTestCase):
              runs.patch_host("cell_state", side_effect=_cs):
             runs.conduct.Conduct().resume(mock.Mock(scope=scope))
 
+    def _hint(self, pidfile_text):
+        (self.conduct / "conduct.pid").write_text(pidfile_text)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self._resume(["all"])
+        return out.getvalue()
+
+    def test_the_hint_names_a_live_run(self):
+        self.assertIn("a live `experiment run` admits them", self._hint(f"{os.getpid()} cap=7"))
+
+    def test_the_hint_names_a_dead_run_down(self):
+        self.assertIn("the run is DOWN", self._hint("999999 cap=7"))
+
     def test_no_loop_is_ever_spawned(self):
         for c in CIDS:
             self._paused(c, "drain")
@@ -1074,13 +1087,18 @@ class TestConductPauseDryRun(OperatorTestCase):
         self.assertNotIn("would park", out)
 
     def test_full_preview_names_conduct_and_the_backlog(self):
-        (self.conduct / "conduct.pid").write_text("4242 cap=7")
+        (self.conduct / "conduct.pid").write_text(f"{os.getpid()} cap=7")
         self.queue("sonnet", [dict(task="T1", variant="alpha_apidocs", rep=7)])
         out, rp, sc = self._dry(["all"], live={CIDS[0]: 4242})
         self.assertIn("would stop conduct", out)
         self.assertIn("queued spec(s) in place", out)
         rp.assert_not_called()
         sc.assert_not_called()
+
+    def test_full_preview_does_not_stop_a_dead_run(self):
+        (self.conduct / "conduct.pid").write_text("999999 cap=7")
+        out, _, _ = self._dry(["all"])
+        self.assertNotIn("would stop conduct", out)
 
     def test_full_preview_counts_only_specs_with_no_workspace(self):
         (self.conduct / "conduct.pid").write_text("4242 cap=7")

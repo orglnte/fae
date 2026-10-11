@@ -290,7 +290,7 @@ class Conduct:
         for kind, ident, owner, note in zs:
             print(f"  {kind:<10} {ident}  owner={owner}  {note}")
         live = _host.loop_parents()
-        up = self.pidfile.exists()
+        up = self.pid() is not None
         print(f"\n— ADMISSION PREVIEW — {len(live)} live loop(s), per-agent cap "
               f"{PER_AGENT_CAP}, run {'UP' if up else 'DOWN'}"
               + ("" if up else " (nothing admits until `experiment run`)"))
@@ -687,7 +687,7 @@ class Conduct:
                     print("would leave the running cells undisturbed (--admission-only)")
                 print("would leave conduct running for the other lanes")
             else:
-                if self.pidfile.exists():
+                if self.pid() is not None:
                     print("would stop conduct (TERM)")
                 ws = fae.experiment.exp().workspace
                 queued = sorted(set(ws.queued_cells("all")) - set(ws.cells()))
@@ -839,7 +839,7 @@ class Conduct:
         if n_reset:
             print(f"  respawn budgets reset for {n_reset} cell(s)")
         hint = ("a live `experiment run` admits them under its caps"
-                if self.pidfile.exists()
+                if self.pid() is not None
                 else "the run is DOWN — nothing starts until you run: "
                      "python3 cli.py experiment run")
         print(f"experiment resume: {lifted} lock(s) lifted, {requeued} cell(s) "
