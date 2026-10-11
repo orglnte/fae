@@ -803,6 +803,14 @@ class TestDiagnose(ConductCase):
         self.assertIn("would admit", out)
         self.assertIn("run DOWN", out)
 
+    def test_the_run_is_up_only_while_its_pid_is_alive(self):
+        conduct = runs.conduct.Conduct()
+        conduct.pidfile.parent.mkdir(parents=True, exist_ok=True)
+        conduct.pidfile.write_text(f"{runs.os.getpid()} cap=8")
+        self.assertIn("run UP", self._diagnose()[0])
+        conduct.pidfile.write_text("999999 cap=8")
+        self.assertIn("run DOWN", self._diagnose()[0])
+
     def test_changes_nothing(self):
         self.q("aaa", [self.spec(rep=r) for r in (1, 2)])
         before = {p.name for p in runs.queues.lane_specs("aaa")}
