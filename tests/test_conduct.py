@@ -122,6 +122,17 @@ class TestStarvationGuard(ConductCase):
 
 
 class TestPerModelCap(ConductCase):
+    def test_the_run_records_the_caps_it_admits_under(self):
+        seen = []
+        conduct = runs.conduct.Conduct()
+        with contextlib.redirect_stdout(io.StringIO()), \
+             mock.patch.object(runs.conduct.Conduct, "preflight",
+                               side_effect=lambda: seen.append(
+                                   (conduct.lane_caps(), conduct.run_line())) or False):
+            conduct.run(SimpleNamespace(limit=7, interval=self.CADENCE, per_agent=2,
+                                        per_agent_override={"aaa": 3}, supervise_interval=0))
+        self.assertEqual(seen, [((2, {"aaa": 3}), "exp: RUNNING (cap=7)")])
+
     def test_default_one_cell_per_model(self):
         self.per_agent = 1
         self.q("aaa", [self.spec(rep=r) for r in (1, 2, 3)])
@@ -834,6 +845,18 @@ class TestDiagnose(ConductCase):
         out, _ = self._diagnose()
         self.assertIn("HELD at 1/lane", out)
 
+    def test_a_lane_is_held_at_the_cap_the_run_admits_under(self):
+        conduct = runs.conduct.Conduct()
+        conduct.pidfile.parent.mkdir(parents=True, exist_ok=True)
+        conduct.pidfile.write_text(f"{runs.os.getpid()} cap=8 per-agent=1 override=aaa=2")
+        self.q("aaa", [self.spec(rep=r) for r in (1, 2, 3)])
+        runs.queues.claim("aaa", runs.queues.lane_specs("aaa")[0])
+        out, _ = self._diagnose()
+        self.assertIn("per-agent cap 1 (override aaa=2)", out)
+        self.assertNotIn("HELD", out)
+        runs.queues.claim("aaa", runs.queues.lane_specs("aaa")[0])
+        self.assertIn("HELD at 2/lane", self._diagnose()[0])
+
 
 class TestSpawnAndAdoptEdges(ConductCase):
     CID = "aaa_high_beta_apidocs_T1_r1"
@@ -1240,6 +1263,12 @@ class TestStatusFooter(OrchTmpCase):
             line = runs.render.footer(runs.conduct.loop_parents(), boxes)
         self.assertRegex(line, r"^exp: PAUSED \| 3 queued, 2 running loops, "
                                r"4 total containers \| \d\d:\d\d:\d\dZ$")
+
+    def test_no_run_up_means_the_default_caps(self):
+        conduct = runs.conduct.Conduct()
+        conduct.pidfile.parent.mkdir(parents=True, exist_ok=True)
+        conduct.pidfile.write_text("999999 cap=8 per-agent=4 override=aaa=2")
+        self.assertEqual(conduct.lane_caps(), (runs.conduct.PER_AGENT_CAP, {}))
 
     def test_the_state_is_running_only_while_the_runs_pid_is_alive(self):
         conduct = runs.conduct.Conduct()

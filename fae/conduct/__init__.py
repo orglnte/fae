@@ -116,26 +116,49 @@ class Conduct:
         self.respawn_book = fae.experiment.exp().workspace.conduct / "reconcile.respawns.json"
         self.alerts = supervise.Alerts()
 
-    def pid(self):
-        """The live scheduler's pid, or None when none is running."""
+    @staticmethod
+    def _record_line(cap, per_agent, overrides):
+        """The pidfile's one line: `<pid> cap=N per-agent=K [override=LANE=N,…]`."""
+        line = f"{os.getpid()} cap={cap} per-agent={per_agent}"
+        if overrides:
+            line += " override=" + ",".join(f"{m}={k}" for m, k in sorted(overrides.items()))
+        return line
+
+    def _record(self):
+        """The live run's pidfile line as {key: value}, `pid` included; None
+        when no run is up."""
         try:
-            pid = int(self.pidfile.read_text().partition(" ")[0])
-            os.kill(pid, 0)
-            return pid
+            pid_s, *fields = self.pidfile.read_text().split()
+            os.kill(int(pid_s), 0)
         except (OSError, ValueError):
             return None
+        return {k: v for k, _, v in (f.partition("=") for f in fields)} | {"pid": int(pid_s)}
+
+    def pid(self):
+        """The live scheduler's pid, or None when none is running."""
+        rec = self._record()
+        return rec["pid"] if rec else None
+
+    def lane_caps(self):
+        """(per-agent cap, {lane: cap} overrides) the live run admits under;
+        (PER_AGENT_CAP, {}) when no run is up or its record names none."""
+        rec = self._record() or {}
+        try:
+            overrides = {m: int(k) for m, _, k in
+                         (o.partition("=") for o in rec.get("override", "").split(",") if o)}
+            return int(rec.get("per-agent", PER_AGENT_CAP)), overrides
+        except ValueError:
+            return PER_AGENT_CAP, {}
 
     def run_line(self):
         """`exp: RUNNING (cap=N)` while the run is up, else `exp: PAUSED`,
         with `(stale pidfile)` when the run died."""
         if not self.pidfile.exists():
             return "exp: PAUSED"
-        try:
-            pid_s, _, cap = self.pidfile.read_text().partition(" ")
-            os.kill(int(pid_s), 0)
-            return f"exp: RUNNING ({cap.strip() or '?'})"
-        except (OSError, ValueError):
+        rec = self._record()
+        if rec is None:
             return "exp: PAUSED (stale pidfile)"
+        return f"exp: RUNNING (cap={rec.get('cap', '?')})"
 
     # --- the leftovers of dead cells, as the run finds them ------------------
 
@@ -291,14 +314,18 @@ class Conduct:
             print(f"  {kind:<10} {ident}  owner={owner}  {note}")
         live = _host.loop_parents()
         up = self.pid() is not None
+        per_agent, overrides = self.lane_caps()
+        override_txt = ", ".join(f"{m}={k}" for m, k in sorted(overrides.items()))
         print(f"\n— ADMISSION PREVIEW — {len(live)} live loop(s), per-agent cap "
-              f"{PER_AGENT_CAP}, run {'UP' if up else 'DOWN'}"
+              f"{per_agent}" + (f" (override {override_txt})" if overrides else "")
+              + f", run {'UP' if up else 'DOWN'}"
               + ("" if up else " (nothing admits until `experiment run`)"))
         for d in qs.lane_dirs(include_parked=True):
             m = qs.lane_agent(d)
             parked = qs.lane_is_parked(d)
             paths = qs.specs_in(d)
             claims = qs.running_specs(m)
+            cap = overrides.get(m, per_agent)
             _cu = qs.cooldown_until(m)
             if parked:
                 note = "parked — no admission until experiment resume"
@@ -306,9 +333,9 @@ class Conduct:
                 note = (f"limit-cooling until "
                         f"{datetime.fromtimestamp(_cu, timezone.utc):%m-%d %H:%M}Z "
                         f"— the run retries then")
-            elif len(claims) >= PER_AGENT_CAP:
+            elif len(claims) >= cap:
                 held = ", ".join(sorted(qs.spec_cid(p) for p in claims))
-                note = f"HELD at {PER_AGENT_CAP}/lane — claimed: {held}"
+                note = f"HELD at {cap}/lane — claimed: {held}"
             else:
                 skipped = 0
                 for p in paths:
@@ -398,7 +425,8 @@ class Conduct:
                 return
             except (OSError, ValueError):
                 pass                                # stale pidfile: take over
-        pidfile.write_text(f"{os.getpid()} cap={n}")
+        per_agent_override = getattr(args, "per_agent_override", None) or {}
+        pidfile.write_text(self._record_line(n, args.per_agent, per_agent_override))
         # Tee the narration to tmp/conduct-<PID>.log: if this instance dies from
         # outside, the per-pid file records what it did and when output stopped.
         _logdir = Path(os.environ.get("CONDUCT_LOG_DIR", fae.experiment.exp().root / "tmp"))
@@ -438,7 +466,6 @@ class Conduct:
         zombie_seen: set[str] = set()   # 2nd-consecutive-sighting reap (watch's rule)
         poll_i = 0                      # liveness tick cadence
         warned_lanes = None             # re-warn only when the lane count moves
-        per_agent_override = getattr(args, "per_agent_override", None) or {}
         override_txt = (f", override {per_agent_override}" if per_agent_override else "")
         print(f"run: global cap {n}, {args.per_agent}/agent{override_txt}, "
               f"round-robin, poll {args.interval}s"
