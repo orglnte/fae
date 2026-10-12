@@ -1,11 +1,7 @@
-"""PY-READINESS row 23: a verify whose load window spans a host suspend is a
-rig fault — VOID, refunded — never a verdict.
-
-The sidecar's monotonic clock stands still while the host sleeps; wall-clock
-does not. The divergence between the two per tick is the detector; the
-driver classifies the arrangement as `host-sleep` and refunds the attempt.
+"""A host sleep is read off the two clocks: the monotonic clock stands still
+while the host sleeps and the wall clock does not. An arrangement that spans
+one is a rig fault, VOID and refunded, never a verdict.
 """
-import json
 import os
 import tempfile
 import unittest
@@ -14,29 +10,26 @@ from pathlib import Path
 from _ctx import ROOT
 
 from fae import cell
+from fae.cell import host_sleep
+from fae.cell.host_sleep import Reading
 
 
+class TestTheClockDetector(unittest.TestCase):
 
-class TestTheSidecarClockDetector(unittest.TestCase):
+    def test_an_interval_that_kept_both_clocks_together_is_no_gap(self):
+        self.assertEqual(host_sleep.gap(wall_dt=1.02, mono_dt=1.0), 0.0)
 
-    def setUp(self):
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "trace", Path(ROOT) / "fae" / "cell" / "contrib" / "elastic_resource" / "trace.py")
-        self.sc = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(self.sc)
-
-    def test_a_tick_that_kept_both_clocks_together_is_no_gap(self):
-        self.assertEqual(self.sc.host_sleep_gap(wall_dt=1.02, mono_dt=1.0), 0.0)
-
-    def test_a_tick_whose_wall_clock_ran_ahead_is_the_gap(self):
+    def test_an_interval_whose_wall_clock_ran_ahead_is_the_gap(self):
         # 900s of wall-clock inside a 1s monotonic tick: the host was gone
-        self.assertAlmostEqual(self.sc.host_sleep_gap(wall_dt=901.0, mono_dt=1.0),
-                               900.0, places=3)
+        self.assertAlmostEqual(host_sleep.gap(wall_dt=901.0, mono_dt=1.0), 900.0, places=3)
 
     def test_small_scheduler_jitter_is_below_the_threshold(self):
-        self.assertEqual(self.sc.host_sleep_gap(wall_dt=12.0, mono_dt=1.0), 0.0)
-        self.assertGreater(self.sc.host_sleep_gap(wall_dt=40.0, mono_dt=1.0), 0.0)
+        self.assertEqual(host_sleep.gap(wall_dt=12.0, mono_dt=1.0), 0.0)
+        self.assertGreater(host_sleep.gap(wall_dt=40.0, mono_dt=1.0), 0.0)
+
+    def test_slept_compares_two_readings(self):
+        self.assertEqual(host_sleep.slept(Reading(1000.0, 10.0), Reading(1300.0, 310.0)), 0.0)
+        self.assertEqual(host_sleep.slept(Reading(1000.0, 10.0), Reading(4900.0, 310.0)), 3600.0)
 
 
 class TestTheDriverRefundsIt(unittest.TestCase):
