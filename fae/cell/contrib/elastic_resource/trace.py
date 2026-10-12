@@ -28,7 +28,7 @@ acquiring) where the variant exposes one.
 
 Stdlib only (threading + urllib + subprocess) — the harness python has no httpx.
 
-Usage (the verifier wires this up):
+Usage (the verifier wires this up), with the engine on PYTHONPATH:
   python3 trace.py \
       --base-url http://127.0.0.1:8080 --k6-jsonl <ws>/k6_results.jsonl \
       --duration-s 65 --cache-probe-cmd "<command; exit 0 == resource serving>" \
@@ -47,6 +47,8 @@ import time
 import urllib.request
 from collections import deque
 from pathlib import Path
+
+from fae.cell import host_sleep
 
 _HEALTH_POLL_S = 0.5      # /health cadence
 _INFRA_POLL_S = 1.0   # infra probe cadence (subprocess — kept off the tick path)
@@ -190,16 +192,6 @@ def _infra_thread(argv: list[str] | None, st: _Shared, stop: threading.Event) ->
         stop.wait(_INFRA_POLL_S)
 
 
-HOST_SLEEP_GAP_S = 30.0
-
-
-def host_sleep_gap(wall_dt, mono_dt):
-    """Seconds the host was away during one tick: wall-clock advanced, the
-    monotonic clock did not. Below the threshold is scheduler jitter, 0."""
-    gap = wall_dt - mono_dt
-    return gap if gap > HOST_SLEEP_GAP_S else 0.0
-
-
 def main(argv=None) -> None:
     # argv[0] is the script path (subprocess convention); None = sys.argv, so
     # script mode is unchanged. An explicit argv lets an in-process caller run
@@ -277,7 +269,7 @@ def main(argv=None) -> None:
             now = time.monotonic()
             elapsed = now - started
             wall = time.time()
-            host_sleep_s += host_sleep_gap(wall - last_tick_wall, now - last_tick_mono)
+            host_sleep_s += host_sleep.gap(wall - last_tick_wall, now - last_tick_mono)
             last_tick_wall = wall
 
             with st.lock:
