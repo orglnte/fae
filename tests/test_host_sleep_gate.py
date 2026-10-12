@@ -149,6 +149,11 @@ class TestTheGateRerunsOnlyTheSleptArrangement(GateCase):
         self.assertEqual((results[-1].shape, results[-1].stage_failed, results[-1].charge),
                          ("B", "host-sleep", False))
         self.assertIn("B void host-sleep, re-run 3/3", self.ledger())
+        self.assertIn("ALERT\tc\tattempt=2\tHOST-SLEEP-CAP B slept through 4 times", self.ledger())
+
+    def test_a_rerun_that_passes_raises_no_alert(self):
+        self.gate({"A": ["green"], "B": ["host-sleep"] * 3 + ["green"], "C": ["green"]})
+        self.assertNotIn("HOST-SLEEP-CAP", self.ledger())
 
     def test_another_void_is_not_rerun(self):
         results, calls = self.gate({"A": ["green"], "B": ["infra"], "C": ["green"]})

@@ -596,7 +596,9 @@ every prior agent's memory — cross-run leakage invisible in the results.
   host slept through is void, stage `host-sleep`, whatever the verifier
   answered (a stand-down stays the operator's). The gate runs it again, up
   to `SLEEP_RERUNS` (3) times, keeping the arrangements already passed and
-  the agent's tree; past that it is a void as any other. Before any
+  the agent's tree; past that it is a void as any other, with an
+  `ALERT HOST-SLEEP-CAP`: four sleeps inside one arrangement point at the
+  host's clock. Before any
   arrangement that follows a sleep the gate waits until the host has stayed
   awake `AWAKE_S` (120 s), longer than a lid-shut laptop's dark wakes, then
   runs the cell's setup again (`WAKE` in the ledger); a setup that fails is
