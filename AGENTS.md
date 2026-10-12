@@ -397,7 +397,7 @@ share one class. It answers:
 | `ok()` | `Cell.infra_ok()` before every attempt; `cli.py experiment infra` | preflight, including whatever daemon the infra needs (the engine probes nothing itself); HALT, no attempt burned, if the environment is wrong |
 | `alive()` | `Cell.verify` before every arrangement and after a charged fail | the infra answers RIGHT NOW (a hard connect failure is "no", a slow daemon is alive). Dead before → the arrangement is void without a deploy; dead after a charged fail at one of the verifier's `MEASURED_STAGES` (None: any) → the same void, stage `infra`, refunded. The base answer is False, and an infra class that never overrides it is refused at preflight (`liveness_declared`): with the base answer every arrangement would be void forever |
 | `sweep()` | `cli.py experiment infra` | remove stale infra left by dead cells |
-| `cell_setup()` | `Cell.run` / `Cell.reverify` / an experiment command (`cli.py experiment verb`), from the driver on the host | what exists for the cell's life, kept for every attempt, on the cell network; returns the agent's docker args when the variant's agent has access |
+| `cell_setup()` | `Cell.run` / `Cell.reverify` / an experiment command (`cli.py experiment verb`), from the driver on the host; again by the gate after a host sleep | what exists for the cell's life, kept for every attempt, on the cell network; returns the agent's docker args when the variant's agent has access. Idempotent: what still answers is reused and what is gone is started, so a second call after a sleep brings back what the sleep killed; the agent's next attempt gets what the latest call returned |
 | `cell_teardown()` | the same, on their unconditional path; `cell stop`, the kill fallback, the reaper | tear it down, idempotently |
 | `verify_setup(ctx, env)` | the experiment's Verifier, inside the verify container over the daemon's socket | the world one arrangement of the judged artifacts runs in, fresh every time; raise on a rig fault (refunded), raise a rejection once the infra is up and the artifacts fail on it (charged); return what the verifier needs to run the artifacts on it |
 | `verify_teardown(ctx, env)` | the same, after the verifier stopped the artifacts, whether `verify_setup` finished or not; `run_teardown` after a kill | the world reset after the arrangement, derivable from the ctx alone |
@@ -586,6 +586,18 @@ every prior agent's memory — cross-run leakage invisible in the results.
   A verify that reached `VERIFY_READY` and collapsed minutes later reads
   exactly like a build failure, so `Cell.verify` asks the infra's `alive()`
   before every arrangement and after a charged fail (§4).
+- **A host sleep costs the arrangement it interrupted, not the attempt.**
+  `Cell.verify` reads both clocks around every arrangement
+  (`fae/cell/host_sleep.py`: wall minus monotonic is the sleep); one the
+  host slept through is void, stage `host-sleep`, whatever the verifier
+  answered (a stand-down stays the operator's). The gate runs it again, up
+  to `SLEEP_RERUNS` (3) times, keeping the arrangements already passed and
+  the agent's tree; past that it is a void as any other. Before any
+  arrangement that follows a sleep the gate waits until the host has stayed
+  awake `AWAKE_S` (120 s), longer than a lid-shut laptop's dark wakes, then
+  runs the cell's setup again (`WAKE` in the ledger); a setup that fails is
+  an `infra` void. Halting instead would discard the agent's run and every
+  arrangement it passed, for a fault of the host's.
 - **`TRACE_MIN_VERIFY_S` (45 s).** A fail returned faster than this without
   reaching `VERIFY_READY` is an infra HALT, no attempt burned — except
   `stage_failed=deploy` (the infra came up and the agent's artifacts
