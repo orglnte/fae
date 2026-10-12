@@ -1783,7 +1783,12 @@ class Cell:
                                     why="the cell's setup failed after a host sleep")
             r = self.verify(shape=shape)
             if r.stage_failed != "host-sleep":
-                break
+                return r
+        # four sleeps inside one arrangement, each after a full wake: more
+        # likely a wall clock that jumps than a host that sleeps
+        self._append("ALERT", f"attempt={attempt}",
+                     f"HOST-SLEEP-CAP {shape or 'seed'} slept through {self.SLEEP_RERUNS + 1} "
+                     f"times; check the host clock ({r.why})")
         return r
 
     def _after_sleep(self, attempt):
