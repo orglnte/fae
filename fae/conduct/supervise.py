@@ -221,11 +221,11 @@ def _attempt_out(cell):
 AGENT_DEAD_GRACE = int(os.environ.get("AGENT_DEAD_GRACE", 300))
 
 
-_VERIFY_MARK_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\t(?:VERIFY_READY|SHAPE)\t")
+_VERIFY_MARK_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\t(?:VERIFY_READY|SHAPE|WAKE)\t")
 
 
 def _verify_progress(ws, since_ts):
-    """(stamp, age) of the newest VERIFY_READY/SHAPE mark the current verify
+    """(stamp, age) of the newest VERIFY_READY/SHAPE/WAKE mark the current verify
     has written, or (None, None) when it has written none yet."""
     newest = None
     for line in fae.experiment.exp().cell(ws.name, workspaces=ws.parent).ledger_text().splitlines():

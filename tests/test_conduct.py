@@ -600,6 +600,17 @@ class TestSupervision(ConductCase):
         self.assertEqual(sp.call_count, 1)
         self.assertEqual(sp.call_args.kwargs, {"dry": False})
 
+    def test_no_sweep_until_the_host_stays_awake_after_a_sleep(self):
+        with mock.patch.object(runs.host, "host_settling", return_value=True):
+            self.max_rounds = 3
+            with mock.patch.object(runs.supervise, "supervise_pass") as sp, \
+                 mock.patch.object(runs.zombies, "find_zombies", return_value=[]) as fz:
+                self.q("aaa", [self.spec()])
+                out = self.run_conduct(supervise=0.000001)
+        sp.assert_not_called()
+        fz.assert_not_called()
+        self.assertEqual(out.count("supervision waits until it has stayed awake 120s"), 1)
+
     def test_zero_disables_supervision(self):
         sp, fz = self._run(supervise=0)
         sp.assert_not_called()

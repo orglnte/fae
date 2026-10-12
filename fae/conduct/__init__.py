@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import fae.experiment
+from fae.cell import host_sleep
 from fae.cell.cell import Cell
 from fae import experiment as _experiment
 from fae import mutex
@@ -466,6 +467,7 @@ class Conduct:
         zombie_seen: set[str] = set()   # 2nd-consecutive-sighting reap (watch's rule)
         poll_i = 0                      # liveness tick cadence
         warned_lanes = None             # re-warn only when the lane count moves
+        settling_told = False           # one line per wake
         override_txt = (f", override {per_agent_override}" if per_agent_override else "")
         print(f"run: global cap {n}, {args.per_agent}/agent{override_txt}, "
               f"round-robin, poll {args.interval}s"
@@ -476,11 +478,18 @@ class Conduct:
             while True:
                 _host.host_sleep_observe()
                 self.act_on_requests()
+                # A lid-shut laptop wakes for under a minute at a time and runs
+                # this loop then: a cell judged in such a wake reads as stalled.
+                settling = _host.host_settling()
+                if settling and not settling_told:
+                    print(f"  [{hhmm()}] the host slept: supervision waits until it has "
+                          f"stayed awake {host_sleep.AWAKE_S:.0f}s", flush=True)
+                settling_told = settling
                 # Supervision inside the ONE controller: repair requeues at the
                 # lane front and the admission below picks it up — conduct is the
                 # only spawner. (reconcile --watch is gone; this replaced it.)
-                if sup_interval and (last_sweep is None or
-                                     time.time() - last_sweep >= sup_interval):
+                if sup_interval and not settling and (last_sweep is None or
+                                                      time.time() - last_sweep >= sup_interval):
                     last_sweep = time.time()
                     supervise.supervise_pass(self.alerts, dry=False)
                     zs = zombies.find_zombies()

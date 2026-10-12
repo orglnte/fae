@@ -30,6 +30,7 @@ from fae import experiment as _experiment
 HOST_SLEEP_BOOK_DAYS = 7
 _sleep_clocks = None            # host_sleep.Reading at the last observation
 _sleep_gaps = None              # the book, loaded on first use
+_woke = None                    # monotonic, at the first observation after the latest sleep
 
 
 def sh(cmd, **kw):
@@ -271,11 +272,12 @@ def _host_sleep_gaps():
 def host_sleep_observe(now=None, mono=None):
     """Record a host suspend since the previous call, if one happened.
     Returns the gap in seconds (0 when none)."""
-    global _sleep_clocks
+    global _sleep_clocks, _woke
     clocks = host_sleep.Reading(time.time() if now is None else now,
                                 time.monotonic() if mono is None else mono)
     gap = host_sleep.slept(_sleep_clocks, clocks) if _sleep_clocks is not None else 0.0
     if gap:
+        _woke = clocks.mono
         gaps = _host_sleep_gaps()
         gaps.append({"start": _sleep_clocks.wall, "s": gap})
         keep = clocks.wall - HOST_SLEEP_BOOK_DAYS * 86400
@@ -288,6 +290,12 @@ def host_sleep_observe(now=None, mono=None):
     _sleep_clocks = clocks
     return gap
 
+
+def host_settling(mono=None):
+    """A sleep was observed and the host has not stayed awake
+    host_sleep.AWAKE_S since: what the fleet shows now may be a dark wake's."""
+    mono = time.monotonic() if mono is None else mono
+    return _woke is not None and mono - _woke < host_sleep.AWAKE_S
 
 
 def awake_age(t_wall, now=None):
