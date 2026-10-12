@@ -312,7 +312,11 @@ writes an `ALERT SETUP-FAILED` ledger line.
   is not an investigation budget. The wall wording, the reset hint and the
   driver's retry decision come from `fae/cell/faults.py` alone. Every
   supervisory age excludes host sleep (`.conduct/host_sleep.json`), so a
-  suspended laptop does not read as a stall.
+  suspended laptop does not read as a stall, and after a sleep the run
+  sweeps nothing until the host has stayed awake `AWAKE_S`
+  (`fae/cell/host_sleep.py`): a lid-shut laptop wakes for under a minute
+  at a time and runs the run then, and a cell judged in such a wake reads
+  as stalled.
 - **The weekly cap.** The claude lanes share one weekly cap: the run reads
   the CLI's seven-day `rate_limit_event` from the attempt logs
   (`.queues/weekly.json`), parks the lanes listed in `BUDGET_LANES` (lane

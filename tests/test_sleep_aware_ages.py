@@ -19,7 +19,8 @@ class SleepCase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         patch_plane(self, Path(self._tmp.name))
         self.patches = [runs.patch_host("_sleep_clocks", None),
-                        runs.patch_host("_sleep_gaps", None)]
+                        runs.patch_host("_sleep_gaps", None),
+                        runs.patch_host("_woke", None)]
         for p in self.patches:
             p.start()
         self.addCleanup(self._tmp.cleanup)
@@ -61,6 +62,32 @@ class TestObservingTheClocks(SleepCase):
         runs.host._host_sleep_book().write_text("{not json")
         self.assertEqual(runs.host._host_sleep_gaps(), [])
         self.assertEqual(runs.host.awake_age(0.0, now=50.0), 50.0)
+
+
+class TestSettlingAfterAWake(SleepCase):
+    def test_a_host_that_never_slept_is_not_settling(self):
+        runs.host.host_sleep_observe(now=1000.0, mono=10.0)
+        runs.host.host_sleep_observe(now=1300.0, mono=310.0)
+        self.assertFalse(runs.host.host_settling(mono=310.0))
+
+    def test_a_wake_settles_once_the_host_stayed_up_the_settle_time(self):
+        runs.host.host_sleep_observe(now=1000.0, mono=10.0)
+        runs.host.host_sleep_observe(now=8200.0, mono=310.0)
+        self.assertTrue(runs.host.host_settling(mono=310.0 + 119))
+        self.assertFalse(runs.host.host_settling(mono=310.0 + 120))
+
+    def test_a_second_sleep_starts_settling_again(self):
+        runs.host.host_sleep_observe(now=1000.0, mono=10.0)
+        runs.host.host_sleep_observe(now=8200.0, mono=310.0)
+        runs.host.host_sleep_observe(now=8700.0, mono=350.0)    # a dark wake, then asleep
+        self.assertTrue(runs.host.host_settling(mono=350.0 + 100))
+
+
+class TestAWakeIsVerifyProgress(unittest.TestCase):
+    def test_the_gates_wake_line_counts_as_a_verify_mark(self):
+        # the gate writes WAKE after waiting out a sleep, before its setup
+        line = "2026-10-12T08:00:00Z\tWAKE\tc\tattempt=2\tslept=600s waited=130s"
+        self.assertTrue(runs.supervise._VERIFY_MARK_RE.match(line))
 
 
 class TestAwakeAge(SleepCase):
