@@ -27,6 +27,8 @@ v2 additions (written going forward, absence tolerated):
   REVERIFY_END  explicit gate-completion marker (upheld/revoked/rig-error) —
                 completion used to be INFERRED from a REVERIFY line's payload
                 text; old ledgers lack it, so the inference stays as fallback
+  WAKE     the host slept since the cell's setup: the gate waited for a full
+           wake and ran the setup again before the next arrangement
 
 Outcome verdicts (intent like .cancelled is NOT the ledger's business):
   green | failed | revoked | None (in flight)

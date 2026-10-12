@@ -44,6 +44,7 @@ from . import archive
 from fae.experiment import config as _config
 from . import confinement
 from . import faults
+from . import host_sleep
 from fae.experiment import variants as _variants
 from .checkpoints import Checkpoints
 from .surface import Surface, authorable
@@ -247,6 +248,8 @@ class Cell:
         self._held = None
         self._fp = None
         self._phase, self._attempt = Phase.SETUP, 0
+        self.agent_env = {}             # what the cell's setup returned for the agent's container
+        self._set_up_at = host_sleep.reading()
         self.ckpt = Checkpoints(self.ws)
         self._surface = None
         self._env = self._read_env()
@@ -1475,6 +1478,7 @@ class Cell:
         definition = fae.experiment.exp().definition
         self._archive_interrupted(out)
         self._mark_inflight(out, shape)
+        clocks = host_sleep.reading()
         # an infra already dead voids fast, before a deploy and a load
         # are spent on a corpse
         if not self.infra.alive():
@@ -1534,6 +1538,15 @@ class Cell:
             # arrangement measured can be attributed
             v = Verdict(ok=False, stage="harness-fp", charge=False,
                         why="verify-surface fingerprint changed mid-run",
+                        metrics=v.metrics, arrangement=v.arrangement,
+                        seconds=v.seconds, files=v.files)
+        gone = host_sleep.slept(clocks)
+        if gone and not v.stand_down:
+            # whatever the arrangement measured, a green included, it
+            # measured the sleep; a stand-down is the operator's either way
+            v = Verdict(ok=False, stage="host-sleep", charge=False,
+                        why=f"the host slept {gone:.0f}s during the arrangement "
+                            f"(was: {'green' if v.ok else v.stage})",
                         metrics=v.metrics, arrangement=v.arrangement,
                         seconds=v.seconds, files=v.files)
         self._persist_verdict(out, v)
@@ -1740,7 +1753,7 @@ class Cell:
             order.remove(seed_shape)
             order.insert(0, seed_shape)
         for s in order:
-            r = self.verify(shape=s)
+            r = self._verify_awake(s, attempt)
             results.append(r)
             label = s or "seed"
             if r.green:
@@ -1751,6 +1764,45 @@ class Cell:
                          f"{label} FAIL (passed: {' '.join(passed) or 'none'})")
             break
         return results
+
+    SLEEP_RERUNS = 3    # past this, the arrangement stays void and the attempt halts as today
+
+    def _verify_awake(self, shape, attempt):
+        """One arrangement of the gate, judged on a host that stayed awake
+        through it. One the host slept through is run again once the infra
+        is back (`_after_sleep`): the arrangements already passed stand and
+        the agent's tree is judged as it is, so a sleep costs one
+        arrangement, not the attempt."""
+        r = None
+        for n in range(self.SLEEP_RERUNS + 1):
+            if r is not None:
+                self._append("SHAPE", f"attempt={attempt}",
+                             f"{shape or 'seed'} void host-sleep, re-run {n}/{self.SLEEP_RERUNS}")
+            if not self._after_sleep(attempt):
+                return VerifyResult(green=False, shape=shape, stage_failed="infra", charge=False,
+                                    why="the cell's setup failed after a host sleep")
+            r = self.verify(shape=shape)
+            if r.stage_failed != "host-sleep":
+                break
+        return r
+
+    def _after_sleep(self, attempt):
+        """While the host has slept since the cell's infra was last set up:
+        wait for a wake that outlasts a dark wake, then run the setup again.
+        Each of its blocks reuses what still answers and restarts what the
+        sleep killed, as it does when a cell starts. False when a setup
+        fails."""
+        while gone := host_sleep.slept(self._set_up_at):
+            waited = host_sleep.wait_awake()
+            self._append("WAKE", f"attempt={attempt}",
+                         f"slept={gone:.0f}s waited={waited:.0f}s; setting the infra up again")
+            rc, _ = self.setup()
+            if rc != 0:
+                self._append("ALERT", f"attempt={attempt}",
+                             f"SETUP-FAILED rc={rc} after a host sleep: {self.variant} "
+                             f"cell_setup; investigate")
+                return False
+        return True
 
     def feedback(self, results, green):
         """Leave shapegate.last for the next attempt's prompt — from the
@@ -1985,15 +2037,18 @@ class Cell:
         """The cell's network, then the arm's provisioning on it. Returns
         (rc, env): 0 and the agent-container env on success; 1 and the
         failure already logged on a rig fault."""
+        started = host_sleep.reading()
         try:
             self.infra.network_up()
         except RuntimeError as e:
             self.infra.log(f"HALT[infra]: {e}")
             return 1, {}
         try:
-            return 0, self.infra.cell_setup()
+            self.agent_env = self.infra.cell_setup()
         except _variants.HookFailure:
             return 1, {}
+        self._set_up_at = started
+        return 0, self.agent_env
 
     def teardown(self):
         """The arm's, then the cell network it lived on."""
@@ -2647,7 +2702,7 @@ class Cell:
         prior = self.attempts
 
         stop_ticker = self.start_ticker()
-        setup_env, green, attempt = {}, False, prior
+        green, attempt = False, prior
         try:
             self.hb(Phase.SETUP, 0)
             # Always: a cell occupies the rig whether or not an agent runs, and
@@ -2662,7 +2717,7 @@ class Cell:
                     raise Halt(f"HALT[agent]: no creds to stage for "
                                f"{self.cid}: {e}", 42) from e
             # a stub replaces the agent, never the infra the gate runs on
-            rc, setup_env = self.setup()
+            rc, _ = self.setup()
             if rc != 0:
                 self._append("ALERT", f"SETUP-FAILED rc={rc}",
                              f"{self.variant} cell_setup; investigate")
@@ -2689,7 +2744,7 @@ class Cell:
 
                 outcome = self.agent_with_retries(
                     attempt, stub_overlay=stub_overlay,
-                    agent_cmd=agent_cmd, extra_env=setup_env, pre=pre)
+                    agent_cmd=agent_cmd, extra_env=self.agent_env, pre=pre)
                 if outcome == self.PAUSED:
                     # The wait is a pause safe point: the attempt was never
                     # judged, so it is abandoned, not crashed.
