@@ -100,7 +100,7 @@ class _HostPatch:
 
     def __init__(self, name, *args, **kw):
         self.name, self.patches = name, [mock.patch.object(host, name, *args, **kw)]
-        self.exported = getattr(conduct, name, None) is getattr(host, name)
+        self.exported = hasattr(conduct, name) and getattr(conduct, name) is getattr(host, name)
 
     def start(self):
         new = self.patches[0].start()
