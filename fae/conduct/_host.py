@@ -171,7 +171,9 @@ def all_states(running_only=False):
     for w in sorted(fae.experiment.exp().workspace.path.iterdir()):
         if not w.is_dir():
             continue
-        if active_cids is not None and w.name not in active_cids:
+        # a held cell (paused or stopped, unfinished) is the operator's to
+        # resume: the live view shows it too
+        if active_cids is not None and w.name not in active_cids and not _cell(w).paused:
             continue
         s = cell_state(w, loops, boxes)
         if s:

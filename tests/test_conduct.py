@@ -1271,8 +1271,8 @@ class TestStatusFooter(OrchTmpCase):
         with runs.patch_host("loop_parents", return_value={"a": 1, "b": 2, "c": 3}), \
              runs.patch_host("heartbeat",
                              side_effect=lambda ws: phases[ws.name] and {"phase": phases[ws.name]}):
-            line = runs.render.footer(runs.conduct.loop_parents(), boxes)
-        self.assertRegex(line, r"^exp: PAUSED \| 3 queued, 2 running loops, "
+            line = runs.render.footer(runs.conduct.loop_parents(), boxes, held=2)
+        self.assertRegex(line, r"^exp: PAUSED \| 3 queued, 2 held, 2 running loops, "
                                r"4 total containers \| \d\d:\d\d:\d\dZ$")
 
     def test_no_run_up_means_the_default_caps(self):
