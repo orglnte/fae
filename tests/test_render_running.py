@@ -56,6 +56,28 @@ class TestTheRunningTable(unittest.TestCase):
         self.assertTrue(b.rstrip().endswith("YES"))
 
 
+class TestTheHeldCells(TestTheRunningTable):
+    def test_a_paused_cell_is_held_not_running_and_counted(self):
+        live = _state("sonnet_high_alpha_apidocs_T1_r1", "verify")
+        held = _state("haiku_high_alpha_apidocs_T1_r2", "", state="PAUSED", why="stopped",
+                      att=3, shape="1/6")
+        out = self._render([live, held])
+        sections = out.split("\n— ")
+        running = next(s for s in sections if s.startswith("RUNNING"))
+        heldsec = next(s for s in sections if s.startswith("HELD (1)"))
+        self.assertNotIn("haiku_high_alpha_apidocs_T1_r2", running)
+        self.assertIn("haiku_high_alpha_apidocs_T1_r2", heldsec)
+        self.assertIn("PAUSED·stopped", heldsec)
+        self.assertIn("3/10", heldsec)
+        self.assertIn("experiment resume <agent>", heldsec)
+        self.assertIn(" 1 held, ", out)
+
+    def test_no_held_cell_no_section(self):
+        out = self._render([_state("sonnet_high_alpha_apidocs_T1_r1", "verify")])
+        self.assertNotIn("HELD", out)
+        self.assertIn(" 0 held, ", out)
+
+
 class TestTheInFlightE2E(unittest.TestCase):
     def test_a_failed_e2e_reads_as_an_x(self):
         with tempfile.TemporaryDirectory() as d:

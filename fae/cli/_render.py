@@ -195,7 +195,7 @@ def render(flat=False, running_only=False):
                 if v.startswith(pfx):
                     v = v[len(pfx):]
             return v[:18]
-        running_raw, other, attention = [], [], []
+        running_raw, held, other, attention = [], [], [], []
         for s in states:
             # (a `live = loop_parents()` sat here, inside the per-cell loop, and
             # was never read — the name is rebound below and the loop count
@@ -212,6 +212,10 @@ def render(flat=False, running_only=False):
                                     _dur(hb.get("phase_age") if hb else None),
                                     f"{s['att']}/{s['budget']}", s["shape"],
                                     _tail_hist(s["hist"], 40), s["detail"]))
+            elif s["state"] == "PAUSED":
+                held.append((s["cid"], vshort(s["agent"], s["agent_model"]), display_state(s),
+                             f"{s['att']}/{s['budget']}", s["shape"],
+                             _tail_hist(s["hist"], 34), s["detail"][:44]))
             else:
                 label = label_of.get(s["variant"], s["variant"])
                 st_txt = (display_state(s) + (" ⚠" if s.get("taint") else ""))
@@ -262,6 +266,13 @@ def render(flat=False, running_only=False):
         out.append(fmt_table(running, ("ID", "CELL", "VER", "PHASE", "TIME", "ATTEMPT",
                                        "GATE", "LAST REP", "BLOCK"))
                    if running else "  (none)")
+        if held:
+            held.sort()
+            out.append(f"\n— HELD ({len(held)}) — paused or stopped, unfinished " + "—" * 26)
+            out.append(fmt_table(held, ("CELL", "VER", "STATE", "ATTEMPT", "GATE",
+                                        "LAST REP", "DETAIL")))
+            out.append("  resume: experiment resume <agent> requeues them for the run; "
+                       "cell resume <cid> respawns one now")
         triage = [f"  ! {cid_to_id.get(cid, cid)}: {why}" for cid, why in attention]
         triage += [f"  z {kind:<10} {ident}  owner={owner}  {note}"
                    for kind, ident, owner, note in Conduct.find_zombies()]
@@ -275,7 +286,7 @@ def render(flat=False, running_only=False):
         qsec = queued_summary()
         if qsec:
             out.extend(qsec)
-        head = footer(loops, boxes)
+        head = footer(loops, boxes, held=len(held))
         bar = " " * head.index("|") + "| "      # the lines below hang off the state's bar
         out.append("\n\n" + head)
         _mp = fae.conduct.mem_pressure()
@@ -295,15 +306,15 @@ def queued_total():
     return sum(len(qs.specs_in(d)) for d in qs.lane_dirs(include_parked=True))
 
 
-def footer(loops, boxes):
-    """`exp: STATE | N queued, N running loops, N total containers | HH:MM:SSZ`. A
-    running loop is one not blocked on a wait phase; the containers are every
-    cell-owned one."""
+def footer(loops, boxes, held=0):
+    """`exp: STATE | N queued, N held, N running loops, N total containers |
+    HH:MM:SSZ`. Held cells are paused or stopped and unfinished; a running loop
+    is one not blocked on a wait phase; the containers are every cell-owned one."""
     ws = fae.experiment.exp().workspace.path
     working = sum(1 for cid in loops
                   if (fae.conduct.heartbeat(ws / cid) or {}).get("phase") not in WAIT_PHASES)
     total = len(Conduct.cell_containers(boxes))
-    return (f"{Conduct().run_line()} | {queued_total()} queued, "
+    return (f"{Conduct().run_line()} | {queued_total()} queued, {held} held, "
             f"{working} running loops, {total} total containers | "
             f"{datetime.now(timezone.utc):%H:%M:%S}Z")
 
