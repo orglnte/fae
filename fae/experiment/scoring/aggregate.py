@@ -568,6 +568,54 @@ def pooled_model(model_id):
     return POOLED_MODELS.get(model_id, model_id)
 
 
+def _ranks(xs: list[float]) -> list[float]:
+    """1-based ranks, ties sharing their mean rank."""
+    order = sorted(range(len(xs)), key=lambda i: xs[i])
+    r = [0.0] * len(xs)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and xs[order[j + 1]] == xs[order[i]]:
+            j += 1
+        for k in range(i, j + 1):
+            r[order[k]] = (i + j) / 2 + 1
+        i = j + 1
+    return r
+
+
+def spearman(xs: list[float], ys: list[float]) -> float | None:
+    """Spearman's rank correlation, None below 3 pairs or with no spread."""
+    if len(xs) < 3:
+        return None
+    rx, ry = _ranks(xs), _ranks(ys)
+    mx, my = sum(rx) / len(rx), sum(ry) / len(ry)
+    sxy = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
+    sxx = sum((a - mx) ** 2 for a in rx)
+    syy = sum((b - my) ** 2 for b in ry)
+    return round(sxy / (sxx * syy) ** 0.5, 3) if sxx and syy else None
+
+
+def wall_vs_work(cells: list[dict]) -> dict:
+    """Per model, over its green cells: how closely the wall clock to green
+    follows the agent's work (output tokens, turns, tool calls). A high rho
+    says time ranks cells as the work does; a low one, that something
+    outside the work (the provider, the host) moved the clock."""
+    by = defaultdict(list)
+    for c in cells:
+        if c.get("green") and c.get("agent_s_total") is not None:
+            by[pooled_model(c.get("model", "unknown"))].append(c)
+    out = {}
+    for model, cs in sorted(by.items()):
+        row = {"n": 0}
+        for f in ("out_tok", "turns", "tool_calls"):
+            pairs = [(c["agent_s_total"], c[f"{f}_total"]) for c in cs
+                     if c.get(f"{f}_total") is not None]
+            row["n"] = max(row["n"], len(pairs))
+            row[f"rho_wall_{f}"] = spearman([a for a, _ in pairs], [b for _, b in pairs])
+        out[model] = row
+    return out
+
+
 def group_and_rank(cells: list[dict]) -> dict:
     """cells -> {"<model> / <variant>": metrics}, ranked.
 
@@ -687,6 +735,7 @@ def main() -> int:
         "total_cells": len(cells),
         "cells_missing_grading": sum(1 for c in cells if c.get("grading_missing")),
         "by_model_variant": by_mv,
+        "wall_vs_work_by_model": wall_vs_work(cells),
         "baseline": ({"impl": other, "delta_by_model_variant": compare}
                      if compare is not None else None),
         # the gaps between variants and the reading notes are the experiment's
@@ -752,6 +801,13 @@ def main() -> int:
     print("   cells only; '-' when the client records none (agy, opencode).")
     print(" * API ms/TOK = API milliseconds per output token: the provider's speed.")
     print("   Rows of one model should read alike; a lane served slower shows here.")
+    for model, w in summary["wall_vs_work_by_model"].items():
+        rhos = [w[f"rho_wall_{f}"] for f in ("out_tok", "turns", "tool_calls")]
+        if all(r is None for r in rhos):
+            continue
+        shown = ", ".join("-" if r is None else f"{r:.2f}" for r in rhos)
+        print(f" * {short_model(model)}: MIN to green vs output tokens, turns, tool calls,")
+        print(f"   Spearman rho = {shown} (n={w['n']} green cells).")
     print(" * SLoC = non-blank, non-comment lines authored by the agent, excluding the")
     print("   seeded skeleton. Raw line counts stay in results.csv/json.")
     if compare is not None:

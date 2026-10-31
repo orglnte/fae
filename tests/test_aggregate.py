@@ -106,6 +106,34 @@ class TestTranscriptUsage(unittest.TestCase):
         self.assertIn("tool_s_total", aggregate.USAGE_TOTALS)
 
 
+class TestWallVsWork(unittest.TestCase):
+    """How closely the wall clock to green ranks a model's green cells as the
+    agent's work does: Spearman's rho, per model."""
+
+    def test_rho_is_one_for_the_same_order_and_minus_one_reversed(self):
+        self.assertEqual(aggregate.spearman([1, 2, 3, 4], [10, 20, 30, 40]), 1.0)
+        self.assertEqual(aggregate.spearman([1, 2, 3, 4], [40, 30, 20, 10]), -1.0)
+
+    def test_ties_share_their_rank(self):
+        self.assertEqual(aggregate._ranks([5, 1, 5, 2]), [3.5, 1.0, 3.5, 2.0])
+
+    def test_too_few_pairs_or_no_spread_is_unknown(self):
+        self.assertIsNone(aggregate.spearman([1, 2], [1, 2]))
+        self.assertIsNone(aggregate.spearman([1, 2, 3], [7, 7, 7]))
+
+    def _cell(self, green, wall, out, model="m"):
+        c = cell(green)
+        c.update(model=model, agent_s_total=wall, out_tok_total=out,
+                 turns_total=out, tool_calls_total=None)
+        return c
+
+    def test_per_model_over_green_cells_only(self):
+        w = aggregate.wall_vs_work([self._cell(True, 100, 1), self._cell(True, 200, 2),
+                                    self._cell(True, 300, 3), self._cell(False, 50, 900)])
+        self.assertEqual(w["m"], {"n": 3, "rho_wall_out_tok": 1.0, "rho_wall_turns": 1.0,
+                                  "rho_wall_tool_calls": None})
+
+
 class TestShortModelStripsGatewayPaths(unittest.TestCase):
     def test_provider_path_keeps_only_the_model(self):
         self.assertEqual(aggregate.short_model("opencode-go/deepseek-v4-flash"),

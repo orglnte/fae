@@ -62,6 +62,10 @@ grading_missing`.
   `n_green_usage`, `mean_files`, `mean_languages`, `mean_lines` (green
   cells) with `n_green_surface`, and the LoC spread. Model ids the
   definition pools (`POOLED_MODELS`) share one row.
+- `wall_vs_work_by_model["<model>"]` → over the model's green cells, Spearman's
+  rho between the wall clock to green (`agent_s_total`) and each of output
+  tokens, turns and tool calls (`rho_wall_out_tok`, `rho_wall_turns`,
+  `rho_wall_tool_calls`; null below 3 cells), with `n`.
 - `baseline` → when the table is cut to one `--impl`, the other driver's
   cells under the same cuts as `delta_by_model_variant`; else null.
 - **whatever the experiment's definition adds** (`report_summary`, given
