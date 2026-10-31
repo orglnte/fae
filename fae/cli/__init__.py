@@ -1005,7 +1005,28 @@ def rig_tool(ctx: typer.Context):
 
 
 
+def no_experiment(argv=None):
+    """Why this root cannot run a command (no experiment definition), or
+    empty; help needs none. One line naming where cli.py runs, in place of
+    the traceback a command would end in."""
+    argv = sys.argv[1:] if argv is None else argv
+    if not argv or "--help" in argv or "-h" in argv:
+        return ""
+    from fae import paths
+    from fae.experiment import config as _config
+    root = paths.root()
+    init = _config.experiment_dir(root) / "__init__.py"
+    if init.is_file():
+        return ""
+    return (f"no experiment at {root}: {init} does not exist. Run cli.py from an "
+            f"experiment's root, or set EXPERIMENT_DIR.")
+
+
 def main():
+    why = no_experiment()
+    if why:
+        print(why, file=sys.stderr)
+        sys.exit(2)
     app()
 
 

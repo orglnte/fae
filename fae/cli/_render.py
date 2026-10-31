@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import collections
 import os
+import subprocess
 import sys
 import time
 import ujson as json
@@ -521,8 +522,16 @@ def results_score(args):
 
 
 def results_aggregate(args):
-    """The scoreboard from the cells' score.json (fae/experiment/scoring/aggregate.py)."""
-    fae.experiment.exp().aggregate(
-        variant=getattr(args, "variant", None), where=getattr(args, "where", None) or (),
-        impl=getattr(args, "impl", None), allow_stale=getattr(args, "allow_stale", False),
-        **{s: getattr(args, s, False) for s in fae.experiment._experiment.Experiment.AGGREGATE_SWITCHES})
+    """The scoreboard from the cells' score.json (fae/experiment/scoring/aggregate.py).
+    A refusal (a stale score.json, say) is the scoreboard's own output above;
+    it ends the command with its exit code, not a traceback."""
+    try:
+        fae.experiment.exp().aggregate(
+            variant=getattr(args, "variant", None), where=getattr(args, "where", None) or (),
+            impl=getattr(args, "impl", None), allow_stale=getattr(args, "allow_stale", False),
+            **{s: getattr(args, s, False)
+               for s in fae.experiment._experiment.Experiment.AGGREGATE_SWITCHES})
+    except subprocess.CalledProcessError as e:
+        print(f"scoreboard not printed: aggregate exited {e.returncode} (its output above)",
+              file=sys.stderr)
+        sys.exit(e.returncode)
