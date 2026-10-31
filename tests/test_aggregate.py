@@ -76,6 +76,36 @@ class TestAgentTime(unittest.TestCase):
         self.assertEqual(aggregate.format_agent_time(s), ("-", "-"))
 
 
+class TestTranscriptUsage(unittest.TestCase):
+    """The transcript's figures to green span GREEN cells only, as MIN; the
+    API/TOOL cell splits MIN into API time and wall minus API time."""
+
+    def _cell(self, green, api, tool, turns, tools, out):
+        c = cell(green)
+        c.update(api_s_total=api, tool_s_total=tool, turns_total=turns,
+                 tool_calls_total=tools, out_tok_total=out,
+                 api_ms_per_out_tok=None if api is None else round(1000 * api / out, 2))
+        return c
+
+    def test_means_ignore_cells_that_never_greened(self):
+        s = aggregate.cell_metrics([self._cell(True, 600, 300, 50, 40, 90000),
+                                    self._cell(True, 1200, 900, 70, 60, 110000),
+                                    self._cell(False, 6000, 6000, 900, 900, 900000)])
+        self.assertEqual((s["mean_api_s_to_green"], s["mean_tool_s_to_green"],
+                          s["mean_turns_to_green"], s["n_green_usage"]), (900, 600, 60, 2))
+        self.assertEqual(aggregate.format_usage(s), ["15.0 / 10.0", "60", "50", "100", "8.8"])
+
+    def test_a_client_without_a_transcript_account_prints_dashes(self):
+        s = aggregate.cell_metrics([self._cell(True, None, None, None, None, None)])
+        self.assertEqual(aggregate.format_usage(s), ["-", "-", "-", "-", "-"])
+        self.assertEqual(s["n_green_usage"], 0)
+
+    def test_every_total_reaches_the_csv(self):
+        for f in aggregate.USAGE_TOTALS:
+            self.assertIn(f, aggregate.CSV_COLUMNS)
+        self.assertIn("tool_s_total", aggregate.USAGE_TOTALS)
+
+
 class TestShortModelStripsGatewayPaths(unittest.TestCase):
     def test_provider_path_keeps_only_the_model(self):
         self.assertEqual(aggregate.short_model("opencode-go/deepseek-v4-flash"),
@@ -146,13 +176,16 @@ class TestTableColumns(unittest.TestCase):
 
     def test_row_order_matches_the_header(self):
         src = (Path(ROOT) / "fae" / "experiment" / "scoring" / "aggregate.py").read_text()
-        row = next(l for l in src.splitlines() if "[str(n), e2e, grn, itg, agent_min, per_att, lines]" in l)
+        row = next(l for l in src.splitlines()
+                   if "[str(n), e2e, grn, itg, agent_min, per_att, *format_usage(m), lines]" in l)
         hdrs = [h for h, _ in aggregate.table_columns(None)]
         self.assertLess(row.index("itg"), row.index("agent_min"))
         self.assertLess(row.index("agent_min"), row.index("per_att"))
-        self.assertLess(row.index("per_att"), row.index("lines"))
+        self.assertLess(row.index("per_att"), row.index("format_usage"))
+        self.assertLess(row.index("format_usage"), row.index("lines"))
         self.assertEqual(hdrs[hdrs.index("ITG mn/avg/mx") + 1:hdrs.index("SLoC avg -mn/+mx")],
-                         ["MIN mn/avg/mx", "MIN/ATT"])
+                         ["MIN mn/avg/mx", "MIN/ATT", "API/TOOL min", "TURNS", "TOOLS", "OUT kTOK",
+                          "API ms/TOK"])
 
     def test_a_row_is_a_model_and_a_variant(self):
         self.assertEqual([h for h, _ in aggregate.table_columns(None)][:2], ["AGENT", "VARIANT"])

@@ -21,6 +21,7 @@ from pathlib import Path
 
 import fae.experiment  # noqa: E402
 from fae import paths as _paths  # noqa: E402
+from fae.experiment.scoring.score_cell import USAGE_FIELDS  # noqa: E402
 
 OUT_CSV, OUT_JSON = "results.csv", "results.json"     # beside the cells
 
@@ -29,6 +30,10 @@ OUT_CSV, OUT_JSON = "results.csv", "results.json"     # beside the cells
 # (~1700 lines); widen it if a variant ever exceeds 9999.
 LOC_MEAN_W = 4
 
+# The transcript's account of the attempts up to green (score_cell.parse_usage);
+# tool_s is wall minus API time.
+USAGE_TOTALS = [f"{f}_total" for f in USAGE_FIELDS] + ["api_ms_per_out_tok"]
+
 CSV_COLUMNS = [
     "cell_id", "model", "task", "variant", "factors", "impl", "repeat",
     "first_pass_correct", "correctness_tier",
@@ -36,6 +41,7 @@ CSV_COLUMNS = [
     "load_errors", "load_total", "k6_available", "verify_stage_failed",
     "iterations_to_green", "green", "revoked", "budget_exhausted",
     "agent_s_total", "agent_s_per_attempt",
+    *USAGE_TOTALS,
     "files", "language_count", "lines", "sloc", "total_lines", "grader", "grading_missing",
 ]
 
@@ -186,6 +192,7 @@ def flat_row(c: dict) -> dict:
         "budget_exhausted": c.get("budget_exhausted"),
         "agent_s_total": c.get("agent_s_total"),
         "agent_s_per_attempt": c.get("agent_s_per_attempt"),
+        **{k: c.get(k) for k in USAGE_TOTALS},
         "files": surface.get("files"),
         "language_count": surface.get("language_count"),
         "lines": surface.get("lines"),
@@ -254,6 +261,13 @@ def cell_metrics(cells: list[dict]) -> dict:
         "mean_agent_s_to_green": mean([c.get("agent_s_total") for c in cells if c.get("green")]),
         "max_agent_s_to_green": max_val([c.get("agent_s_total") for c in cells if c.get("green")]),
         "mean_agent_s_per_attempt": mean([c.get("agent_s_per_attempt") for c in cells]),
+        # the transcript's account to green, GREEN cells only (as MIN)
+        **{f"mean_{f}_to_green": mean([c.get(f"{f}_total") for c in cells if c.get("green")])
+           for f in USAGE_FIELDS},
+        "mean_api_ms_per_out_tok": mean([c.get("api_ms_per_out_tok") for c in cells
+                                         if c.get("green")]),
+        "n_green_usage": sum(1 for c in cells
+                             if c.get("green") and c.get("api_s_total") is not None),
         # metric 4 (agent-authored surface)
         # GREEN CELLS ONLY: a non-green cell's files are whatever its last failed
         # attempt left, possibly mid-edit, so counting them would measure how far
@@ -498,12 +512,29 @@ def format_agent_time(m: dict) -> tuple[str, str]:
     return total, "-" if per is None else f"{per / 60:.1f}"
 
 
+def format_usage(m: dict) -> list[str]:
+    """The API/TOOL, TURNS, TOOLS, OUT kTOK and API ms/TOK cells: means to
+    green over the green cells whose transcripts carry them."""
+    def g(f):
+        return m.get(f"mean_{f}_to_green")
+    api, tool = g("api_s"), g("tool_s")
+    split = "-" if api is None or tool is None else f"{api / 60:.1f} / {tool / 60:.1f}"
+    out, speed = g("out_tok"), m.get("mean_api_ms_per_out_tok")
+    return [split,
+            "-" if g("turns") is None else f"{g('turns'):.0f}",
+            "-" if g("tool_calls") is None else f"{g('tool_calls'):.0f}",
+            "-" if out is None else f"{out / 1000:.0f}",
+            "-" if speed is None else f"{speed:.1f}"]
+
+
 def table_columns(vs: str | None) -> list[tuple[str, int]]:
     """(header, width) per column, in print order. The LoC column must fit
     format_loc's widest value or the columns after it walk left."""
     return ([("AGENT", 16), ("VARIANT", 24)]
             + [("REPS", 4), ("E2E", 5), ("GREEN", 5), ("ITG mn/avg/mx", 14),
                ("MIN mn/avg/mx", 17), ("MIN/ATT", 7),
+               ("API/TOOL min", 12), ("TURNS", 5), ("TOOLS", 5), ("OUT kTOK", 8),
+               ("API ms/TOK", 10),
                ("SLoC avg -mn/+mx", LOC_MEAN_W + len("   -9999/+9999"))]
             + ([("N: GRN%  Δpt", 15), ("ITG  Δ", 10), ("SIG(p)  GRADE", 19)]
                if vs else []))
@@ -649,6 +680,7 @@ def main() -> int:
                "mean_e2e_pass_rate", "load_error_rate_on_green",
                "mean_iterations_to_green", "budget_censored_rate",
                "mean_agent_s_to_green", "mean_agent_s_per_attempt",
+               *[f"mean_{f}_to_green" for f in USAGE_FIELDS], "mean_api_ms_per_out_tok",
                "mean_files", "mean_languages", "mean_lines"]
 
     summary = {
@@ -703,7 +735,7 @@ def main() -> int:
         
         mod, var = key.split(" / ", 1)
         vals = [short_model(mod), var] \
-            + [str(n), e2e, grn, itg, agent_min, per_att, lines] \
+            + [str(n), e2e, grn, itg, agent_min, per_att, *format_usage(m), lines] \
             + (list(format_compare(compare.get(key))) if compare is not None else [])
         print(" | ".join(f"{v:<{w}}" for v, (_, w) in zip(vals, cols)))
 
@@ -713,6 +745,13 @@ def main() -> int:
     print(" * MIN = the agent's minutes up to green (charged attempts; GREEN cells only);")
     print("   MIN/ATT = its mean minutes per charged attempt, every cell. '-' when the")
     print("   ledger has no AGENT lines for those attempts.")
+    print(" * API/TOOL min = of MIN, the minutes in the client's API requests / TOOL,")
+    print("   wall minus API time (the agent's commands and the CLI's own work).")
+    print("   TURNS, TOOLS, OUT kTOK = agent turns, tool calls and output tokens")
+    print("   (thinking included) up to green. All from the agent's transcript, GREEN")
+    print("   cells only; '-' when the client records none (agy, opencode).")
+    print(" * API ms/TOK = API milliseconds per output token: the provider's speed.")
+    print("   Rows of one model should read alike; a lane served slower shows here.")
     print(" * SLoC = non-blank, non-comment lines authored by the agent, excluding the")
     print("   seeded skeleton. Raw line counts stay in results.csv/json.")
     if compare is not None:

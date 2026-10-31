@@ -23,6 +23,14 @@ makes `aggregate` refuse rather than publish a stale table.
 | `verify_stage_failed` | str/null | the verifier's stage of the last non-green verify (`deploy`, `e2e`, `k6`, `scaling`, …) or null |
 | `iterations_to_green` | int/null | attempts to the first green, from the ledger; null when never green |
 | `green` / `revoked` / `budget_exhausted` | bool | the terminal outcome the ledger records (`revoked`: a green the gate later revoked — never merged with never-green) |
+| `agent_s_total` / `agent_s_per_attempt` / `agent_s_by_attempt` | int/float/obj, null | the agent's wall-clock seconds, from the ledger's AGENT lines: summed over the charged attempts up to green (every charged attempt when never green), their mean, and each charged attempt's |
+| `api_s_total` / `tool_s_total` | float, null | of that wall clock, the seconds in the client's API requests, and `tool_s`: wall minus API time (the judged run's `last_s` less its API time — the agent's commands and the CLI's own work) |
+| `turns_total` / `tool_calls_total` | int, null | the agent's turns and tool calls up to green |
+| `out_tok_total` / `think_tok_total` / `in_tok_total` | int, null | output tokens (thinking included), thinking tokens, and input tokens (fresh, cache-written and cache-read) up to green |
+| `cost_usd_total` | float, null | the client's own cost figure up to green |
+| `retries_total` / `retry_wait_s_total` / `limited_total` | int/float/int, null | the client's API retries, the backoff it announced before them, and rate-limit events whose status was not `allowed` |
+| `api_ms_per_out_tok` | float, null | API milliseconds per output token up to green: the provider's speed, the same across one model's rows unless a lane was served slower |
+| `usage_by_attempt` | obj | per charged attempt with a transcript account, the fields above unsummed (`api_s`, `tool_s`, `turns`, …) |
 | `author_surface` | obj | `{files, languages[], language_count, lines, sloc, total_files, total_languages, total_language_count, total_lines, per_file[]}` — the agent-authored delta over the seeded skeleton (`surface_filter.py` decides what counts) |
 
 ## `results.csv`
@@ -32,7 +40,10 @@ One row per cell, the columns of `CSV_COLUMNS` in `aggregate.py`:
 first_pass_correct, correctness_tier, deploy_ok, e2e_pass, e2e_total,
 e2e_green, load_errors, load_total, k6_available, verify_stage_failed,
 iterations_to_green, green, revoked, budget_exhausted, agent_s_total,
-agent_s_per_attempt, files, language_count, lines, sloc, total_lines, grader,
+agent_s_per_attempt, api_s_total, tool_s_total, turns_total,
+tool_calls_total, out_tok_total, think_tok_total, in_tok_total,
+cost_usd_total, retries_total, retry_wait_s_total, limited_total,
+api_ms_per_out_tok, files, language_count, lines, sloc, total_lines, grader,
 grading_missing`.
 
 ## `results.json`
@@ -45,7 +56,10 @@ grading_missing`.
   `first_pass_correct_rate`, `e2e_green_rate`,
   `green_rate`, `revoked_rate`, `mean_e2e_pass_rate`,
   `load_error_rate_on_green`, `min/mean/max_iterations_to_green`,
-  `budget_censored_rate`, `mean_files`, `mean_languages`, `mean_lines` (green
+  `budget_censored_rate`, `min/mean/max_agent_s_to_green`,
+  `mean_agent_s_per_attempt`, `mean_<field>_to_green` for every transcript
+  field above and `mean_api_ms_per_out_tok` (green cells) with
+  `n_green_usage`, `mean_files`, `mean_languages`, `mean_lines` (green
   cells) with `n_green_surface`, and the LoC spread. Model ids the
   definition pools (`POOLED_MODELS`) share one row.
 - `baseline` → when the table is cut to one `--impl`, the other driver's
@@ -59,6 +73,10 @@ grading_missing`.
 
 `green_rate` and `mean_iterations_to_green` with `budget_censored_rate`
 carry the attempts-to-green story; `load_error_rate_on_green` is a parity check
-measured on green builds only. Always report `n_cells` and
+measured on green builds only. Turns, tool calls and output tokens to green
+measure the agent's work without the provider's latency in them; wall time
+does not, and `mean_api_ms_per_out_tok` says how far the provider's speed
+differed between rows. The transcript fields come from claude's stream-json
+only: an agy or opencode cell reads null. Always report `n_cells` and
 `cells_missing_grading`. Which gaps between variants matter is the experiment's
 to say, in its notes.

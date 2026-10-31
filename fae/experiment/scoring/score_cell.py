@@ -17,9 +17,13 @@ import sys
 from pathlib import Path
 
 import fae.experiment
+from fae.cell import transcript
 from fae.experiment.scoring import surface_filter
 
 from fae import paths as _paths  # noqa: E402
+
+# Per attempt from the agent's transcript; tool_s is wall minus API time.
+USAGE_FIELDS = ("api_s", "tool_s") + transcript.FIELDS[1:]
 
 
 # Extension -> language label (author-surface metric 4).
@@ -91,7 +95,7 @@ def _sha256(p: Path) -> str:
 # Bump when scoring semantics change (sloc rules, surface filter, authored
 # logic): a stale cache would otherwise keep serving numbers computed under
 # the old rules.
-CACHE_VERSION = 1
+CACHE_VERSION = 4
 
 
 def load_cache(cell) -> dict:
@@ -240,7 +244,7 @@ def parse_agent_time(text: str) -> dict:
     none and is not counted. An attempt run more than once keeps its last AGENT
     line, the run whose work was judged. The totals are None when a charged
     attempt has no AGENT line (cells that predate it)."""
-    charged, green_at, secs = [], None, {}
+    charged, green_at, secs, last, clients = [], None, {}, {}, {}
     for line in text.splitlines():
         f = line.split("\t")
         if len(f) < 4:
@@ -254,7 +258,11 @@ def parse_agent_time(text: str) -> dict:
         elif f[1] == "AGENT":
             kv = dict(x.split("=", 1) for x in f[3:] if "=" in x)
             if kv.get("attempt", "").isdigit() and kv.get("s", "").isdigit():
-                secs[int(kv["attempt"])] = int(kv["s"])
+                n = int(kv["attempt"])
+                secs[n] = int(kv["s"])
+                if kv.get("last_s", "").isdigit():
+                    last[n] = int(kv["last_s"])
+                clients[n] = kv.get("client", "-").split(":", 1)[0]
     counted = [n for n in charged if green_at is None or n <= green_at]
     complete = bool(counted) and all(n in secs for n in counted)
     return {
@@ -262,7 +270,47 @@ def parse_agent_time(text: str) -> dict:
         "agent_s_total": sum(secs[n] for n in counted) if complete else None,
         "agent_s_per_attempt": (round(sum(secs[n] for n in counted) / len(counted), 1)
                                 if complete else None),
+        "charged": charged,
+        "to_green": counted,
+        "last_s": {str(n): v for n, v in last.items()},
+        "clients": {str(n): v for n, v in clients.items()},
     }
+
+
+def attempt_usage(log, client, last_s) -> dict | None:
+    """One attempt's transcript figures (fae.cell.transcript.FIELDS) plus
+    tool_s, wall minus API time: the engine's wall clock of the judged run
+    less the time the client's API requests took."""
+    u = transcript.usage(client, log)
+    if u is None:
+        return None
+    u["tool_s"] = (round(last_s - u["api_s"], 1)
+                   if last_s is not None and u["api_s"] is not None else None)
+    return u
+
+
+def parse_usage(cell, agent_time: dict) -> dict:
+    """Per charged attempt, what its transcript records (attempt_usage), and
+    each figure summed over the charged attempts up to green. A total is None
+    when any of those attempts lacks it (a client whose transcript carries
+    none, a missing log)."""
+    by = {}
+    for n in agent_time["charged"]:
+        k = str(n)
+        last_s = agent_time["last_s"].get(k)
+        u = attempt_usage(cell.agent_log(n), agent_time["clients"].get(k, "-"), last_s)
+        if u is not None:
+            by[k] = u
+    counted = [str(n) for n in agent_time["to_green"]]
+    totals = {}
+    for f in USAGE_FIELDS:
+        vals = [by.get(k, {}).get(f) for k in counted]
+        ok = bool(vals) and all(isinstance(v, (int, float)) for v in vals)
+        totals[f"{f}_total"] = round(sum(vals), 4 if f == "cost_usd" else 1) if ok else None
+    api, out = totals["api_s_total"], totals["out_tok_total"]
+    # provider speed: a lane served slower shows here, whatever the design
+    totals["api_ms_per_out_tok"] = round(1000 * api / out, 2) if api is not None and out else None
+    return {"usage_by_attempt": by, **totals}
 
 
 def main() -> int:
@@ -292,6 +340,8 @@ def score_one(cell_id: str, cell=None) -> int:
     metrics = cached_input(cache, "metrics", mt["metrics"], cell.read_metrics)
     agent_time = cached_input(cache, "agent_time", mt["ledger"],
                               lambda: parse_agent_time(cell.ledger_text()))
+    usage = cached_input(cache, "usage", mt["ledger"],
+                         lambda: parse_usage(cell, agent_time))
 
     itg = iters["iterations_to_green"]
     
@@ -328,6 +378,9 @@ def score_one(cell_id: str, cell=None) -> int:
         "agent_s_total": agent_time["agent_s_total"],
         "agent_s_per_attempt": agent_time["agent_s_per_attempt"],
         "agent_s_by_attempt": agent_time["agent_s_by_attempt"],
+        # the transcript's account, same attempts; tool_s is wall minus API time
+        **{k: v for k, v in usage.items() if k != "usage_by_attempt"},
+        "usage_by_attempt": usage["usage_by_attempt"],
         
         # metric 4
         "author_surface": surface,
