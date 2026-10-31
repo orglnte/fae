@@ -71,7 +71,7 @@ class TestAgentTime(unittest.TestCase):
 
     def test_the_cells_print_minutes_and_a_dash_without_data(self):
         s = aggregate.cell_metrics([self._cell(True, 600, 300), self._cell(True, 1200, 300)])
-        self.assertEqual(aggregate.format_agent_time(s), ("10 / 15.0 / 20", "5.0"))
+        self.assertEqual(aggregate.format_agent_time(s), ("10/15.0/20", "5.0"))
         s = aggregate.cell_metrics([self._cell(True, None, None)])
         self.assertEqual(aggregate.format_agent_time(s), ("-", "-"))
 
@@ -93,7 +93,7 @@ class TestTranscriptUsage(unittest.TestCase):
                                     self._cell(False, 6000, 6000, 900, 900, 900000)])
         self.assertEqual((s["mean_api_s_to_green"], s["mean_tool_s_to_green"],
                           s["mean_turns_to_green"], s["n_green_usage"]), (900, 600, 60, 2))
-        self.assertEqual(aggregate.format_usage(s), ["15.0 / 10.0", "60", "50", "100", "8.8"])
+        self.assertEqual(aggregate.format_usage(s), ["15.0/10.0", "60", "50", "100", "8.8"])
 
     def test_a_client_without_a_transcript_account_prints_dashes(self):
         s = aggregate.cell_metrics([self._cell(True, None, None, None, None, None)])
@@ -200,7 +200,7 @@ class TestTableColumns(unittest.TestCase):
 
     def test_header_order_is_itg_then_loc(self):
         hdrs = [h for h, _ in aggregate.table_columns(None)]
-        self.assertLess(hdrs.index("ITG mn/avg/mx"), hdrs.index("SLoC avg -mn/+mx"))
+        self.assertLess(hdrs.index("ATTEMPTS"), hdrs.index("SLoC"))
 
     def test_row_order_matches_the_header(self):
         src = (Path(ROOT) / "fae" / "experiment" / "scoring" / "aggregate.py").read_text()
@@ -211,9 +211,11 @@ class TestTableColumns(unittest.TestCase):
         self.assertLess(row.index("agent_min"), row.index("per_att"))
         self.assertLess(row.index("per_att"), row.index("format_usage"))
         self.assertLess(row.index("format_usage"), row.index("lines"))
-        self.assertEqual(hdrs[hdrs.index("ITG mn/avg/mx") + 1:hdrs.index("SLoC avg -mn/+mx")],
-                         ["MIN mn/avg/mx", "MIN/ATT", "API/TOOL min", "TURNS", "TOOLS", "OUT kTOK",
-                          "API ms/TOK"])
+        cols = aggregate.table_columns(None)
+        self.assertEqual(cols[[h for h, _ in cols].index("ATTEMPTS") + 1:[h for h, _ in cols].index("SLoC")],
+                         [("MINUTES", "to green"), ("MINUTES", "per try"), ("API/TOOL", "minutes"),
+                          ("TURNS", "agent"), ("TOOL", "calls"), ("OUTPUT", "ktokens"),
+                          ("API", "ms/token")])
 
     def test_a_row_is_a_model_and_a_variant(self):
         self.assertEqual([h for h, _ in aggregate.table_columns(None)][:2], ["AGENT", "VARIANT"])
@@ -228,12 +230,21 @@ class TestTableColumns(unittest.TestCase):
         src = (Path(ROOT) / "fae" / "experiment" / "scoring" / "aggregate.py").read_text()
         self.assertNotIn("AUTH_LINES", src)
 
-    def test_the_loc_column_is_wide_enough_for_its_header_and_values(self):
-        """A narrow field does not truncate, it silently stops padding, and the
-        DEFECTS column walks left under the wrong header."""
-        width = dict(aggregate.table_columns(None))["SLoC avg -mn/+mx"]
-        self.assertGreaterEqual(width, aggregate.LOC_MEAN_W + len("   -9999/+9999"))
-        self.assertGreaterEqual(width, len("SLoC avg -mn/+mx"))
+    def test_each_column_is_as_wide_as_its_widest_cell_and_no_wider(self):
+        """A narrow field does not truncate, it silently stops padding, and
+        the columns after it walk left under the wrong header."""
+        cols = [("AGENT", "model"), ("SLoC", "mean -/+")]
+        lines = aggregate.render_table(cols, [["haiku-5.5", " 565 -62/+84"],
+                                              ["opus-5.5", "1015 -907/+1150"]])
+        self.assertEqual(lines[1], "AGENT      SLoC")
+        self.assertEqual(lines[2], "model      mean -/+")
+        self.assertEqual(lines[4], "haiku-5.5   565 -62/+84")
+        self.assertEqual(lines[5], "opus-5.5   1015 -907/+1150")
+        self.assertEqual(len(lines[0]), len("haiku-5.5  1015 -907/+1150"))
+
+    def test_a_header_without_a_second_line_takes_one(self):
+        lines = aggregate.render_table([("A", ""), ("B", "")], [["1", "2"]])
+        self.assertEqual(lines, ["====", "A  B", "----", "1  2", "===="])
 
     def test_the_loc_offsets_start_at_a_fixed_column(self):
         """They are read down the column; a 3-digit mean next to a 4-digit one
@@ -242,7 +253,7 @@ class TestTableColumns(unittest.TestCase):
                     ((90, 80, 100), (999, 1, 9999), (1015, 907, 1150))]
         starts = {r.index("-") for r in rendered}
         self.assertEqual(len(starts), 1, rendered)
-        self.assertEqual(starts.pop(), aggregate.LOC_MEAN_W + 3)
+        self.assertEqual(starts.pop(), aggregate.LOC_MEAN_W + 1)
 
     def test_an_empty_loc_cell_keeps_the_mean_field_width(self):
         """Otherwise a no-green row's dash sits under the offsets instead of

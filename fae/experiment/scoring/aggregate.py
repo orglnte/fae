@@ -324,7 +324,7 @@ def format_loc(mean_lines, min_lines, max_lines) -> str:
         return f"{'-':>{LOC_MEAN_W}}"
     lo = mean_lines - (min_lines if min_lines is not None else mean_lines)
     hi = (max_lines if max_lines is not None else mean_lines) - mean_lines
-    return f"{mean_lines:>{LOC_MEAN_W}.0f}   -{lo:.0f}/+{hi:.0f}"
+    return f"{mean_lines:>{LOC_MEAN_W}.0f} -{lo:.0f}/+{hi:.0f}"
 
 
 def delta(a: float | None, b: float | None) -> float | None:
@@ -506,7 +506,7 @@ def discrepancy(b: dict | None) -> float | None:
 def format_agent_time(m: dict) -> tuple[str, str]:
     """The MIN and MIN/ATT cells: agent seconds shown as minutes."""
     mean = m.get("mean_agent_s_to_green")
-    total = "-" if mean is None else (f"{m['min_agent_s_to_green'] / 60:.0f} / {mean / 60:.1f} / "
+    total = "-" if mean is None else (f"{m['min_agent_s_to_green'] / 60:.0f}/{mean / 60:.1f}/"
                                       f"{m['max_agent_s_to_green'] / 60:.0f}")
     per = m.get("mean_agent_s_per_attempt")
     return total, "-" if per is None else f"{per / 60:.1f}"
@@ -518,7 +518,7 @@ def format_usage(m: dict) -> list[str]:
     def g(f):
         return m.get(f"mean_{f}_to_green")
     api, tool = g("api_s"), g("tool_s")
-    split = "-" if api is None or tool is None else f"{api / 60:.1f} / {tool / 60:.1f}"
+    split = "-" if api is None or tool is None else f"{api / 60:.1f}/{tool / 60:.1f}"
     out, speed = g("out_tok"), m.get("mean_api_ms_per_out_tok")
     return [split,
             "-" if g("turns") is None else f"{g('turns'):.0f}",
@@ -527,17 +527,31 @@ def format_usage(m: dict) -> list[str]:
             "-" if speed is None else f"{speed:.1f}"]
 
 
-def table_columns(vs: str | None) -> list[tuple[str, int]]:
-    """(header, width) per column, in print order. The LoC column must fit
-    format_loc's widest value or the columns after it walk left."""
-    return ([("AGENT", 16), ("VARIANT", 24)]
-            + [("REPS", 4), ("E2E", 5), ("GREEN", 5), ("ITG mn/avg/mx", 14),
-               ("MIN mn/avg/mx", 17), ("MIN/ATT", 7),
-               ("API/TOOL min", 12), ("TURNS", 5), ("TOOLS", 5), ("OUT kTOK", 8),
-               ("API ms/TOK", 10),
-               ("SLoC avg -mn/+mx", LOC_MEAN_W + len("   -9999/+9999"))]
-            + ([("N: GRN%  Δpt", 15), ("ITG  Δ", 10), ("SIG(p)  GRADE", 19)]
+def table_columns(vs: str | None) -> list[tuple[str, str]]:
+    """(name, what it counts) per column, in print order: the header's two
+    lines, so a column reads in words and is as narrow as its values."""
+    return ([("AGENT", "model"), ("VARIANT", "")]
+            + [("REPS", "cells"), ("E2E", "pass"), ("GREEN", "rate"),
+               ("ATTEMPTS", "to green"), ("MINUTES", "to green"), ("MINUTES", "per try"),
+               ("API/TOOL", "minutes"), ("TURNS", "agent"), ("TOOL", "calls"),
+               ("OUTPUT", "ktokens"), ("API", "ms/token"), ("SLoC", "mean -/+")]
+            + ([("N: GRN%  Δpt", ""), ("ITG  Δ", ""), ("SIG(p)  GRADE", "")]
                if vs else []))
+
+
+def render_table(cols: list[tuple[str, str]], rows: list[list[str]]) -> list[str]:
+    """The table's lines: a rule, the header's name and unit lines, a rule,
+    the rows, a rule. Each column is as wide as its widest cell, two spaces
+    apart, so the table is as narrow as its content."""
+    widths = [max([len(n), len(u)] + [len(r[i]) for r in rows]) for i, (n, u) in enumerate(cols)]
+
+    def line(cells):
+        return "  ".join(f"{c:<{w}}" for c, w in zip(cells, widths)).rstrip()
+    width = sum(widths) + 2 * (len(widths) - 1)
+    header = [line([n for n, _ in cols])]
+    if any(u for _, u in cols):
+        header.append(line([u for _, u in cols]))
+    return ["=" * width, *header, "-" * width, *map(line, rows), "=" * width]
 
 
 def _definition():
@@ -748,7 +762,6 @@ def main() -> int:
     print(f"[OK] Wrote aggregate summary to: {out_json}")
     
     cols = table_columns(other if compare is not None else None)
-    width = sum(w for _, w in cols) + 3 * (len(cols) - 1)
     if compare is not None:
         print(f"\nVS baseline: impl={other}")
     sort_discrepancy = "--sort-discrepancy" in sys.argv
@@ -758,9 +771,7 @@ def main() -> int:
         print(f"NOTE: {flag} has no effect without --impl "
               "(there is no baseline to diverge from)")
     rows_to_print = order_rows(by_mv, compare, sort_discrepancy, sort_significant)
-    print("\n" + "=" * width)
-    print(" | ".join(f"{h:<{w}}" for h, w in cols))
-    print("-" * width)
+    table = []
     for key, m in rows_to_print:
         n = m.get("n_cells", 0)
         e2e = f"{m.get('mean_e2e_pass_rate', 0):.0%}" if m.get('mean_e2e_pass_rate') is not None else "-"
@@ -770,7 +781,7 @@ def main() -> int:
         if itg_mean is not None:
             itg_min = m.get('min_iterations_to_green', 0)
             itg_max = m.get('max_iterations_to_green', 0)
-            itg = f"{itg_min:.0f} / {itg_mean:.1f} / {itg_max:.0f}"
+            itg = f"{itg_min:.0f}/{itg_mean:.1f}/{itg_max:.0f}"
         else:
             itg = "-"
             
@@ -786,31 +797,34 @@ def main() -> int:
         vals = [short_model(mod), var] \
             + [str(n), e2e, grn, itg, agent_min, per_att, *format_usage(m), lines] \
             + (list(format_compare(compare.get(key))) if compare is not None else [])
-        print(" | ".join(f"{v:<{w}}" for v, (_, w) in zip(vals, cols)))
+        table.append(vals)
 
-    print("=" * width)
-    print(" * ITG, SLoC: GREEN cells only -- denominator is GREEN, not REPS.")
-    print("   A non-green cell never worked; its size is not comparable.")
-    print(" * MIN = the agent's minutes up to green (charged attempts; GREEN cells only);")
-    print("   MIN/ATT = its mean minutes per charged attempt, every cell. '-' when the")
+    print()
+    print("\n".join(render_table(cols, table)))
+    print(" * a/b/c = min/mean/max over the row's cells. ATTEMPTS, MINUTES to green,")
+    print("   SLoC: GREEN cells only -- denominator is GREEN, not REPS. A non-green")
+    print("   cell never worked; its size is not comparable.")
+    print(" * MINUTES to green = the agent's minutes up to green (charged attempts);")
+    print("   per try = its mean minutes per charged attempt, every cell. '-' when the")
     print("   ledger has no AGENT lines for those attempts.")
-    print(" * API/TOOL min = of MIN, the minutes in the client's API requests / TOOL,")
-    print("   wall minus API time (the agent's commands and the CLI's own work).")
-    print("   TURNS, TOOLS, OUT kTOK = agent turns, tool calls and output tokens")
-    print("   (thinking included) up to green. All from the agent's transcript, GREEN")
-    print("   cells only; '-' when the client records none (agy: no API time;")
-    print("   opencode: nothing).")
-    print(" * API ms/TOK = API milliseconds per output token: the provider's speed.")
+    print(" * API/TOOL minutes = of MINUTES to green, the minutes in the client's API")
+    print("   requests / the rest, wall minus API time (the agent's commands and the")
+    print("   CLI's own work). TURNS, TOOL calls, OUTPUT ktokens = agent turns, tool")
+    print("   calls and output tokens (thinking included) up to green. All from the")
+    print("   agent's transcript, GREEN cells only; '-' when the client records none")
+    print("   (agy: no API time; opencode: nothing).")
+    print(" * API ms/token = API milliseconds per output token: the provider's speed.")
     print("   Rows of one model should read alike; a lane served slower shows here.")
     for model, w in summary["wall_vs_work_by_model"].items():
         rhos = [w[f"rho_wall_{f}"] for f in ("out_tok", "turns", "tool_calls")]
         if all(r is None for r in rhos):
             continue
         shown = ", ".join("-" if r is None else f"{r:.2f}" for r in rhos)
-        print(f" * {short_model(model)}: MIN to green vs output tokens, turns, tool calls,")
+        print(f" * {short_model(model)}: MINUTES to green vs output tokens, turns, tool calls,")
         print(f"   Spearman rho = {shown} (n={w['n']} green cells).")
     print(" * SLoC = non-blank, non-comment lines authored by the agent, excluding the")
-    print("   seeded skeleton. Raw line counts stay in results.csv/json.")
+    print("   seeded skeleton: the mean, then how far the row's smallest and largest")
+    print("   reach below and above it. Raw line counts stay in results.csv/json.")
     if compare is not None:
         print(" * SIG(p) GRADE = two-sided Fisher's exact test on green vs non-green")
         print("   counts, cut against baseline: the p-value (* p<.05, ** p<.01), then the")
