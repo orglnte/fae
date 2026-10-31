@@ -157,25 +157,54 @@ def cgroup_mem_mb_from(text: str) -> float | None:
     return max(usage - inactive, 0) / (1024.0 * 1024.0)
 
 
-def cross_check(rows: list[dict], tolerance_pct: float,
-                cgroup=None) -> tuple[bool, list[str]]:
+def _stats_mem_mb(container: str) -> float | None:
+    """One container's memory from docker stats, read now."""
+    out = _run(["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", container])
+    return _mem_to_mb(out.split("/")[0]) if out.strip() else None
+
+
+def _running(container: str) -> bool:
+    return _run(["docker", "inspect", "-f", "{{.State.Running}}", container]).strip() == "true"
+
+
+def cross_check(rows: list[dict], tolerance_pct: float, cgroup=None, restat=None,
+                running=None) -> tuple[bool, list[str]]:
     """Every docker component measured twice (stats vs its cgroup); the pods
     of a kind node must fit inside that node. A disagreement beyond the
     tolerance marks the sample unreliable — the number is not trusted, it is
-    reported as such. Returns (reliable, findings)."""
+    reported as such. Returns (reliable, findings).
+
+    The cgroup is read after the sample's one docker stats call, seconds
+    later for the last container, and a container's memory moves in that
+    time (a kind node sheds hundreds of MB as its pods settle). So a
+    disagreement is read once more from docker stats, after the cgroup:
+    a cgroup figure between the two stats readings, within the tolerance,
+    is the same memory read at another moment. A container gone by its
+    cgroup read was measured once and is left out."""
     cgroup = cgroup or _cgroup_mem_mb
+    restat = restat or _stats_mem_mb
+    running = running or _running
+    tol = tolerance_pct / 100.0
     findings = []
     for r in rows:
         if r["plane"] != "docker":
             continue
         other = cgroup(r["name"])
         if other is None:
-            findings.append(f"{r['name']}: cgroup memory unreadable")
+            if running(r["name"]):
+                findings.append(f"{r['name']}: cgroup memory unreadable")
             continue
         base = max(r["mem_mb"], other, 1.0)
-        if abs(r["mem_mb"] - other) / base * 100.0 > tolerance_pct:
-            findings.append(f"{r['name']}: docker stats {r['mem_mb']:.0f} MB vs "
-                            f"cgroup {other:.0f} MB")
+        if abs(r["mem_mb"] - other) / base <= tol:
+            continue
+        again = restat(r["name"])
+        if again is not None:
+            lo, hi = min(r["mem_mb"], again), max(r["mem_mb"], again)
+            if lo * (1 - tol) <= other <= hi * (1 + tol):
+                continue
+        findings.append(f"{r['name']}: docker stats {r['mem_mb']:.0f} MB"
+                        + (f" then {again:.0f} MB" if again is not None else "")
+                        + f" vs cgroup {other:.0f} MB")
     node_mem = sum(r["mem_mb"] for r in rows
                    if r["plane"] == "docker" and _KIND_INFRA.search(r["name"]))
     pods_mem = sum(r["mem_mb"] for r in rows if r["plane"] == "k8s")

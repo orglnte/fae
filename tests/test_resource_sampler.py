@@ -38,6 +38,10 @@ class TestTheSamplerIsScopedToTheCell(unittest.TestCase):
             self.assertEqual(len(rs.sample_docker(None)), 5)
 
 
+# the second stats reading and the liveness probe as before: none, and running
+ONCE = {"restat": lambda n: None, "running": lambda n: True}
+
+
 class TestEveryNumberHasTwoSources(unittest.TestCase):
 
     def rows(self):
@@ -48,26 +52,46 @@ class TestEveryNumberHasTwoSources(unittest.TestCase):
 
     def test_agreeing_sources_are_reliable(self):
         cg = {"fae-dind-x": 310.0, "exp-ka-1-control-plane": 1900.0}
-        ok, findings = rs.cross_check(self.rows(), 15.0, cgroup=cg.get)
+        ok, findings = rs.cross_check(self.rows(), 15.0, cgroup=cg.get, **ONCE)
         self.assertTrue(ok, findings)
 
     def test_a_disagreement_beyond_the_tolerance_is_named(self):
         cg = {"fae-dind-x": 600.0, "exp-ka-1-control-plane": 1900.0}
-        ok, findings = rs.cross_check(self.rows(), 15.0, cgroup=cg.get)
+        ok, findings = rs.cross_check(self.rows(), 15.0, cgroup=cg.get, **ONCE)
         self.assertFalse(ok)
         self.assertEqual(findings, ["fae-dind-x: docker stats 300 MB vs cgroup 600 MB"])
 
     def test_an_unreadable_second_source_is_not_silently_trusted(self):
-        ok, findings = rs.cross_check(self.rows(), 15.0, cgroup=lambda n: None)
+        ok, findings = rs.cross_check(self.rows(), 15.0, cgroup=lambda n: None, **ONCE)
         self.assertFalse(ok)
         self.assertEqual(len(findings), 2)
 
     def test_pods_cannot_exceed_their_node(self):
         rows = self.rows()
         rows[2]["mem_mb"] = 2500.0
-        ok, findings = rs.cross_check(rows, 15.0, cgroup={"fae-dind-x": 300.0, "exp-ka-1-control-plane": 2000.0}.get)
+        ok, findings = rs.cross_check(rows, 15.0, cgroup={"fae-dind-x": 300.0, "exp-ka-1-control-plane": 2000.0}.get, **ONCE)
         self.assertFalse(ok)
         self.assertIn("exceed their node", findings[0])
+
+    def test_memory_that_moved_between_the_reads_is_one_figure_read_twice(self):
+        """A kind node read at 1282 MB by stats, 831 MB by its cgroup a moment
+        later, and 927 MB by stats after that: the cgroup lies between."""
+        rows = [{"plane": "docker", "name": "exp-ka-1-control-plane", "tag": "infra",
+                 "cpu_pct": 1, "mem_mb": 1282.0}]
+        ok, findings = rs.cross_check(rows, 15.0, cgroup=lambda n: 831.0,
+                                      restat=lambda n: 927.0, running=lambda n: True)
+        self.assertTrue(ok, findings)
+
+    def test_a_cgroup_outside_both_stats_readings_is_still_a_disagreement(self):
+        ok, findings = rs.cross_check(self.rows()[:1], 15.0, cgroup=lambda n: 600.0,
+                                      restat=lambda n: 310.0, running=lambda n: True)
+        self.assertFalse(ok)
+        self.assertEqual(findings, ["fae-dind-x: docker stats 300 MB then 310 MB vs cgroup 600 MB"])
+
+    def test_a_container_gone_before_its_cgroup_read_is_left_out(self):
+        ok, findings = rs.cross_check(self.rows()[:1], 15.0, cgroup=lambda n: None,
+                                      restat=lambda n: None, running=lambda n: False)
+        self.assertTrue(ok, findings)
 
 
 class TestTheSummaryCarriesTheTrustFlags(unittest.TestCase):
@@ -78,7 +102,7 @@ class TestTheSummaryCarriesTheTrustFlags(unittest.TestCase):
         argv = ["resource_sampler", "--duration-s", "0.2", "--interval-s", "0.1",
                 "--csv-output", str(d / "r.csv"), "--json-output", str(d / "r.json"),
                 "--namespaces", "", "--infra-namespaces", ""] + own
-        with mock.patch.object(rs, "_run", lambda cmd, timeout=8.0: STATS if cmd[:2] == ["docker", "stats"] else ""), \
+        with mock.patch.object(rs, "_run", lambda cmd, timeout=8.0: STATS if cmd[:2] == ["docker", "stats"] and len(cmd) == 5 else ""), \
              mock.patch.object(rs, "_cgroup_mem_mb", lambda name: cgroup_mb), \
              mock.patch.object(rs.time, "sleep", lambda s: None):
             rs.main(argv)
