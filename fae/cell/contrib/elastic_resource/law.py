@@ -8,7 +8,10 @@ VERIFY_SAT_P99_MS — never on the load generator's clock: the moment a
 capped store tips over under a ramp is a property of the host, and a
 policy cannot be judged on a clock it cannot see. A spike that never
 saturates the store is a rig fault (the ramp did not reach the host's
-knee), reported as VOID, not as a verdict against the policy.
+knee), reported as VOID, not as a verdict against the policy — unless the
+load errors exceed the threshold: a service that stops answering completes
+no request, so its ticks carry no p99 and read as an idle store, and that
+is the policy's failure, charged.
 
 Two modes:
 
@@ -91,6 +94,14 @@ def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict |
     released_last = (not eps) or eps[-1][1] is not None or (events.get("release_epoch") is not None)
     err_pct = (100.0 * errors / total) if total else 100.0
     why: list[str] = []
+    errors_why = ("load errors %d/%d = %.1f%% > %g%% (the policy must serve every request)"
+                  % (errors, total, err_pct, max_pct))
+
+    def unsaturated(what: str) -> tuple[str, list[str]]:
+        if err_pct > max_pct:
+            return "false", [what + " while requests failed — the service did not answer",
+                             errors_why]
+        return VOID, [what + " — the host's knee is above the ramp; raise [load] top"]
 
     if sched:
         spikes = [w for w in sched["events"] if w["kind"] == "spike"]
@@ -98,10 +109,9 @@ def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict |
         for i, spk in enumerate(spikes, 1):
             sat_ts, peak = saturation(rows, sat_p99, spk["t0"], spk["t1"])
             if sat_ts is None:
-                return VOID, [
+                return unsaturated(
                     "spike %d never saturated the store (p99 max %.0fms < %gms over "
-                    "[%.0f..%.0f]) — the host's knee is above the ramp; raise [load] top"
-                    % (i, peak, sat_p99, spk["t0"], spk["t1"])]
+                    "[%.0f..%.0f])" % (i, peak, sat_p99, spk["t0"], spk["t1"]))
             sats.append(sat_ts)
         # pair episodes to spike windows in order
         if len(eps) != len(spikes):
@@ -129,8 +139,8 @@ def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict |
         # canonical single-spike law
         sat_ts, peak = saturation(rows, sat_p99)
         if sat_ts is None:
-            return VOID, ["load never saturated the store (p99 max %.0fms < %gms) — "
-                          "the host's knee is above the load; raise [load] top" % (peak, sat_p99)]
+            return unsaturated("load never saturated the store (p99 max %.0fms < %gms)"
+                               % (peak, sat_p99))
         if not eps:
             why.append("cache never mounted under load")
         if len(eps) > 1:
@@ -144,8 +154,7 @@ def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict |
             why.append("cache never released after the tail (traffic below the knee must release it)")
 
     if err_pct > max_pct:
-        why.append("load errors %d/%d = %.1f%% > %g%% (the policy must serve every request)"
-                   % (errors, total, err_pct, max_pct))
+        why.append(errors_why)
     return ("true" if not why else "false"), why
 
 

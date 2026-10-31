@@ -85,11 +85,29 @@ class TestASpikeThatNeverSaturatesIsAVoid(unittest.TestCase):
         self.assertRegex(why[0], r"spike 1 never saturated the store \(p99 max 12ms < 150ms")
         self.assertIn("raise [load] top", why[0])
 
-    def test_the_void_is_decided_before_any_other_clause(self):
-        # no mount at all, 40% errors: still a void, none of that is judged
-        v, why = judge(rows(100, saturated_from=None), SCHED, errors=2400)
+    def test_the_void_is_decided_before_the_mount_clauses(self):
+        # no mount at all, no errors: still a void, the mounts are not judged
+        v, why = judge(rows(100, saturated_from=None), SCHED)
         self.assertEqual(v, "void")
         self.assertEqual(len(why), 1)
+
+    def test_a_service_that_stops_answering_is_charged_not_void(self):
+        # every request times out: no tick completes one, so no p99 reaches
+        # the threshold, and the errors say why
+        v, why = judge(rows(100, saturated_from=None), SCHED, errors=2400)
+        self.assertEqual(v, "false")
+        self.assertIn("spike 1 never saturated the store", why[0])
+        self.assertIn("the service did not answer", why[0])
+        self.assertIn("load errors 2400/6000", why[1])
+
+    def test_errors_within_the_threshold_keep_the_void(self):
+        v, _ = judge(rows(100, saturated_from=None), SCHED, errors=6, max_pct=1.0)
+        self.assertEqual(v, "void")
+
+    def test_canonical_mode_charges_a_silent_service_too(self):
+        v, why = judge(rows(100, saturated_from=None), None, errors=2400)
+        self.assertEqual(v, "false")
+        self.assertIn("the service did not answer", why[0])
 
     def test_saturation_outside_the_spike_does_not_count(self):
         # a blip's aftermath saturates at t=15 and recovers; the spike itself never does

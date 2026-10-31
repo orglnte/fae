@@ -618,7 +618,10 @@ so its proof is its steps: a call to a tool outside the list is a breach.
   fixed count of slow requests sees that count with nothing sustained behind
   it. A spike that never saturates the store is `FAIL[load-shape]`, a VOID
   (`charge=False`, ledger `ALERT LOAD-SHAPE`): the ramp did not reach the
-  host's knee. Every value — baseline, top, ramp, hold, thresholds, the
+  host's knee. Not when the load errors exceed the threshold: a service
+  that stops answering completes no request, so its ticks carry no p99 and
+  read as an idle store; that is a charged `FAIL[scaling]` naming the
+  silent spike. Every value — baseline, top, ramp, hold, thresholds, the
   excess, the deadline — is the experiment's `CONFIG`, tuned per host.
 - **Tuning the load shape to a host.** Before scored cells, in order: the
   store's bench is above the verifier's floor; the spike saturates well
