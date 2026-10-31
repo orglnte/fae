@@ -563,6 +563,13 @@ to every cell whose transcript is kept.
 per-project memory and transcripts under `~/.claude/projects/<cwd>`, and
 every agent runs in `/workspace`, so a shared mount would let each agent read
 every prior agent's memory — cross-run leakage invisible in the results.
+An agy cell's home is staged the same way, from the sign-in home but with
+only the sign-in and agy's identity files (`config.AGY_LOGIN`) and an empty
+`settings.json` FAE writes: the sign-in home also keeps agy's conversation
+summaries, the sign-in session's log and whatever settings were set there
+(an `agentMode`, say), and copying it whole would start every cell from
+them. agy runs with `--output-format stream-json` when `stream_agent` is on,
+so its transcript records its steps and tokens (`fae/cell/transcript.py`).
 
 ## 7. Verdicts are gated, and fast failures are not failures
 

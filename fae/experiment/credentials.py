@@ -69,7 +69,7 @@ class Credential:
             key = _config.opencode_key_file(self.home)
             return "" if key.is_file() and key.read_text().strip() else f"no API key in {key}"
         if self.cli == "agy":
-            signed_in = self.home.is_dir() and any(self.home.iterdir())
+            signed_in = (self.home / _config.AGY_TOKEN).is_file()
             return "" if signed_in else f"no signed-in agy home at {self.home}"
         return ""
 

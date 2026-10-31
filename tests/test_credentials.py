@@ -114,6 +114,10 @@ class TestOpencodeAndAgy(Case):
     def test_agy_signs_in_with_its_home_mounted(self):
         c = self.cred("agy")
         self.assertIn("no signed-in agy home", c.missing())
+        (c.home / "antigravity-cli" / "log").mkdir(parents=True)
+        self.assertIn("no signed-in agy home", c.missing())    # a home with no token
+        (c.home / "antigravity-cli" / "antigravity-oauth-token").write_text("t")
+        self.assertEqual(c.missing(), "")
         c.setup(ask=lambda _: "", run=self.docker, say=lambda *_: None)
         self.assertIn(f"{c.home}:/home/node/.gemini", self.runs[0])
 

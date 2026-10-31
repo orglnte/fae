@@ -335,6 +335,17 @@ def _refuse(dest, suffix):
         raise RuntimeError(f"REFUSING agent-home dest {dest!r} (not an absolute {suffix} path)")
 
 
+# What a cell's agy home holds: the sign-in and the identity agy keeps with
+# it. Its memory, logs and settings stay behind (conversation summaries, the
+# sign-in session's log, any agentMode), so every g38f cell starts alike.
+AGY_TOKEN = "antigravity-cli/antigravity-oauth-token"
+AGY_LOGIN = (AGY_TOKEN, "antigravity-cli/installation_id",
+             "antigravity-cli/cache/default_project_id.txt",
+             "antigravity-cli/cache/onboarding.json",
+             "config/projects/default-cli-project.json")
+AGY_SETTINGS = "antigravity-cli/settings.json"
+
+
 def stage_agent(conf, cli, dest, root):
     """Give the cell its own agent home holding its credentials or, for
     claude, its confinement settings, nothing else — a shared home would let
@@ -346,14 +357,17 @@ def stage_agent(conf, cli, dest, root):
         raise RuntimeError(f"no agent {conf.get('AGENT', '')!r} in the experiment's agents.toml")
     if cli == "agy":
         _refuse(dest, "/.agent-gemini")
-        src = home
-        if not src.is_dir():
-            raise RuntimeError(f"no authed {src} — run the one-time container login (README: agy in Docker)")
+        if not (home / AGY_TOKEN).is_file():
+            raise RuntimeError(f"no signed-in agy home at {home} — "
+                               f"python3 cli.py experiment credentials agy")
         shutil.rmtree(dest, ignore_errors=True)
-        shutil.copytree(src, dest)
-        for junk in ("GEMINI.md", "history", "projects.json", "tmp"):
-            p = Path(dest) / junk
-            shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
+        for rel in AGY_LOGIN:
+            if (home / rel).is_file():
+                (Path(dest) / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(home / rel, Path(dest) / rel)
+        # the agent's mode comes from its argv alone, never from a settings
+        # file the sign-in or an operator left in the home
+        (Path(dest) / AGY_SETTINGS).write_text("{}\n")
         return
     if cli == "opencode":
         _refuse(dest, "/.agent-opencode")
