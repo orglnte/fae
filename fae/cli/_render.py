@@ -441,7 +441,8 @@ def results_validate(args, quiet=False):
                       quiet)
 
 
-def _print_validation(results, quiet):
+def _validation_rows(results):
+    """(rows for the per-cell table, [(cid, taints)] of the TAINTED)."""
     rows, tainted = [], []
     for cid, why, doc in results:
         if doc is None:
@@ -450,18 +451,19 @@ def _print_validation(results, quiet):
         rows.append((cid, why, doc["verdict"], "; ".join(doc["taints"] + doc["warns"])[:60] or "-"))
         if doc["verdict"] == "TAINTED":
             tainted.append((cid, doc["taints"]))
-    if not rows:
-        print("no DONE cells match")
-        return
-    if quiet:
-        n_warn = sum(1 for r in rows if r[3] != "-" and r[2] == "VALID")
-        by = collections.Counter(r[1] for r in rows)
-        print(f"  {len(rows)} completed cell(s): "
-              + ", ".join(f"{n} {k}" for k, n in sorted(by.items()))
-              + f" | {len(rows) - len(tainted)} VALID, {len(tainted)} TAINTED"
-              + (f", {n_warn} with warnings" if n_warn else ""))
-    else:
-        print(fmt_table(rows, ("CELL", "VERDICT", "VALIDATION", "NOTES")))
+    return rows, tainted
+
+
+def _validation_tally(rows, tainted):
+    """One line: the cells by outcome, VALID and TAINTED, with warnings."""
+    n_warn = sum(1 for r in rows if r[3] != "-" and r[2] == "VALID")
+    by = collections.Counter(r[1] for r in rows)
+    return (", ".join(f"{n} {k}" for k, n in sorted(by.items()))
+            + f", {len(rows) - len(tainted)} VALID, {len(tainted)} TAINTED"
+            + (f", {n_warn} with warnings" if n_warn else ""))
+
+
+def _print_tainted(tainted, quiet):
     if tainted and quiet:
         print(f"  {len(tainted)} TAINTED — `score --tainted-cells-details` lists them")
     elif tainted:
@@ -472,51 +474,69 @@ def _print_validation(results, quiet):
                 print(f"  {cid}: {t}")
 
 
+def _print_validation(results, quiet):
+    rows, tainted = _validation_rows(results)
+    if not rows:
+        print("no DONE cells match")
+        return
+    if quiet:
+        print(f"  {len(rows)} completed cell(s): {_validation_tally(rows, tainted)}")
+    else:
+        print(fmt_table(rows, ("CELL", "VERDICT", "VALIDATION", "NOTES")))
+    _print_tainted(tainted, quiet)
+
+
 def results_score(args):
     """Validate, score and aggregate the cells the selector matches (all by
-    default), printing each phase. The per-cell validation table is hidden
-    unless --all-cells or a selector is given; the TAINTED count and the
-    scoring tally always print."""
+    default) under one progress bar, then print the scoreboard. The bar's
+    last line is the validation tally; the per-cell validation table prints
+    with --unpack or a selector."""
     if getattr(args, "tainted_cells_details", False):
         results_aggregate(args)
         return
     selector = getattr(args, "selector", None)
-    verbose = bool(getattr(args, "all_cells", False) or selector)
-    print("Validating cells before scoring..." if verbose else
-          "Validating cells before scoring... (per-cell list hidden, see --help for filters)")
+    details = bool(getattr(args, "unpack", False) or selector)
+    print("Validating, scoring, aggregating cells... (--unpack for details, --help for filters)")
     sys.stdout.flush()
-    # a progress bar on a TTY only, so a piped or logged run holds no \r frames;
-    # an error clears the bar first and lands on a line of its own
+    # a bar on a TTY only, so a piped or logged run holds no \r frames; an
+    # error clears it first and lands on a line of its own
     bar_on = sys.stdout.isatty()
-    seen = {"n": 0}
+    seen = {"results": []}
+
+    def draw(done, total, text):
+        if bar_on:
+            fill = int(24 * done / total) if total else 24
+            sys.stdout.write(f"\r  [{'█' * fill}{'░' * (24 - fill)}] {text}"[:120].ljust(120))
+            sys.stdout.flush()
+
+    def validating(i, n, cid):
+        draw(i, 2 * n, f"{i}/{n} validating {cid}")
 
     def validated(results):
-        _print_validation(results, quiet=not verbose)
-        print("\n--- Scoring --- (one record per cell: iterations-to-green, "
-              "authored surface -> <cell>/score.json, which the scoreboard reads)")
-        sys.stdout.flush()
+        seen["results"] = results
 
-    def bar(i, n, cid):
-        seen["n"] = n
-        if bar_on:
-            fill = int(24 * i / n) if n else 24
-            sys.stdout.write(f"\r  [{'█' * fill}{'░' * (24 - fill)}] {i}/{n} {cid}"[:100].ljust(100))
-            sys.stdout.flush()
+    def scoring(i, n, cid):
+        draw(n + i, 2 * n, f"{i}/{n} scoring {cid}")
 
     def failed(cid, line):
         if bar_on:
-            sys.stdout.write("\r" + " " * 100 + "\r")
+            sys.stdout.write("\r" + " " * 120 + "\r")
         print(f"  ERROR scoring {cid}: {line}")
 
-    n_ok, errors = fae.experiment.exp().score(selector, on_validated=validated, on_cell=bar,
+    n_ok, errors = fae.experiment.exp().score(selector, on_validating=validating,
+                                               on_validated=validated, on_cell=scoring,
                                                on_failed=failed)
+    rows, tainted = _validation_rows(seen["results"])
+    n = len(rows)
+    end = (f"{n}/{n} done: {_validation_tally(rows, tainted)}" if rows else "no DONE cells match")
+    end += f"; {len(errors)} FAILED to score" if errors else ""
     if bar_on:
-        bar(seen["n"], seen["n"], "done")
-        sys.stdout.write("\n")
-    print(f"  scored {n_ok} cell(s) -> score.json"
-          + (f", {len(errors)} FAILED" if errors else ""))
+        sys.stdout.write("\r" + " " * 120 + "\r")
+    print(f"  [{'█' * 24}] {end}")
+    if details and rows:
+        print(fmt_table(rows, ("CELL", "VERDICT", "VALIDATION", "NOTES")))
+    _print_tainted(tainted, quiet=not details)
     if not getattr(args, "no_aggregate", False):
-        print("\n--- Aggregate Scoreboard ---")
         sys.stdout.flush()
         results_aggregate(args)
 

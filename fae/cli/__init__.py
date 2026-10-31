@@ -811,7 +811,8 @@ def results_score(
     selector: Optional[str] = typer.Argument(None, help=SEL),
     no_aggregate: bool = typer.Option(False, "--no-aggregate",
                                       help="score cells without printing the table"),
-    all_cells: bool = typer.Option(False, "--all-cells", help="per-cell rows"),
+    unpack: bool = typer.Option(False, "--unpack", "--all-cells",
+                                help="the per-cell validation table"),
     allow_stale: bool = typer.Option(False, "--allow-stale",
                                      help="proceed even if a score.json is older than its inputs"),
     variant: Optional[str] = typer.Option(None, "--variant",
@@ -832,14 +833,16 @@ def results_score(
                                                "most significant first; combine with "
                                                "--sort-discrepancy for significant AND big "
                                                "first (needs --impl; no-op without it)"),
+    legend: bool = typer.Option(False, "--legend",
+                                help="print what each scoreboard column counts, under the table"),
 ):
     """Validate and score the finished cells (the selector's, else all), then
     print the metrics table."""
-    _render.results_score(_ns(selector=selector, all_cells=all_cells,
+    _render.results_score(_ns(selector=selector, unpack=unpack,
                              allow_stale=allow_stale, no_aggregate=no_aggregate,
                              variant=variant, where=list(where), impl=impl,
                              sort_discrepancy=sort_discrepancy,
-                             sort_significant=sort_significant))
+                             sort_significant=sort_significant, legend=legend))
 
 
 @results_app.command("validate")
@@ -873,6 +876,8 @@ def results_aggregate(
                                                "most significant first; combine with "
                                                "--sort-discrepancy for significant AND big "
                                                "first (needs --impl; no-op without it)"),
+    legend: bool = typer.Option(False, "--legend",
+                                help="print what each scoreboard column counts, under the table"),
 ):
     """Print the scoreboard from existing score.json files, without rescoring
     (`results score` also runs this as its last step)."""
@@ -880,7 +885,7 @@ def results_aggregate(
                                  include_tainted=include_tainted,
                                  tainted_cells_details=tainted_cells_details,
                                  allow_stale=allow_stale, sort_discrepancy=sort_discrepancy,
-                                 sort_significant=sort_significant))
+                                 sort_significant=sort_significant, legend=legend))
 
 
 # --- experiment / rig ------------------------------------------------------

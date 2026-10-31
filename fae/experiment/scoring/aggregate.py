@@ -758,8 +758,6 @@ def main() -> int:
 
     out_json.write_text(json.dumps({"cells": rows, "summary": summary}, indent=2) + "\n")
     
-    print(f"\n[OK] Wrote {len(rows)} cell records to: {out_csv}")
-    print(f"[OK] Wrote aggregate summary to: {out_json}")
     
     cols = table_columns(other if compare is not None else None)
     if compare is not None:
@@ -801,35 +799,39 @@ def main() -> int:
 
     print()
     print("\n".join(render_table(cols, table)))
-    print(" * a/b/c = min/mean/max over the row's cells. ATTEMPTS, MINUTES to green,")
-    print("   SLoC: GREEN cells only -- denominator is GREEN, not REPS. A non-green")
-    print("   cell never worked; its size is not comparable.")
-    print(" * MINUTES to green = the agent's minutes up to green (charged attempts);")
-    print("   per try = its mean minutes per charged attempt, every cell. '-' when the")
-    print("   ledger has no AGENT lines for those attempts.")
-    print(" * API/TOOL minutes = of MINUTES to green, the minutes in the client's API")
-    print("   requests / the rest, wall minus API time (the agent's commands and the")
-    print("   CLI's own work). TURNS, TOOL calls, OUTPUT ktokens = agent turns, tool")
-    print("   calls and output tokens (thinking included) up to green. All from the")
-    print("   agent's transcript, GREEN cells only; '-' when the client records none")
-    print("   (agy: no API time; opencode: nothing).")
-    print(" * API ms/token = API milliseconds per output token: the provider's speed.")
-    print("   Rows of one model should read alike; a lane served slower shows here.")
-    for model, w in summary["wall_vs_work_by_model"].items():
-        rhos = [w[f"rho_wall_{f}"] for f in ("out_tok", "turns", "tool_calls")]
-        if all(r is None for r in rhos):
-            continue
-        shown = ", ".join("-" if r is None else f"{r:.2f}" for r in rhos)
-        print(f" * {short_model(model)}: MINUTES to green vs output tokens, turns, tool calls,")
-        print(f"   Spearman rho = {shown} (n={w['n']} green cells).")
-    print(" * SLoC = non-blank, non-comment lines authored by the agent, excluding the")
-    print("   seeded skeleton: the mean, then how far the row's smallest and largest")
-    print("   reach below and above it. Raw line counts stay in results.csv/json.")
-    if compare is not None:
-        print(" * SIG(p) GRADE = two-sided Fisher's exact test on green vs non-green")
-        print("   counts, cut against baseline: the p-value (* p<.05, ** p<.01), then the")
-        print("   same result spelled out (not sig / significant / strong). '-' when")
-        print("   either side has 0 cells.")
+    if "--legend" not in sys.argv:
+        print(" Add --legend to see what each column means.")
+    else:
+        print(" * a/b/c = min/mean/max over the row's cells. ATTEMPTS, MINUTES to green,")
+        print("   SLoC: GREEN cells only -- denominator is GREEN, not REPS. A non-green")
+        print("   cell never worked; its size is not comparable.")
+        print(" * MINUTES to green = the agent's minutes up to green (charged attempts);")
+        print("   per try = its mean minutes per charged attempt, every cell. '-' when the")
+        print("   ledger has no AGENT lines for those attempts.")
+        print(" * API/TOOL minutes = of MINUTES to green, the minutes in the client's API")
+        print("   requests / the rest, wall minus API time (the agent's commands and the")
+        print("   CLI's own work). TURNS, TOOL calls, OUTPUT ktokens = agent turns, tool")
+        print("   calls and output tokens (thinking included) up to green. All from the")
+        print("   agent's transcript, GREEN cells only; '-' when the client records none")
+        print("   (agy: no API time; opencode: nothing).")
+        print(" * API ms/token = API milliseconds per output token: the provider's speed.")
+        print("   Rows of one model should read alike; a lane served slower shows here.")
+        for model, w in summary["wall_vs_work_by_model"].items():
+            rhos = [w[f"rho_wall_{f}"] for f in ("out_tok", "turns", "tool_calls")]
+            if all(r is None for r in rhos):
+                continue
+            shown = ", ".join("-" if r is None else f"{r:.2f}" for r in rhos)
+            print(f" * {short_model(model)}: MINUTES to green vs output tokens, turns, tool calls,")
+            print(f"   Spearman rho = {shown} (n={w['n']} green cells).")
+        print(" * SLoC = non-blank, non-comment lines authored by the agent, excluding the")
+        print("   seeded skeleton: the mean, then how far the row's smallest and largest")
+        print("   reach below and above it.")
+        print(f" * Every cell's record: {out_csv}; the summary: {out_json}.")
+        if compare is not None:
+            print(" * SIG(p) GRADE = two-sided Fisher's exact test on green vs non-green")
+            print("   counts, cut against baseline: the p-value (* p<.05, ** p<.01), then the")
+            print("   same result spelled out (not sig / significant / strong). '-' when")
+            print("   either side has 0 cells.")
     print()
     
     return 0

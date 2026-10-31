@@ -783,3 +783,20 @@ class TestTheScoreboardRunsEndToEnd(unittest.TestCase):
                 rc = aggregate.main()
             self.assertIn(rc, (0, None), argv)
             self.assertIn("beta", out.getvalue(), argv)
+
+    def test_the_column_notes_print_only_with_legend(self):
+        import io, tempfile
+        from contextlib import redirect_stdout
+        root = Path(tempfile.mkdtemp())
+        self.cell(root, "m_high_beta_apidocs_T1_r1", True)
+        outs = {}
+        for argv in (["aggregate"], ["aggregate", "--legend"]):
+            out = io.StringIO()
+            with at_workspace(root), \
+                 unittest.mock.patch.object(sys, "argv", argv), redirect_stdout(out):
+                aggregate.main()
+            outs[len(argv)] = out.getvalue()
+        self.assertIn("Add --legend to see what each column means.", outs[1])
+        self.assertNotIn("a/b/c = min/mean/max", outs[1])
+        self.assertIn("a/b/c = min/mean/max", outs[2])
+        self.assertNotIn("Add --legend", outs[2])

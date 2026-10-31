@@ -651,19 +651,24 @@ class Experiment:
                          looping=lambda: False, queued=lambda: False)
         return st["why"] if st["state"] == "DONE" and st["why"] != "cancelled" else None
 
-    def validate(self, selector="all", workspace=None):
+    def validate(self, selector="all", workspace=None, on_cell=None):
         """Validate the finished cells of `workspace` (this experiment's by
         default) that `selector` matches: [(cid, outcome, doc)], doc None for
-        a cell another process holds."""
+        a cell another process holds. `on_cell(i, n, cid)` runs before each
+        of the n finished cells is validated."""
         from fae.cell.cell import Busy
         from fae.experiment.scoring import validate as _validate
         ws = workspace or self.workspace
-        out = []
+        finished = []
         for cid in ws.select(selector or "all"):
             c = ws.cell(cid)
             why = self.finished(c, ws)
-            if why is None:
-                continue
+            if why is not None:
+                finished.append((cid, c, why))
+        out = []
+        for i, (cid, c, why) in enumerate(finished):
+            if on_cell:
+                on_cell(i, len(finished), cid)
             try:
                 doc = _validate.validate_cell(c, ws)
             except Busy:
@@ -672,16 +677,17 @@ class Experiment:
         return out
 
     def score(self, selector=None, workspace=None, on_validated=None, on_cell=None,
-              on_failed=None):
+              on_failed=None, on_validating=None):
         """Validate, then score the finished cells of `workspace` that
         `selector` matches (all by default), each into its score.json
-        (fae/experiment/scoring/score_cell.py, in-process). `on_validated(results)` gets
-        validate()'s results before any cell is scored, `on_cell(i, n, cid)`
-        runs before each cell, `on_failed(cid, line)` after each failure.
-        Returns (scored, [(cid, one-line error)])."""
+        (fae/experiment/scoring/score_cell.py, in-process). `on_validating(i,
+        n, cid)` runs before each cell is validated, `on_validated(results)`
+        gets validate()'s results before any cell is scored, `on_cell(i, n,
+        cid)` runs before each cell is scored, `on_failed(cid, line)` after
+        each failure. Returns (scored, [(cid, one-line error)])."""
         from fae.experiment.scoring import score_cell as _sc
         ws = workspace or self.workspace
-        validated = self.validate(selector or "all", ws)
+        validated = self.validate(selector or "all", ws, on_cell=on_validating)
         if on_validated:
             on_validated(validated)
         todo = [cid for cid, _why, _doc in validated]
@@ -707,7 +713,7 @@ class Experiment:
         return n_ok, failed
 
     AGGREGATE_SWITCHES = ("include_tainted", "tainted_cells_details", "sort_discrepancy",
-                          "sort_significant")
+                          "sort_significant", "legend")
 
     def aggregate(self, workspace=None, variant=None, where=(), impl=None,
                   allow_stale=False, **switches):
