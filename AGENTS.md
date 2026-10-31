@@ -570,6 +570,14 @@ summaries, the sign-in session's log and whatever settings were set there
 (an `agentMode`, say), and copying it whole would start every cell from
 them. agy runs with `--output-format stream-json` when `stream_agent` is on,
 so its transcript records its steps and tokens (`fae/cell/transcript.py`).
+An agy agent is confined as a claude one is (`fae/cell/confinement.py`): no
+web, no browser, no MCP server or plugin, no subagent it defines itself.
+agy has no flag that removes a built-in tool, so the home also carries a
+custom agent, `fae`, whose `tools` list names what it keeps, and the command
+line selects it (`--agent fae`). agy's init line lists its default tools
+whatever the agent, so the proof is the session's steps, read as the
+transcript grows: a call to a tool outside the list is a breach that
+interrupts the cell, and `stream_agent` off is one too.
 
 ## 7. Verdicts are gated, and fast failures are not failures
 

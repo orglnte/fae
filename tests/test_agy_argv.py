@@ -25,6 +25,10 @@ class TestAgyArgv(unittest.TestCase):
         self.assertEqual(tail[tail.index("--output-format") + 1], "stream-json")
         self.assertEqual(tail[-2:], ["--print", "task\n"])
 
+    def test_it_runs_the_confined_agent(self):
+        tail = self.argv("1")
+        self.assertEqual(tail[tail.index("--agent") + 1], "fae")
+
     def test_stream_agent_off_prints_text(self):
         self.assertNotIn("--output-format", self.argv(""))
 

@@ -1,5 +1,5 @@
-"""A cell's agy home: the sign-in and agy's identity files, nothing else, and
-a settings file FAE writes. The sign-in home also holds agy's conversation
+"""A cell's agy home: the sign-in and agy's identity files, nothing else,
+plus a settings file and the confined agent FAE writes. The sign-in home also holds agy's conversation
 memory, the sign-in session's log and its settings (an agentMode, say);
 copying those would start every g38f cell from whatever they say."""
 import json
@@ -10,6 +10,7 @@ from pathlib import Path
 
 from _ctx import ROOT
 
+from fae.cell import confinement
 from fae.experiment import config as C
 
 
@@ -38,7 +39,7 @@ class TestAgyHome(unittest.TestCase):
             self.put(rel)
         self.stage()
         got = {str(p.relative_to(self.dest)) for p in self.dest.rglob("*") if p.is_file()}
-        self.assertEqual(got, set(C.AGY_LOGIN) | {C.AGY_SETTINGS})
+        self.assertEqual(got, set(C.AGY_LOGIN) | {C.AGY_SETTINGS, confinement.AGY_AGENT_FILE})
 
     def test_the_settings_are_fae_s_own_whatever_the_home_holds(self):
         self.put(C.AGY_TOKEN)

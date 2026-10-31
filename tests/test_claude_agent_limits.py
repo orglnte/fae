@@ -112,7 +112,7 @@ class TestTheCommandLine(Case):
 class TestTheInitLineIsTheProof(Case):
 
     def test_a_confined_session_with_built_in_skills_shows_nothing_denied(self):
-        self.assertEqual(confinement.breach(CONFINED), "")
+        self.assertEqual(confinement.breach(CONFINED, "claude"), "")
 
     def test_each_denied_thing_is_named(self):
         for key, value, word in (("mcp_servers", [{"name": "claude.ai Gmail"}], "claude.ai Gmail"),
@@ -120,12 +120,12 @@ class TestTheInitLineIsTheProof(Case):
                                  ("tools", ["WebSearch"], "WebSearch"),
                                  ("tools", ["mcp__x__y"], "mcp__x__y")):
             with self.subTest(key=key, value=value):
-                self.assertIn(word, confinement.breach({**CONFINED, key: value}))
+                self.assertIn(word, confinement.breach({**CONFINED, key: value}, "claude"))
 
     def test_an_init_line_that_cannot_prove_confinement_is_a_breach(self):
         for init in ({}, {"tools": []}, {"mcp_servers": []}):
             with self.subTest(init=init):
-                self.assertIn("init line without", confinement.breach(init))
+                self.assertIn("init line without", confinement.breach(init, "claude"))
 
     def test_the_watch_reads_only_complete_lines_as_the_transcript_grows(self):
         log = self.d / "agent.attempt-1.log"
@@ -141,7 +141,7 @@ class TestTheInitLineIsTheProof(Case):
     def test_a_malformed_init_line_reads_as_empty_and_so_as_a_breach(self):
         log = self.d / "agent.attempt-1.log"
         log.write_text('{"type":"system","subtype":"init", broken\n')
-        self.assertIn("init line without", confinement.breach(confinement.Watch(log).poll()))
+        self.assertIn("init line without", confinement.breach(confinement.Watch(log).poll(), "claude"))
 
 
 class TestABreachInterruptsTheAgent(Case):

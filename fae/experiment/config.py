@@ -348,7 +348,7 @@ AGY_SETTINGS = "antigravity-cli/settings.json"
 
 def stage_agent(conf, cli, dest, root):
     """Give the cell its own agent home holding its credentials or, for
-    claude, its confinement settings, nothing else — a shared home would let
+    claude, its confinement settings (agy: both), nothing else — a shared home would let
     each agent read prior agents' memory/transcripts."""
     import shutil
     dest = str(dest)
@@ -368,6 +368,8 @@ def stage_agent(conf, cli, dest, root):
         # the agent's mode comes from its argv alone, never from a settings
         # file the sign-in or an operator left in the home
         (Path(dest) / AGY_SETTINGS).write_text("{}\n")
+        from fae.cell import confinement
+        confinement.stage_agy(dest)
         return
     if cli == "opencode":
         _refuse(dest, "/.agent-opencode")

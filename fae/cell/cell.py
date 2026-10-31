@@ -2448,7 +2448,7 @@ class Cell:
         override = agent_cmd or os.environ.get("AGENT_CMD")
         with log.open("w") as f:
             if override:
-                if cli == "claude":
+                if cli in ("claude", "agy"):
                     self._append("ALERT", f"attempt={attempt}",
                                  "AGENT-CMD override: the agent's confinement is not checked")
                 env = self.conf.child_env(
@@ -2466,10 +2466,13 @@ class Cell:
             if cli == "opencode":
                 env[self.OPENCODE_KEY_ENV] = _config.opencode_key_file(
                     self.conf.get("AGENT_HOME", "")).read_text().strip()
-            if cli == "claude":
+            if cli in ("claude", "agy"):
                 try:
-                    env[confinement.TOKEN_ENV] = confinement.token(self.conf.get("AGENT_HOME", ""))
-                    confinement.check_home(home)
+                    if cli == "claude":
+                        env[confinement.TOKEN_ENV] = confinement.token(self.conf.get("AGENT_HOME", ""))
+                        confinement.check_home(home)
+                    else:
+                        confinement.check_agy_home(home)
                     if not self.conf.get("STREAM_AGENT", ""):
                         raise confinement.Breach("stream_agent is off: the init line "
                                                  "that proves confinement is never written")
@@ -2515,7 +2518,7 @@ class Cell:
             stream = ["--output-format", "stream-json"] if conf.get("STREAM_AGENT", "") else []
             return (common + ["-v", f"{home}:/home/node/.gemini"] + net
                     + [image, "agy", "--sandbox", "--dangerously-skip-permissions",
-                       *add_dirs, "--model", model, *stream,
+                       *confinement.AGY_CLI_LIMITS, *add_dirs, "--model", model, *stream,
                        "--print-timeout", "60m", "--print", prompt])
         if cli == "opencode":
             # the key's value is in the docker client's environment, never its argv
@@ -2550,9 +2553,11 @@ class Cell:
         """Run the agent under the wall-clock limit. Killing the docker client
         leaves its container running, so the container goes too. With `watch`
         (the transcript), the session's init line is read as soon as it is
-        written, and an agent it shows unconfined is killed."""
+        written (and an agy session's steps as they are), and an agent they
+        show unconfined is killed."""
         limit = self._agent_timeout_s()
         deadline = time.monotonic() + limit
+        cli = self.conf.get("AGENT_CLI", "claude")
         w = confinement.Watch(watch) if watch else None
         p = subprocess.Popen(argv, stdout=f, stderr=f, env=env)
         try:
@@ -2564,11 +2569,13 @@ class Cell:
                 if w:
                     init = w.poll()
                     if init is not None:
-                        why = confinement.breach(init)
+                        why = confinement.breach(init, cli, w.tools_used)
                         if why:
                             self._kill_agent(p)
                             return self._unconfined(f, why)
-                        w = None
+                        if cli != "agy":
+                            # an agy session is judged by every step it takes
+                            w = None
                     elif (rc is not None and rc != self.DOCKER_RUN_FAILED
                           and self._produced_output(Path(watch))):
                         return self._unconfined(f, "the agent ran without writing an init line")
