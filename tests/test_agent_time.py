@@ -53,7 +53,7 @@ class TestTheClientsOwnAccount(unittest.TestCase):
     def test_other_clients_and_missing_events_report_nothing(self):
         log = self._log(['{"type":"assistant"}'])
         self.assertIsNone(_config.client_reported_seconds("claude", log))
-        self.assertIsNone(_config.client_reported_seconds("agy", log))
+        self.assertIsNone(_config.client_reported_seconds("agy", log))   # no agy result event
         self.assertIsNone(_config.client_reported_seconds("opencode", log))
         self.assertIsNone(_config.client_reported_seconds("claude", Path("/nonexistent/log")))
 

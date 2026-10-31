@@ -798,7 +798,8 @@ def main() -> int:
     print("   wall minus API time (the agent's commands and the CLI's own work).")
     print("   TURNS, TOOLS, OUT kTOK = agent turns, tool calls and output tokens")
     print("   (thinking included) up to green. All from the agent's transcript, GREEN")
-    print("   cells only; '-' when the client records none (agy, opencode).")
+    print("   cells only; '-' when the client records none (agy: no API time;")
+    print("   opencode: nothing).")
     print(" * API ms/TOK = API milliseconds per output token: the provider's speed.")
     print("   Rows of one model should read alike; a lane served slower shows here.")
     for model, w in summary["wall_vs_work_by_model"].items():

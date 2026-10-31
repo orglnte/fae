@@ -2512,9 +2512,10 @@ class Cell:
         net = shlex.split(docker_net) + shlex.split(kube_mount)
 
         if cli == "agy":
+            stream = ["--output-format", "stream-json"] if conf.get("STREAM_AGENT", "") else []
             return (common + ["-v", f"{home}:/home/node/.gemini"] + net
                     + [image, "agy", "--sandbox", "--dangerously-skip-permissions",
-                       *add_dirs, "--model", model,
+                       *add_dirs, "--model", model, *stream,
                        "--print-timeout", "60m", "--print", prompt])
         if cli == "opencode":
             # the key's value is in the docker client's environment, never its argv

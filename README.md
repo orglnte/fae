@@ -41,8 +41,9 @@ authoring time in minutes up to green, summed over its attempts, and `MIN/ATT`
 the mean per attempt; each cell's `score.json` keeps the seconds of every
 attempt. `E2E` is the share of the verifier's end-to-end checks passed, `-`
 when the verifier reports none (the calculator's does not). Four more columns,
-left out above, come from the agent's own transcript (claude only; `-` for
-other clients): `API/TOOL min` splits `MIN` into the minutes in API requests
+left out above, come from the agent's own transcript (claude; agy records
+its turns, tool calls and tokens but no API time; `-` for what a client does
+not record): `API/TOOL min` splits `MIN` into the minutes in API requests
 and the rest, wall minus API time; `TURNS`, `TOOLS` and `OUT kTOK` count the
 agent's turns, tool calls and output tokens up to green; `API ms/TOK` is the
 provider's speed, so a lane that was served slower shows.

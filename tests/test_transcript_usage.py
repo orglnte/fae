@@ -73,10 +73,49 @@ class TestAResumedRun(unittest.TestCase):
                          (70, 9100, 6040, 1116))
 
 
+def _agy(*steps, usage=None, duration=851.3):
+    """An agy stream-json transcript with the fields its real ones carry."""
+    out = [{"event": "init", "conversation_id": "c",
+            "init": {"model": "Gemini 3.8 Flash (High)", "permission_mode": "always-proceed"}}]
+    for i, kind in steps:
+        for state in ("ACTIVE", "DONE"):
+            out.append({"event": "step_update", "step_update": {
+                "conversation_id": "c", "step_index": i, "state": state, "step_type": kind}})
+    out.append({"event": "result", "result": {
+        "conversation_id": "c", "status": "SUCCESS", "response": "done",
+        "duration_seconds": duration, "num_turns": 1,
+        "usage": usage or {"input_tokens": 386010, "output_tokens": 82250,
+                           "thinking_tokens": 66030, "cache_read_tokens": 6996400,
+                           "total_tokens": 468260}}})
+    return out
+
+
+class TestAgy(unittest.TestCase):
+    def test_turns_and_tools_are_its_steps_counted_once(self):
+        u = transcript.usage("agy", _log(_agy((0, "user_input"), (1, "agent_response"),
+                                               (2, "tool"), (3, "agent_response"),
+                                               (4, "tool"), (5, "agent_response"))))
+        self.assertEqual((u["turns"], u["tool_calls"]), (3, 2))
+        self.assertEqual((u["out_tok"], u["think_tok"], u["in_tok"]),
+                         (82250, 66030, 386010 + 6996400))
+
+    def test_what_agy_does_not_record_is_unknown_not_zero(self):
+        u = transcript.usage("agy", _log(_agy((1, "agent_response"))))
+        for f in ("api_s", "cost_usd", "retries", "retry_wait_s", "limited"):
+            self.assertIsNone(u[f], f)
+
+    def test_its_own_duration_is_the_clients_account(self):
+        from fae.experiment import config as _config
+        self.assertEqual(_config.client_reported_seconds("agy", _log(_agy())), (851.3, 1))
+
+    def test_no_result_event_reads_as_none(self):
+        self.assertIsNone(transcript.usage("agy", _log(_agy()[:-1])))
+
+
 class TestNoAccount(unittest.TestCase):
     def test_other_clients_and_missing_results_read_as_none(self):
         log = _log([_result()])
-        self.assertIsNone(transcript.usage("agy", log))
+        self.assertIsNone(transcript.usage("agy", log))         # a claude transcript
         self.assertIsNone(transcript.usage("opencode", log))
         self.assertIsNone(transcript.usage("claude", _log([_assistant("a")])))
         self.assertIsNone(transcript.usage("claude", Path("/nonexistent/log")))

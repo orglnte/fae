@@ -80,7 +80,11 @@ carry the attempts-to-green story; `load_error_rate_on_green` is a parity check
 measured on green builds only. Turns, tool calls and output tokens to green
 measure the agent's work without the provider's latency in them; wall time
 does not, and `mean_api_ms_per_out_tok` says how far the provider's speed
-differed between rows. The transcript fields come from claude's stream-json
-only: an agy or opencode cell reads null. Always report `n_cells` and
+differed between rows. The transcript fields come from the client's
+stream-json: claude records all of them; agy records turns (its
+`agent_response` steps), tool calls (its `tool` steps) and tokens, and its
+API time, tool time, cost, retries and rate limits read null (whether its
+`output_tokens` include its thinking is not documented); an opencode cell
+reads null throughout. Always report `n_cells` and
 `cells_missing_grading`. Which gaps between variants matter is the experiment's
 to say, in its notes.
