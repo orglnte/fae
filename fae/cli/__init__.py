@@ -130,8 +130,9 @@ def spawn(args):
         print(f"refusing: loop already running for {cid} (pid {live[cid]}) — "
               f"two loops on one workspace corrupt its logs")
         return
-    if (fae.experiment.exp().workspace.path / cid).is_dir() and not args.fresh:
-        c = fae.experiment.exp().cell(cid)
+    root = fae.experiment.exp().smoke_workspaces if os.environ.get("SMOKE") else None
+    if ((root or fae.experiment.exp().workspace.path) / cid).is_dir() and not args.fresh:
+        c = fae.experiment.exp().cell(cid, workspaces=root)
         L = c.read_ledger()
         if L["verdict"] in ("green", "failed", "revoked"):
             at = f" @{L['green_at']}" if L["verdict"] == "green" else f" @{L['att']}"
@@ -140,7 +141,8 @@ def spawn(args):
         if c.cancelled:
             print(f"skipping {cid}: already DONE·cancelled — use --fresh to force a new run")
             return
-    cell = fae.experiment.exp().cell(cid, args.task, args.variant, rep, agent=args.agent)
+    cell = fae.experiment.exp().cell(cid, args.task, args.variant, rep, agent=args.agent,
+                                     workspaces=root)
     if not cell.ready_image():
         sys.exit(f"refusing: the agent image for {args.variant} could not be built "
                  f"(the lines above say why)")

@@ -493,6 +493,19 @@ class TestSpawnReportsEarlyDeath(unittest.TestCase):
         with mock.patch.object(Cell, "process_argv", return_value=argv):
             return runs.conduct.Conduct().launch(runs.experiment.exp().workspace.named_cell(cid), "sonnet")
 
+    def test_the_cells_process_runs_on_the_root_its_cell_names(self):
+        other = Path(self._tmp.name) / "ws-smoke.nosync"
+        out = Path(self._tmp.name) / "root.txt"
+        cell = runs.experiment.exp().beside(other).named_cell("cell-s")
+        with mock.patch.object(Cell, "process_argv",
+                               return_value=["bash", "-c", f'echo "$WORKSPACES_DIR" > {out}']):
+            runs.conduct.Conduct().launch(cell, "sonnet")
+        for _ in range(40):
+            if out.exists() and out.read_text().strip():
+                break
+            time.sleep(0.1)
+        self.assertEqual(out.read_text().strip(), str(other))
+
     def test_immediate_failure_returns_the_exit_code(self):
         rc = self.spawn(
             ["bash", "-c", 'echo "FATAL prepare_cell: wrong seed doc" >&2; exit 3'], "cell-x")

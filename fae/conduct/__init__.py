@@ -1069,7 +1069,8 @@ class Conduct:
         rc = cell.before_start(what)
         if rc is not None:
             return rc
-        env = dict(os.environ, AGENT=agent)
+        # the cell's process runs on the root its Cell names, not on the default
+        env = dict(os.environ, AGENT=agent, WORKSPACES_DIR=str(cell.workspaces))
         env.pop(cell.SLOT_FDS_ENV, None)
         env.pop(cell.IGNORE_SLOTS_ENV, None)
         if slots is not None:
