@@ -48,6 +48,7 @@ class TestTheFixtureIsReady(CheckCase):
         ok = [check.Finding(True, "ok")]
         with mock.patch.object(check, "_prerequisites", return_value=ok), \
                 mock.patch.object(check, "_infra", return_value=ok), \
+                mock.patch.object(check, "_clients", return_value=ok), \
                 mock.patch.object(check, "_leftovers", return_value=ok):
             steps = tuple(check.Step(s.key, s.title, s.why, s.howto, getattr(check, s.run.__name__),
                                      s.needs, s.docker, s.opt_in) for s in check.STEPS)
@@ -212,6 +213,57 @@ class TestTheFoldedSteps(CheckCase):
         with mock.patch.object(type(d), "verbs", new_callable=mock.PropertyMock, return_value=verbs):
             bad = [f for f in self.findings(check._invariants) if not f.ok]
         self.assertIn("the experiment's own check: a green with no mount", [f.text for f in bad])
+
+    def _clients(self, have, want, built=True, log=()):
+        class Images:
+            def __init__(self, root, definition):
+                pass
+
+            def ready(self, log=print):
+                for line in logged:
+                    log(line)
+                return built
+
+            def installed(self):
+                return have
+
+            def upstream(self, arch):
+                return want
+
+            def arch(self):
+                return "arm64"
+
+            def base(self):
+                return "fae-x-agent-base:latest"
+        logged = list(log)
+        with mock.patch("fae.cell.agent_image.AgentImage", Images):
+            return check._clients(self.ctx())
+
+    def test_every_client_at_its_latest_release_passes(self):
+        v = {"claude": "2.1.296", "opencode": "1.19.0", "agy": "1.4.12"}
+        f = self._clients(v, v)
+        self.assertTrue(all(x.ok for x in f))
+        self.assertIn("agy 1.4.12, latest 1.4.12", [x.text for x in f])
+
+    def test_a_client_behind_after_the_rebuild_fails(self):
+        f = self._clients({"claude": "2.1.296", "opencode": "1.19.0", "agy": "1.3.3"},
+                          {"claude": "2.1.296", "opencode": "1.19.0", "agy": "1.4.12"})
+        bad = [x for x in f if not x.ok]
+        self.assertEqual([x.text for x in bad], ["agy 1.3.3, latest 1.4.12"])
+        self.assertIn("without the build cache", bad[0].fix)
+
+    def test_the_rebuild_is_shown_and_a_failed_build_fails(self):
+        f = self._clients({}, {}, built=False,
+                          log=["agent image behind upstream: agy 1.3.3 < 1.4.12 — rebuilding"])
+        self.assertTrue(f[0].ok)
+        self.assertIn("rebuilding", f[0].text)
+        self.assertFalse(f[-1].ok)
+
+    def test_an_unknown_latest_release_warns_and_a_missing_client_fails(self):
+        f = self._clients({"claude": "2.1.296", "agy": "1.4.12"}, {"claude": "2.1.296"})
+        by = {x.text.split()[0].rstrip(":"): x for x in f}
+        self.assertFalse(by["opencode"].ok)
+        self.assertTrue(by["WARNING"].ok)
 
     def test_leftovers_fail_with_the_repair_fix(self):
         from fae.conduct import zombies

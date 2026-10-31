@@ -539,7 +539,10 @@ the base present, its clients at upstream, the variant's layer built — under
 `.locks/image-lock`, so concurrent callers build once. The base's clients
 follow upstream (versions cached 1 h in `.images/agent_image.json`), because
 a provider gates new models on a minimum client and a stale client fails
-every cell of that agent. The run readies every variant's image at preflight
+every cell of that agent. `experiment check` does the same (step
+`clients`) and fails when a client is still behind a fresh lookup of its
+latest release, so a stale client is found before a run, not by a lane's
+first cell. The run readies every variant's image at preflight
 and a cell's before admitting it, never while holding its slots; a failed
 build at preflight stops the run, and at admission the cell is not started. An update pulls the base image through
 Docker's credential helper, so a helper that hangs blocks every update.

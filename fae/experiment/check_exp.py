@@ -367,6 +367,35 @@ def _invariants(ctx):
     return out
 
 
+def _clients(ctx):
+    """The agents' base image, its client CLIs at their latest release: it is
+    brought current here, as `experiment run` does at preflight, then each
+    client's installed version is compared with a fresh upstream lookup."""
+    from fae.cell.agent_image import AgentImage, TOOLS, vtuple
+    images = AgentImage(fae.experiment.exp().root, ctx.definition())
+    log = []
+    built = images.ready(log=log.append)
+    out = [Finding(True, line) for line in log]
+    if not built:
+        out.append(Finding(False, "the agent image could not be built (the lines above say why)",
+                           "fix the build; every spawn would die at preflight"))
+        return out
+    have, want = images.installed(), images.upstream(images.arch())
+    for tool in TOOLS:
+        h, w = have.get(tool), want.get(tool)
+        if h is None:
+            out.append(Finding(False, f"{tool}: not found in {images.base()}",
+                               f"rebuild {images.base()}; its Dockerfile installs every client"))
+        elif w is None:
+            out.append(Finding(True, f"WARNING: {tool} {h}: latest release unknown "
+                                     f"(the upstream lookup failed)"))
+        else:
+            out.append(Finding(vtuple(h) >= vtuple(w), f"{tool} {h}, latest {w}",
+                               "the rebuild did not install the latest release: rebuild "
+                               f"{images.base()} without the build cache"))
+    return out
+
+
 def _leftovers(ctx):
     from fae.conduct import Conduct
     found = Conduct.find_zombies()
@@ -437,6 +466,9 @@ STEPS = (
     Step("infra", "infra",
          "infra ok() per variant; verify image, built if missing",
          "§7", _infra, needs=("seeds", "prerequisites"), docker=True),
+    Step("clients", "clients",
+         "the agents' image: claude, opencode, agy at their latest release, rebuilt if behind",
+         "§7", _clients, needs=("definition", "prerequisites"), docker=True),
     Step("leftovers", "leftovers",
          "containers, clusters, heartbeats of dead cells",
          "§11", _leftovers, needs=("prerequisites",), docker=True),

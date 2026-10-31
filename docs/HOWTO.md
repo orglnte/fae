@@ -447,8 +447,10 @@ invariants (the engine's own functions, a shell that names cells as the
 scheduler does, the experiment's own checks, finished cells whose record
 disagrees with their state), the docker daemon, each variant's infra
 preflight (`ok()`) with the verifier image built, so the first cell does not
-pay for the build under a lock, the agents' images (built when missing; a
-CLI behind upstream is noted), and no leftovers of dead cells (`experiment
+pay for the build under a lock, the agents' images (built when missing, rebuilt
+when a client CLI is behind its latest release, and each client's version
+checked against a fresh lookup of that release: still behind fails the
+step), and no leftovers of dead cells (`experiment
 repair` reaps them). `--walk` explains each step before running it and, on
 a failure, names the fix and waits for you to retry. Without `--walk` it
 prints a checklist and exits 1 on any failure; `--static` skips the docker

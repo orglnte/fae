@@ -179,7 +179,7 @@ would not expect, and names that collide, are in
 
 1. **Check.** Purpose: find what would fail before cells run. Actions:
    prerequisites, configuration, definition, variants, seeds, infra,
-   engine invariants, leftovers, trace, pipeline. Principle: each step
+   engine invariants, clients, leftovers, trace, pipeline. Principle: each step
    reports its findings; the summary names the HOWTO sections that fix
    the failed ones.
 2. **Smoke.** Purpose: show the rig judges a known answer green. State:
