@@ -410,23 +410,28 @@ def subprocess_chmod(dest):
 
 
 def client_reported_seconds(cli, log):
-    """The agent client's own account of how long its run took, for clients
-    whose transcript carries one (claude's closing result event); None for
-    the others and for a transcript without it."""
+    """The agent client's own account of how long its run spent in turns, and
+    in how many turns it closed, for clients whose transcript carries one
+    (claude's result events): (seconds, closings), else None. A finished
+    background task resumes the session and it closes again, so a resumed
+    run's seconds are the sum of its closings and leave out the waits between
+    them."""
     if cli != "claude":
         return None
     try:
-        lines = Path(log).read_text(errors="replace").splitlines()[-50:]
+        lines = Path(log).read_text(errors="replace").splitlines()
     except OSError:
         return None
-    for line in reversed(lines):
-        if '"result"' not in line:
+    ms = []
+    for line in lines:
+        if '"result"' not in line or not line.startswith("{"):
             continue
         try:
             event = json.loads(line)
         except ValueError:
             continue
         if isinstance(event, dict) and event.get("type") == "result":
-            ms = event.get("duration_ms")
-            return ms / 1000 if isinstance(ms, (int, float)) else None
-    return None
+            ms.append(event.get("duration_ms"))
+    if not ms or not all(isinstance(v, (int, float)) for v in ms):
+        return None
+    return sum(ms) / 1000, len(ms)

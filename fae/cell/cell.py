@@ -167,16 +167,25 @@ AGENT_AGREE_S = 60.0          # engine and client agree within this, or
 AGENT_AGREE_FRAC = 0.1        # within this fraction of the client's figure
 
 
-def agent_time_fields(attempt, runs, client_s):
+def agent_time_fields(attempt, runs, client):
     """Fields of the AGENT ledger event: the attempt's total agent run time
     (waits between runs excluded), the number of runs, the last run's time,
-    the client's own account of that last run, and whether the two agree."""
+    the client's own account of that last run (`client`: seconds in turns and
+    how many turns it closed, or None), and whether the two agree. A resumed
+    run (closed more than once) that the engine timed longer than the client
+    is `resumed`: the engine's clock also holds the waits between its turns."""
     last = runs[-1]
-    if client_s is None:
+    client_s = None if client is None else client[0]
+    if client is None:
         check = "-"
     else:
         tol = max(AGENT_AGREE_S, AGENT_AGREE_FRAC * client_s)
-        check = "agree" if abs(last - client_s) <= tol else "disagree"
+        if abs(last - client_s) <= tol:
+            check = "agree"
+        elif client[1] > 1 and client_s < last:
+            check = "resumed"
+        else:
+            check = "disagree"
     return [f"attempt={attempt}", f"s={round(sum(runs))}", f"runs={len(runs)}",
             f"last_s={round(last)}",
             "client_s=" + ("-" if client_s is None else str(round(client_s))),
@@ -2276,9 +2285,9 @@ class Cell:
                     return self.PAUSED
                 self.hb(Phase.AGENT, attempt)
                 continue
-            client_s = _config.client_reported_seconds(
+            account = _config.client_reported_seconds(
                 self.conf.get("AGENT_CLI", "claude"), log)
-            self._append("AGENT", *agent_time_fields(attempt, runs, client_s), client)
+            self._append("AGENT", *agent_time_fields(attempt, runs, account), client)
             (self.ws / "timeout.last").unlink(missing_ok=True)
             return True
 

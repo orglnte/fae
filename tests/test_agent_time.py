@@ -19,10 +19,17 @@ class TestTheFields(unittest.TestCase):
         self.assertEqual(f, ["attempt=3", "s=151", "runs=2", "last_s=51", "client_s=-", "check=-"])
 
     def test_agree_within_a_minute_or_a_tenth(self):
-        self.assertIn("check=agree", cellmod.agent_time_fields(1, [620.0], 600.0))
-        self.assertIn("check=agree", cellmod.agent_time_fields(1, [3300.0], 3000.0))
-        self.assertIn("check=disagree", cellmod.agent_time_fields(1, [700.0], 600.0))
-        self.assertIn("check=disagree", cellmod.agent_time_fields(1, [3400.0], 3000.0))
+        self.assertIn("check=agree", cellmod.agent_time_fields(1, [620.0], (600.0, 1)))
+        self.assertIn("check=agree", cellmod.agent_time_fields(1, [3300.0], (3000.0, 1)))
+        self.assertIn("check=disagree", cellmod.agent_time_fields(1, [700.0], (600.0, 1)))
+        self.assertIn("check=disagree", cellmod.agent_time_fields(1, [3400.0], (3000.0, 1)))
+
+    def test_a_resumed_run_timed_longer_by_the_engine_is_resumed_not_a_disagreement(self):
+        f = cellmod.agent_time_fields(1, [1101.0], (743.0, 6))
+        self.assertIn("client_s=743", f)
+        self.assertIn("check=resumed", f)
+        self.assertIn("check=disagree", cellmod.agent_time_fields(1, [600.0], (900.0, 6)))
+        self.assertIn("check=disagree", cellmod.agent_time_fields(1, [1101.0], (743.0, 1)))
 
 
 class TestTheClientsOwnAccount(unittest.TestCase):
@@ -35,7 +42,13 @@ class TestTheClientsOwnAccount(unittest.TestCase):
     def test_claude_result_event_is_read(self):
         log = self._log(['{"type":"assistant"}',
                          json.dumps({"type": "result", "duration_ms": 616317})])
-        self.assertAlmostEqual(_config.client_reported_seconds("claude", log), 616.317)
+        self.assertEqual(_config.client_reported_seconds("claude", log), (616.317, 1))
+
+    def test_a_resumed_run_sums_its_closings(self):
+        log = self._log([json.dumps({"type": "result", "duration_ms": 704577}),
+                         '{"type":"system","subtype":"init"}',
+                         json.dumps({"type": "result", "duration_ms": 10556})])
+        self.assertEqual(_config.client_reported_seconds("claude", log), (715.133, 2))
 
     def test_other_clients_and_missing_events_report_nothing(self):
         log = self._log(['{"type":"assistant"}'])
@@ -50,7 +63,7 @@ class TestWhereItIsWritten(unittest.TestCase):
         src = (Path(ROOT) / "fae" / "cell" / "cell.py").read_text()
         body = src[src.index("    def agent_with_retries("):src.index("    def _charged_note(self):")]
         tail = body[body.rindex("continue"):]
-        self.assertIn('self._append("AGENT", *agent_time_fields(attempt, runs, client_s), client)', tail)
+        self.assertIn('self._append("AGENT", *agent_time_fields(attempt, runs, account), client)', tail)
         self.assertIn("runs.append(time.monotonic() - t0)", body)
 
 
