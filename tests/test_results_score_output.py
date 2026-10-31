@@ -45,13 +45,41 @@ class TestTheScoreOutput(unittest.TestCase):
                                    "(--unpack for details, --help for filters)")
         self.assertEqual(lines[1], f"  [{'█' * 24}] 2/2 done: 1 failed, 1 green, "
                                    "2 VALID, 0 TAINTED")
-        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[2], "  warnings: none")
+        self.assertEqual(len(lines), 3)
         agg.assert_called_once()
+
+    def test_the_warnings_line_names_each_kind_once_per_cell(self):
+        warned = {"verdict": "VALID", "taints": [], "warns": [
+            "footprint unreliable (scope=cell, 2 sample(s) disagreed: x: docker stats 9 MB)",
+            "2 verify run(s) not charged (host-sleepx2)"]}
+        other = {"verdict": "VALID", "taints": [],
+                 "warns": ["footprint unreliable (scope=cell, 5 sample(s) disagreed: y)"]}
+        lines, _ = self.run_score([("a", "green", warned), ("b", "green", other),
+                                   ("c", "green", VALID)])
+        self.assertTrue(lines[1].endswith("3 VALID, 0 TAINTED, 2 with warnings"), lines[1])
+        self.assertEqual(lines[2], "  ⚠ warnings — 2 cells: footprint unreliable · "
+                                   "1 cell: verify run(s) not charged  (--unpack lists them)")
+
+    def test_tainted_is_red_and_warnings_yellow_only_when_any(self):
+        rows = [("a", "green", "TAINTED", "x")]
+        self.assertIn("\033[31m1 TAINTED\033[0m",
+                      _render._validation_tally(rows, [("a", ["x"])], colour=True))
+        self.assertNotIn("\033[", _render._validation_tally([("a", "green", "VALID", "-")], [],
+                                                           colour=True))
+        self.assertIn("\033[33m1 with warnings\033[0m",
+                      _render._validation_tally([("a", "green", "VALID", "w")], [], colour=True))
+        warned = [("a", "green", {"warns": ["footprint unreliable (x)"]})]
+        self.assertIn("\033[33m", _render._warning_recap(warned, colour=True))
+        self.assertNotIn("\033[", _render._warning_recap(warned, colour=False))
+        self.assertEqual(_render._warning_recap([("a", "green", VALID)], colour=True),
+                         "  warnings: none")
 
     def test_a_scoring_failure_is_named_and_counted_on_the_bar(self):
         lines, _ = self.run_score([("a", "green", VALID)], errors=[("a", "boom")])
         self.assertIn("  ERROR scoring a: boom", lines)
-        self.assertTrue(lines[-1].endswith("; 1 FAILED to score"), lines[-1])
+        done = next(l for l in lines if " done: " in l)
+        self.assertTrue(done.endswith("; 1 FAILED to score"), done)
 
     def test_nothing_finished_says_so_on_the_bar(self):
         lines, _ = self.run_score([])

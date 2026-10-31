@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import collections
 import os
+import re
 import subprocess
 import sys
 import time
@@ -454,13 +455,46 @@ def _validation_rows(results):
     return rows, tainted
 
 
-def _validation_tally(rows, tainted):
-    """One line: the cells by outcome, VALID and TAINTED, with warnings."""
+def _paint(text, colour, on):
+    """`text` in an ANSI colour (red, yellow) when `on`."""
+    codes = {"red": "31", "yellow": "33"}
+    return f"\033[{codes[colour]}m{text}\033[0m" if on else text
+
+
+def _colour_on():
+    """Colour on a terminal only, and never under NO_COLOR."""
+    return sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+
+
+def _validation_tally(rows, tainted, colour=False):
+    """One line: the cells by outcome, VALID and TAINTED (red when any),
+    and how many carry a warning (yellow)."""
     n_warn = sum(1 for r in rows if r[3] != "-" and r[2] == "VALID")
     by = collections.Counter(r[1] for r in rows)
+    taint = _paint(f"{len(tainted)} TAINTED", "red", colour and bool(tainted))
     return (", ".join(f"{n} {k}" for k, n in sorted(by.items()))
-            + f", {len(rows) - len(tainted)} VALID, {len(tainted)} TAINTED"
-            + (f", {n_warn} with warnings" if n_warn else ""))
+            + f", {len(rows) - len(tainted)} VALID, {taint}"
+            + (", " + _paint(f"{n_warn} with warnings", "yellow", colour) if n_warn else ""))
+
+
+def _warning_kind(text):
+    """A warning's kind: its words before any detail, numbers left out, so
+    one kind counts once whatever its figures."""
+    head = re.split(r" \(|: ", text, maxsplit=1)[0]
+    return re.sub(r"\s+", " ", re.sub(r"\d+", "", head)).strip()
+
+
+def _warning_recap(results, colour=False):
+    """One line: each kind of warning with the number of cells it hits,
+    yellow when any; `warnings: none` when none."""
+    by = collections.Counter()
+    for _cid, _why, doc in results:
+        if doc:
+            by.update({_warning_kind(w) for w in doc.get("warns", [])})
+    if not by:
+        return "  warnings: none"
+    kinds = " · ".join(f"{n} cell{'s' if n != 1 else ''}: {k}" for k, n in by.most_common())
+    return _paint(f"  ⚠ warnings — {kinds}", "yellow", colour) + "  (--unpack lists them)"
 
 
 def _print_tainted(tainted, quiet):
@@ -528,11 +562,15 @@ def results_score(args):
                                                on_failed=failed)
     rows, tainted = _validation_rows(seen["results"])
     n = len(rows)
-    end = (f"{n}/{n} done: {_validation_tally(rows, tainted)}" if rows else "no DONE cells match")
+    colour = _colour_on()
+    end = (f"{n}/{n} done: {_validation_tally(rows, tainted, colour=colour)}"
+           if rows else "no DONE cells match")
     end += f"; {len(errors)} FAILED to score" if errors else ""
     if bar_on:
         sys.stdout.write("\r" + " " * 120 + "\r")
     print(f"  [{'█' * 24}] {end}")
+    if rows:
+        print(_warning_recap(seen["results"], colour))
     if details and rows:
         print(fmt_table(rows, ("CELL", "VERDICT", "VALIDATION", "NOTES")))
     _print_tainted(tainted, quiet=not details)

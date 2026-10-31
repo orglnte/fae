@@ -799,4 +799,9 @@ class TestTheScoreboardRunsEndToEnd(unittest.TestCase):
         self.assertIn("Add --legend to see what each column means.", outs[1])
         self.assertNotIn("a/b/c = min/mean/max", outs[1])
         self.assertIn("a/b/c = min/mean/max", outs[2])
+        legend = [l for l in outs[2].splitlines() if l.startswith(" * ")]
+        table_width = len(next(l for l in outs[2].splitlines() if l.startswith("====")))
+        self.assertTrue(legend)
+        self.assertTrue(all(len(l) <= table_width for l in outs[2].splitlines()
+                            if l.startswith((" * ", "   "))))
         self.assertNotIn("Add --legend", outs[2])

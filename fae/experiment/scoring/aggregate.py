@@ -15,6 +15,7 @@ import csv
 import json
 import re
 import sys
+import textwrap
 from collections import defaultdict
 from math import comb
 from pathlib import Path
@@ -554,6 +555,36 @@ def render_table(cols: list[tuple[str, str]], rows: list[list[str]]) -> list[str
     return ["=" * width, *header, "-" * width, *map(line, rows), "=" * width]
 
 
+def legend(summary: dict, out_csv, out_json, compared: bool) -> list[str]:
+    """What each column means, one definition per entry."""
+    out = [
+        "a/b/c = min/mean/max over the row's cells; '-' = no data. ATTEMPTS, MINUTES to green, SLoC: "
+        "GREEN cells only (denominator GREEN, not REPS).",
+        "MINUTES to green = agent minutes over the charged attempts up to green; per try = mean "
+        "minutes per charged attempt, every cell.",
+        "API/TOOL minutes = MINUTES to green split into the client's API requests / the rest "
+        "(the agent's commands, the CLI's own work).",
+        "TURNS, TOOL calls, OUTPUT ktokens = agent turns, tool calls, output tokens (thinking "
+        "included) up to green, from the transcript.",
+        "API ms/token = API milliseconds per output token, the provider's speed: one model's "
+        "rows should read alike.",
+    ]
+    for model, w in summary["wall_vs_work_by_model"].items():
+        rhos = [w[f"rho_wall_{f}"] for f in ("out_tok", "turns", "tool_calls")]
+        if any(r is not None for r in rhos):
+            shown = ", ".join("-" if r is None else f"{r:.2f}" for r in rhos)
+            out.append(f"{short_model(model)}: Spearman rho of MINUTES to green vs output tokens, "
+                       f"turns, tool calls = {shown} (n={w['n']} green cells).")
+    out.append("SLoC = non-blank, non-comment lines the agent authored (skeleton excluded): the "
+               "mean, then its distance to the smallest and largest.")
+    if compared:
+        out.append("SIG(p) GRADE = two-sided Fisher's exact test, green vs non-green, cut vs "
+                   "baseline: p (* <.05, ** <.01) and its grade; '-' if a side is empty.")
+    out.append(f"Cell records: {out_csv}")
+    out.append(f"Summary: {out_json}")
+    return out
+
+
 def _definition():
     if str(_paths.ENGINE.parent) not in sys.path:
         sys.path.insert(0, str(_paths.ENGINE.parent))
@@ -797,41 +828,15 @@ def main() -> int:
             + (list(format_compare(compare.get(key))) if compare is not None else [])
         table.append(vals)
 
+    drawn = render_table(cols, table)
     print()
-    print("\n".join(render_table(cols, table)))
+    print("\n".join(drawn))
     if "--legend" not in sys.argv:
         print(" Add --legend to see what each column means.")
     else:
-        print(" * a/b/c = min/mean/max over the row's cells. ATTEMPTS, MINUTES to green,")
-        print("   SLoC: GREEN cells only -- denominator is GREEN, not REPS. A non-green")
-        print("   cell never worked; its size is not comparable.")
-        print(" * MINUTES to green = the agent's minutes up to green (charged attempts);")
-        print("   per try = its mean minutes per charged attempt, every cell. '-' when the")
-        print("   ledger has no AGENT lines for those attempts.")
-        print(" * API/TOOL minutes = of MINUTES to green, the minutes in the client's API")
-        print("   requests / the rest, wall minus API time (the agent's commands and the")
-        print("   CLI's own work). TURNS, TOOL calls, OUTPUT ktokens = agent turns, tool")
-        print("   calls and output tokens (thinking included) up to green. All from the")
-        print("   agent's transcript, GREEN cells only; '-' when the client records none")
-        print("   (agy: no API time; opencode: nothing).")
-        print(" * API ms/token = API milliseconds per output token: the provider's speed.")
-        print("   Rows of one model should read alike; a lane served slower shows here.")
-        for model, w in summary["wall_vs_work_by_model"].items():
-            rhos = [w[f"rho_wall_{f}"] for f in ("out_tok", "turns", "tool_calls")]
-            if all(r is None for r in rhos):
-                continue
-            shown = ", ".join("-" if r is None else f"{r:.2f}" for r in rhos)
-            print(f" * {short_model(model)}: MINUTES to green vs output tokens, turns, tool calls,")
-            print(f"   Spearman rho = {shown} (n={w['n']} green cells).")
-        print(" * SLoC = non-blank, non-comment lines authored by the agent, excluding the")
-        print("   seeded skeleton: the mean, then how far the row's smallest and largest")
-        print("   reach below and above it.")
-        print(f" * Every cell's record: {out_csv}; the summary: {out_json}.")
-        if compare is not None:
-            print(" * SIG(p) GRADE = two-sided Fisher's exact test on green vs non-green")
-            print("   counts, cut against baseline: the p-value (* p<.05, ** p<.01), then the")
-            print("   same result spelled out (not sig / significant / strong). '-' when")
-            print("   either side has 0 cells.")
+        for text in legend(summary, out_csv, out_json, compare is not None):
+            print(textwrap.fill(text, width=len(drawn[0]), initial_indent=" * ",
+                                subsequent_indent="   "))
     print()
     
     return 0
