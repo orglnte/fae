@@ -14,10 +14,12 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+from fae.cell import clients as _clients
+
 PACKAGE = "experiment"
 
 AGENTS_FILE = "agents.toml"
-AGENT_CLIS = ("claude", "agy", "opencode", "testagent")
+AGENT_CLIS = _clients.NAMES
 AGENT_KEYS = {"cli"}
 MODEL_KEYS = {"agent", "model", "effort"}
 BUILTIN_AGENTS = {"testagent": {"cli": "testagent"}}

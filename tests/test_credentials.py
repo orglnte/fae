@@ -13,10 +13,10 @@ from unittest import mock
 
 from _ctx import ROOT  # noqa: F401  (sys.path)
 import fae.experiment
-from fae.cell import confinement
+from fae.cell.clients import claude
 from fae.experiment import credentials
 
-TOKEN = confinement.TOKEN_PREFIX + "abc"
+TOKEN = claude.TOKEN_PREFIX + "abc"
 
 
 class Case(unittest.TestCase):
@@ -54,7 +54,7 @@ class TestClaude(Case):
         why = c.setup(ask=lambda _: TOKEN, run=self.docker, say=lambda *_: None)
         self.assertEqual(why, "")
         self.assertEqual(self.runs, [["docker", "run", "-it", "--rm", "img", "claude", "setup-token"]])
-        token = c.home / confinement.TOKEN_FILE
+        token = c.home / claude.TOKEN_FILE
         self.assertEqual(token.read_text(), TOKEN + "\n")
         self.assertEqual(stat.S_IMODE(token.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(c.home.stat().st_mode), 0o700)
@@ -71,7 +71,7 @@ class TestClaude(Case):
         c = self.cred("claude")
         why = c.setup(ask=lambda _: "sk-ant-api03-x", run=self.docker, say=lambda *_: None)
         self.assertIn("not a `claude setup-token` token", why)
-        self.assertFalse((c.home / confinement.TOKEN_FILE).exists())
+        self.assertFalse((c.home / claude.TOKEN_FILE).exists())
 
     def test_missing_names_why(self):
         self.assertIn("setup-token", self.cred("claude").missing())
@@ -84,32 +84,33 @@ class TestClaude(Case):
         self.assertEqual((asked, self.runs), ([], []))
 
     def test_a_lax_existing_file_is_owner_only_before_the_secret_lands(self):
-        c = self.cred("opencode")
+        c = self.cred("claude")
         c.home.mkdir()
-        key = c.home / "opencode.key"
+        key = c.home / claude.TOKEN_FILE
         key.write_text("old\n")
         key.chmod(0o644)
-        c.setup(ask=lambda _: "NEW", run=self.docker, say=lambda *_: None)
-        self.assertEqual(key.read_text(), "NEW\n")
+        c.setup(ask=lambda _: TOKEN, run=self.docker, say=lambda *_: None)
+        self.assertEqual(key.read_text(), TOKEN + "\n")
         self.assertEqual(stat.S_IMODE(key.stat().st_mode), 0o600)
 
     def test_a_symlink_where_the_secret_goes_is_refused(self):
-        c = self.cred("opencode")
+        c = self.cred("claude")
         c.home.mkdir()
-        (c.home / "opencode.key").symlink_to(self.d / "elsewhere")
+        (c.home / claude.TOKEN_FILE).symlink_to(self.d / "elsewhere")
         with self.assertRaises(OSError):
-            c.setup(ask=lambda _: "NEW", run=self.docker, say=lambda *_: None)
+            c.setup(ask=lambda _: TOKEN, run=self.docker, say=lambda *_: None)
         self.assertFalse((self.d / "elsewhere").exists())
 
 
 class TestOpencodeAndAgy(Case):
 
-    def test_opencode_writes_the_key_owner_only(self):
+    def test_opencode_cannot_start_so_its_credential_reads_missing_and_nothing_is_written(self):
         c = self.cred("opencode")
-        self.assertIn("no API key", c.missing())
-        self.assertEqual(c.setup(ask=lambda _: "KEY", run=self.docker, say=lambda *_: None), "")
-        key = c.home / "opencode.key"
-        self.assertEqual(stat.S_IMODE(key.stat().st_mode), 0o600)
+        self.assertIn("cannot start", c.missing())
+        asked = []
+        self.assertIn("cannot start", c.setup(ask=asked.append, run=self.docker, say=lambda *_: None))
+        self.assertEqual((asked, self.runs), ([], []))
+        self.assertFalse((c.home / "opencode.key").exists())
 
     def test_agy_signs_in_with_its_home_mounted(self):
         c = self.cred("agy")
@@ -125,10 +126,10 @@ class TestOpencodeAndAgy(Case):
 class TestEnsure(Case):
 
     def creds(self):
-        claude = self.cred("claude")
-        claude.home.mkdir()
-        (claude.home / confinement.TOKEN_FILE).write_text(TOKEN)
-        return {"claude": claude, "opencode": self.cred("opencode"), "agy": self.cred("agy")}
+        signed_in = self.cred("claude")
+        signed_in.home.mkdir()
+        (signed_in.home / claude.TOKEN_FILE).write_text(TOKEN)
+        return {"claude": signed_in, "opencode": self.cred("opencode"), "agy": self.cred("agy")}
 
     def test_without_a_terminal_the_missing_are_reported_not_asked(self):
         asked = []
@@ -145,12 +146,12 @@ class TestEnsure(Case):
             credentials.ensure(self.creds(), exclude=["gemini"], interactive=False)
 
     def test_at_a_terminal_a_yes_sets_it_up(self):
-        creds = self.creds()
-        left = credentials.ensure(creds, exclude=["agy"], interactive=True,
-                                  confirm=lambda _: "y", ask=lambda _: "KEY",
+        creds = {"claude": self.cred("claude"), "opencode": self.cred("opencode")}
+        left = credentials.ensure(creds, interactive=True,
+                                  confirm=lambda _: "y", ask=lambda _: TOKEN,
                                   run=self.docker, say=lambda *_: None)
-        self.assertEqual(left, {})
-        self.assertEqual((creds["opencode"].home / "opencode.key").read_text(), "KEY\n")
+        self.assertEqual(list(left), ["opencode"])          # a client that cannot start
+        self.assertEqual((creds["claude"].home / claude.TOKEN_FILE).read_text(), TOKEN + "\n")
 
 
 if __name__ == "__main__":

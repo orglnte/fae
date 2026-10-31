@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 import fae.experiment
-from fae.cell import transcript
+from fae.cell import clients, transcript
 from fae.experiment.scoring import surface_filter
 
 from fae import paths as _paths  # noqa: E402
@@ -281,7 +281,8 @@ def attempt_usage(log, client, last_s) -> dict | None:
     """One attempt's transcript figures (fae.cell.transcript.FIELDS) plus
     tool_s, wall minus API time: the engine's wall clock of the judged run
     less the time the client's API requests took."""
-    u = transcript.usage(client, log)
+    cls = clients.reader(client)
+    u = cls.usage(log) if cls else None
     if u is None:
         return None
     u["tool_s"] = (round(last_s - u["api_s"], 1)

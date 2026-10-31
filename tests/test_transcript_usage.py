@@ -8,7 +8,7 @@ from pathlib import Path
 
 from _ctx import ROOT  # noqa: F401
 
-from fae.cell import transcript
+from fae.cell import clients, transcript
 from fae.experiment.scoring import score_cell as sc
 
 
@@ -37,18 +37,18 @@ def _log(events, d=None):
 
 class TestOneRun(unittest.TestCase):
     def test_the_result_event_and_the_tool_blocks_are_read(self):
-        u = transcript.usage("claude", _log([_assistant("a", "b"), "plain text line",
+        u = clients.reader("claude").usage(_log([_assistant("a", "b"), "plain text line",
                                              _assistant("c"), _result()]))
         self.assertEqual(u, {"api_s": 400.0, "turns": 50, "tool_calls": 3, "out_tok": 9000,
                              "think_tok": 6000, "in_tok": 1110, "cost_usd": 0.4,
                              "retries": 0, "retry_wait_s": 0.0, "limited": 0})
 
     def test_a_tool_block_streamed_twice_counts_once(self):
-        u = transcript.usage("claude", _log([_assistant("a"), _assistant("a", "b"), _result()]))
+        u = clients.reader("claude").usage(_log([_assistant("a"), _assistant("a", "b"), _result()]))
         self.assertEqual(u["tool_calls"], 2)
 
     def test_retries_their_backoff_and_rate_limit_pressure_are_counted(self):
-        u = transcript.usage("claude", _log([
+        u = clients.reader("claude").usage(_log([
             {"type": "system", "subtype": "api_retry", "retry_delay_ms": 542},
             {"type": "system", "subtype": "api_retry", "retry_delay_ms": 39776},
             {"type": "rate_limit_event", "rate_limit_info": {"status": "allowed"}},
@@ -62,7 +62,7 @@ class TestAResumedRun(unittest.TestCase):
     result event again: API time and cost run on, turns and tokens restart."""
 
     def test_running_totals_are_read_last_and_counts_are_summed(self):
-        u = transcript.usage("claude", _log([
+        u = clients.reader("claude").usage(_log([
             _result(duration_api_ms=410000, num_turns=67, total_cost_usd=0.40),
             _result(duration_api_ms=446000, num_turns=3, total_cost_usd=0.56,
                     usage={"input_tokens": 1, "cache_creation_input_tokens": 2,
@@ -92,7 +92,7 @@ def _agy(*steps, usage=None, duration=851.3):
 
 class TestAgy(unittest.TestCase):
     def test_turns_and_tools_are_its_steps_counted_once(self):
-        u = transcript.usage("agy", _log(_agy((0, "user_input"), (1, "agent_response"),
+        u = clients.reader("agy").usage(_log(_agy((0, "user_input"), (1, "agent_response"),
                                                (2, "tool"), (3, "agent_response"),
                                                (4, "tool"), (5, "agent_response"))))
         self.assertEqual((u["turns"], u["tool_calls"]), (3, 2))
@@ -100,28 +100,27 @@ class TestAgy(unittest.TestCase):
                          (82250, 66030, 386010 + 6996400))
 
     def test_what_agy_does_not_record_is_unknown_not_zero(self):
-        u = transcript.usage("agy", _log(_agy((1, "agent_response"))))
+        u = clients.reader("agy").usage(_log(_agy((1, "agent_response"))))
         for f in ("api_s", "cost_usd", "retries", "retry_wait_s", "limited"):
             self.assertIsNone(u[f], f)
 
     def test_its_own_duration_is_the_clients_account(self):
-        from fae.experiment import config as _config
-        self.assertEqual(_config.client_reported_seconds("agy", _log(_agy())), (851.3, 1))
+        self.assertEqual(clients.reader("agy").client_seconds(_log(_agy())), (851.3, 1))
 
     def test_no_result_event_reads_as_none(self):
-        self.assertIsNone(transcript.usage("agy", _log(_agy()[:-1])))
+        self.assertIsNone(clients.reader("agy").usage(_log(_agy()[:-1])))
 
 
 class TestNoAccount(unittest.TestCase):
     def test_other_clients_and_missing_results_read_as_none(self):
         log = _log([_result()])
-        self.assertIsNone(transcript.usage("agy", log))         # a claude transcript
-        self.assertIsNone(transcript.usage("opencode", log))
-        self.assertIsNone(transcript.usage("claude", _log([_assistant("a")])))
-        self.assertIsNone(transcript.usage("claude", Path("/nonexistent/log")))
+        self.assertIsNone(clients.reader("agy").usage(log))         # a claude transcript
+        self.assertIsNone(clients.reader("opencode").usage(log))
+        self.assertIsNone(clients.reader("claude").usage(_log([_assistant("a")])))
+        self.assertIsNone(clients.reader("claude").usage(Path("/nonexistent/log")))
 
     def test_a_missing_token_count_leaves_that_total_unknown(self):
-        u = transcript.usage("claude", _log([_result(usage={"output_tokens": 5})]))
+        u = clients.reader("claude").usage(_log([_result(usage={"output_tokens": 5})]))
         self.assertIsNone(u["in_tok"])
         self.assertIsNone(u["think_tok"])
         self.assertEqual(u["out_tok"], 5)

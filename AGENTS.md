@@ -559,25 +559,42 @@ turns, tool calls, tokens, retries) is read from the transcript at scoring
 (`fae/cell/transcript.py`), not written to the ledger, so a rescore gives it
 to every cell whose transcript is kept.
 
-`$AGENT_CLAUDE` is restaged **before every attempt**: the CLI keeps
-per-project memory and transcripts under `~/.claude/projects/<cwd>`, and
-every agent runs in `/workspace`, so a shared mount would let each agent read
-every prior agent's memory — cross-run leakage invisible in the results.
-An agy cell's home is staged the same way, from the sign-in home but with
-only the sign-in and agy's identity files (`config.AGY_LOGIN`) and an empty
-`settings.json` FAE writes: the sign-in home also keeps agy's conversation
-summaries, the sign-in session's log and whatever settings were set there
-(an `agentMode`, say), and copying it whole would start every cell from
-them. agy runs with `--output-format stream-json` when `stream_agent` is on,
-so its transcript records its steps and tokens (`fae/cell/transcript.py`).
-An agy agent is confined as a claude one is (`fae/cell/confinement.py`): no
-web, no browser, no MCP server or plugin, no subagent it defines itself.
-agy has no flag that removes a built-in tool, so the home also carries a
-custom agent, `fae`, whose `tools` list names what it keeps, and the command
-line selects it (`--agent fae`). agy's init line lists its default tools
-whatever the agent, so the proof is the session's steps, read as the
-transcript grows: a call to a tool outside the list is a breach that
-interrupts the cell, and `stream_agent` off is one too.
+**Each CLI is an agent client** (`fae/cell/clients/`): a subclass of
+`AgentClient` (`base.py`), whose docstrings name five guarantees, each a
+method — the credential (`credential_missing`, `setup_credential`), the
+cell's home (`stage_home`, `check_home`), confinement (`breach`), the
+container command (`env`, `docker_args`, `command`) and accounting
+(`usage`, `client_seconds`). A cell gets its client only from `clients.of`,
+which refuses one that leaves any out, naming it; the cell halts
+(`client-incomplete`) and the run reads its agent's credential as missing.
+opencode is refused so: `opencode run` prints the agent's text only, so
+nothing proves which tools its session had. What a cell does with a CLI
+lives in its client; outside it are only each CLI's default credentials
+home (`config.AGENT_HOME_DEFAULT`) and the one-agent proof `experiment
+credentials --check` runs for claude (`Cell.trial`). A finished attempt's
+transcript is read through `clients.reader`, so old cells of a refused
+client still score.
+
+**The home is restaged before every attempt, from an allowlist**: a CLI
+keeps per-project memory and transcripts in its home (claude's
+`~/.claude/projects/<cwd>`, agy's conversation summaries), and every agent
+runs in `/workspace`, so a shared or inherited home would let each agent
+read every prior agent's memory — cross-run leakage invisible in the
+results. claude's holds only its confinement settings (the token reaches
+the agent by environment); agy's only the sign-in and agy's identity files
+(`clients/agy.py: LOGIN`), a `settings.json` FAE writes, so the agent's mode
+comes from its argv alone, and the confined agent below.
+
+**Confinement is proven by the agent's own transcript, read as it grows**,
+so a client update that widens the agent interrupts the cell instead of
+passing unseen; `stream_agent` off is a breach for a client proven so.
+claude: a `setup-token` credential, settings and command-line limits that
+drop MCP and WebSearch/WebFetch, and an init line that must show neither.
+agy: no web, no browser, no MCP server or plugin, no subagent it defines
+itself. agy has no flag that removes a built-in tool, so its home carries a
+custom agent, `fae`, whose `tools` list names what it keeps, selected by
+`--agent fae`; agy's init line lists its default tools whatever the agent,
+so its proof is its steps: a call to a tool outside the list is a breach.
 
 ## 7. Verdicts are gated, and fast failures are not failures
 

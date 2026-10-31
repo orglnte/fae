@@ -9,7 +9,7 @@ from pathlib import Path
 from _ctx import ROOT
 
 from fae.cell import cell as cellmod
-from fae.experiment import config as _config
+from fae.cell import clients
 from fae.book import Book
 
 
@@ -42,20 +42,20 @@ class TestTheClientsOwnAccount(unittest.TestCase):
     def test_claude_result_event_is_read(self):
         log = self._log(['{"type":"assistant"}',
                          json.dumps({"type": "result", "duration_ms": 616317})])
-        self.assertEqual(_config.client_reported_seconds("claude", log), (616.317, 1))
+        self.assertEqual(clients.reader("claude").client_seconds(log), (616.317, 1))
 
     def test_a_resumed_run_sums_its_closings(self):
         log = self._log([json.dumps({"type": "result", "duration_ms": 704577}),
                          '{"type":"system","subtype":"init"}',
                          json.dumps({"type": "result", "duration_ms": 10556})])
-        self.assertEqual(_config.client_reported_seconds("claude", log), (715.133, 2))
+        self.assertEqual(clients.reader("claude").client_seconds(log), (715.133, 2))
 
     def test_other_clients_and_missing_events_report_nothing(self):
         log = self._log(['{"type":"assistant"}'])
-        self.assertIsNone(_config.client_reported_seconds("claude", log))
-        self.assertIsNone(_config.client_reported_seconds("agy", log))   # no agy result event
-        self.assertIsNone(_config.client_reported_seconds("opencode", log))
-        self.assertIsNone(_config.client_reported_seconds("claude", Path("/nonexistent/log")))
+        self.assertIsNone(clients.reader("claude").client_seconds(log))
+        self.assertIsNone(clients.reader("agy").client_seconds(log))   # no agy result event
+        self.assertIsNone(clients.reader("opencode").client_seconds(log))
+        self.assertIsNone(clients.reader("claude").client_seconds(Path("/nonexistent/log")))
 
 
 class TestWhereItIsWritten(unittest.TestCase):

@@ -10,8 +10,8 @@ from pathlib import Path
 
 from _ctx import ROOT
 
-from fae.cell import confinement
-from fae.experiment import config as C
+from fae.cell import clients
+from fae.cell.clients import agy
 
 
 class TestAgyHome(unittest.TestCase):
@@ -27,10 +27,10 @@ class TestAgyHome(unittest.TestCase):
         p.write_text(text)
 
     def stage(self):
-        C.stage_agent({"AGENT_HOME": str(self.home)}, "agy", str(self.dest), ROOT)
+        clients.of("agy").stage_home({"AGENT_HOME": str(self.home)}, str(self.dest), ROOT)
 
     def test_only_the_sign_in_and_identity_files_reach_the_cell(self):
-        for rel in C.AGY_LOGIN:
+        for rel in agy.LOGIN:
             self.put(rel)
         for rel in ("antigravity-cli/conversation_summaries.db",
                     "antigravity-cli/implicit/a.pb", "antigravity-cli/log/cli-1.log",
@@ -39,13 +39,13 @@ class TestAgyHome(unittest.TestCase):
             self.put(rel)
         self.stage()
         got = {str(p.relative_to(self.dest)) for p in self.dest.rglob("*") if p.is_file()}
-        self.assertEqual(got, set(C.AGY_LOGIN) | {C.AGY_SETTINGS, confinement.AGY_AGENT_FILE})
+        self.assertEqual(got, set(agy.LOGIN) | {agy.SETTINGS, agy.AGENT_FILE})
 
     def test_the_settings_are_fae_s_own_whatever_the_home_holds(self):
-        self.put(C.AGY_TOKEN)
-        self.put(C.AGY_SETTINGS, json.dumps({"agentMode": "auto"}))
+        self.put(agy.TOKEN)
+        self.put(agy.SETTINGS, json.dumps({"agentMode": "auto"}))
         self.stage()
-        self.assertEqual(json.loads((self.dest / C.AGY_SETTINGS).read_text()), {})
+        self.assertEqual(json.loads((self.dest / agy.SETTINGS).read_text()), {})
 
     def test_a_home_without_the_sign_in_halts_at_staging(self):
         self.put("antigravity-cli/log/cli-1.log")
@@ -53,7 +53,7 @@ class TestAgyHome(unittest.TestCase):
             self.stage()
 
     def test_a_restage_drops_what_the_last_attempt_left(self):
-        self.put(C.AGY_TOKEN)
+        self.put(agy.TOKEN)
         self.stage()
         (self.dest / "antigravity-cli" / "conversation_summaries.db").write_text("x")
         self.stage()

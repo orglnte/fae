@@ -424,15 +424,16 @@ class TestTheClaudeAgentIsCheckedBeforeItRuns(DriverCase):
     the staged home and the stream are checked, and an AGENT_CMD is alerted."""
 
     def claude_cell(self, stream="1", token=None):
-        from fae.cell import confinement
+        import json
+        from fae.cell.clients import claude
         c = self.cell()
         creds = self.root / "creds"
         creds.mkdir(exist_ok=True)
-        (creds / ".oauth_token").write_text((token or confinement.TOKEN_PREFIX + "abc") + "\n")
+        (creds / ".oauth_token").write_text((token or claude.TOKEN_PREFIX + "abc") + "\n")
         c.conf.values.update(AGENT_CLI="claude", AGENT_HOME=str(creds), STREAM_AGENT=stream)
         home = c.ws / ".agent-claude"
         home.mkdir(exist_ok=True)
-        confinement.stage(home)
+        (home / "settings.json").write_text(json.dumps(claude.SETTINGS, indent=2) + "\n")
         (c.ws / "PROMPT.md").write_text("task\n")
         c.agent_image = lambda: "img"
         c._prompt = lambda attempt: c.ws / "PROMPT.md"
@@ -441,12 +442,12 @@ class TestTheClaudeAgentIsCheckedBeforeItRuns(DriverCase):
         return c, runs
 
     def test_the_token_goes_to_the_clients_environment_and_the_transcript_is_watched(self):
-        from fae.cell import confinement
+        from fae.cell.clients import claude
         c, runs = self.claude_cell()
         self.assertEqual(c._agent(1), 0)
         argv, env, watch = runs[0]
-        self.assertEqual(env[confinement.TOKEN_ENV], confinement.TOKEN_PREFIX + "abc")
-        self.assertNotIn(confinement.TOKEN_PREFIX + "abc", " ".join(argv))
+        self.assertEqual(env[claude.TOKEN_ENV], claude.TOKEN_PREFIX + "abc")
+        self.assertNotIn(claude.TOKEN_PREFIX + "abc", " ".join(argv))
         self.assertEqual(watch, c.ws / "agent.attempt-1.log")
 
     def test_no_stream_a_bad_token_or_an_edited_home_never_starts_the_agent(self):
@@ -463,3 +464,37 @@ class TestTheClaudeAgentIsCheckedBeforeItRuns(DriverCase):
         c, runs = self.claude_cell()
         c._agent(1, agent_cmd="true")
         self.assertIn("AGENT-CMD override", (c.ws / "iterations.log").read_text())
+
+
+class TestACellOnAClientThatCannotStart(DriverCase):
+    """clients.of refuses a client that does not provide every guarantee, and
+    the experiment may name a client the engine does not have: the cell halts
+    for the operator at staging, before any attempt, as for missing creds."""
+
+    def cell_on(self, cli):
+        c = self.cell()
+        del c.stage_agent                      # the real one: it resolves the client
+        c.conf.values.update(AGENT_CLI=cli, AGENT="dsv4f")
+        return c
+
+    def test_an_incomplete_client_halts_the_cell_naming_what_it_lacks(self):
+        c = self.cell_on("opencode")
+        with self.assertRaisesRegex(cell.Halt, "does not provide breach") as h:
+            c.run(ignore_slots=True, verify=self.green)
+        self.assertEqual(h.exception.code, 42)
+        self.assertIn("client-incomplete", (c.ws / "iterations.log").read_text())
+        self.assertFalse((c.ws / ".agent-opencode").exists())
+
+    def test_a_client_the_engine_does_not_have_halts_as_missing_creds(self):
+        c = self.cell_on("gemini-cli")
+        with self.assertRaisesRegex(cell.Halt, "no agent 'dsv4f'"):
+            c.run(ignore_slots=True, verify=self.green)
+        self.assertIn("no-creds", (c.ws / "iterations.log").read_text())
+
+    def test_an_agent_cmd_override_runs_whatever_the_client(self):
+        for cli in ("opencode", "gemini-cli"):
+            with self.subTest(cli=cli):
+                c = self.cell_on(cli)
+                (c.ws / "PROMPT.md").write_text("task\n")
+                c._prompt = lambda attempt: c.ws / "PROMPT.md"
+                self.assertEqual(c._agent(1, agent_cmd="true"), 0)

@@ -3,13 +3,10 @@ runs, kept in the agent's credentials home on this machine.
 
 `experiment credentials AGENT` sets one up, the secret read from a hidden
 prompt and written owner-only; `experiment run` checks every agent's before
-it admits anything. What each CLI needs:
-
-claude    .oauth_token   a `claude setup-token` token, never a login (see
-                         fae/cell/confinement.py); a login found there is
-                         moved aside
-opencode  opencode.key   the API key
-agy       the home       a signed-in agy home (agy writes it at sign-in)
+it admits anything. What each CLI needs is its client's
+(fae/cell/clients/: credential_missing, setup_credential); a client that
+cannot start (clients.Incomplete) reads as a missing credential, so the run
+names it before any cell.
 """
 from __future__ import annotations
 
@@ -19,24 +16,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import datetime
 from pathlib import Path
 
-from fae.cell import confinement
+from fae.cell import clients
 from fae.experiment import config as _config
-
-
-def _write_secret(path, value):
-    """`value` into `path`, owner-only before a byte is written, in an
-    owner-only directory; a symlink at `path` is refused."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    os.chmod(path.parent, 0o700)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-    os.fchmod(fd, 0o600)
-    os.ftruncate(fd, 0)
-    with os.fdopen(fd, "w") as f:
-        f.write(value.strip() + "\n")
 
 
 def _image_absent(image):
@@ -54,57 +37,22 @@ class Credential:
     def missing(self):
         """Why the credential is not usable; empty when it is."""
         try:
-            return self._missing()
+            return clients.of(self.cli).credential_missing(self.home)
+        except clients.Incomplete as e:
+            return str(e)
         except OSError as e:
             return f"unreadable: {e}"
-
-    def _missing(self):
-        if self.cli == "claude":
-            try:
-                confinement.token(self.home)
-            except confinement.Breach as e:
-                return str(e)
-            return ""
-        if self.cli == "opencode":
-            key = _config.opencode_key_file(self.home)
-            return "" if key.is_file() and key.read_text().strip() else f"no API key in {key}"
-        if self.cli == "agy":
-            signed_in = (self.home / _config.AGY_TOKEN).is_file()
-            return "" if signed_in else f"no signed-in agy home at {self.home}"
-        return ""
 
     def setup(self, ask=getpass.getpass, run=subprocess.run, say=print):
         """Set the credential up interactively; returns why it is still not
         usable, empty when it is."""
-        if self.cli in ("claude", "agy"):
-            absent = _image_absent(self.image)
-            if absent:
-                return absent
-        if self.cli == "claude":
-            say(f"{self.name}: a browser sign-in follows; copy the token it prints.")
-            run(["docker", "run", "-it", "--rm", self.image, "claude", "setup-token"])
-            token = ask("Paste the token (hidden): ").strip()
-            if not token.startswith(confinement.TOKEN_PREFIX):
-                return "that is not a `claude setup-token` token; nothing written"
-            _write_secret(self.home / confinement.TOKEN_FILE, token)
-            login = self.home / ".credentials.json"
-            if login.exists():
-                aside = self.home / ".to_be_deleted" / datetime.now().strftime("%Y%m%d-%H%M%S")
-                aside.mkdir(parents=True)
-                shutil.move(str(login), aside / login.name)
-                say(f"{self.name}: the old login moved to {aside}")
-        elif self.cli == "opencode":
-            key = ask(f"{self.name}: the opencode API key (hidden): ").strip()
-            if not key:
-                return "no key given; nothing written"
-            _write_secret(_config.opencode_key_file(self.home), key)
-        elif self.cli == "agy":
-            self.home.mkdir(parents=True, exist_ok=True)
-            os.chmod(self.home, 0o700)
-            say(f"{self.name}: sign in inside the container, then exit it.")
-            run(["docker", "run", "-it", "--rm", "-v", f"{self.home}:/home/node/.gemini",
-                 self.image, "agy"])
-        return self.missing()
+        try:
+            client = clients.of(self.cli)
+        except clients.Incomplete as e:
+            return str(e)
+        why = ((client.SETUP_IN_IMAGE and _image_absent(self.image))
+               or client.setup_credential(self.home, self.image, ask, run, say))
+        return why or self.missing()
 
     def proven(self, model, log_dir):
         """Start one claude agent on this credential with the cell's limits and

@@ -1,7 +1,8 @@
 """opencode (OSS models via OpenRouter): the third agent CLI.
 
-The model map, the docker-run argv and the credential staging are Python now
-(fae/experiment/config.py); these pin the opencode branch of each.
+Its client (fae/cell/clients/opencode.py) provides everything but a proof of
+its confinement, so it cannot start; the model map, the docker-run argv and
+the home staging are pinned here on a stand-in that supplies that proof.
 """
 import os
 import tempfile
@@ -11,8 +12,22 @@ from pathlib import Path
 from _ctx import ROOT
 
 import fae.experiment
+from unittest import mock
+
+from fae.cell import clients
 from fae.cell.cell import Cell
+from fae.cell.clients.opencode import Opencode
 from fae.experiment import config as C
+
+
+class _Proven(Opencode):
+    """opencode with a stand-in proof, for what the rest of its client does."""
+
+    def breach(self, init, tools_used):
+        return ""
+
+
+OPENCODE = _Proven()
 
 TOML = C._toml(str(ROOT))
 
@@ -63,8 +78,9 @@ class TestOpencodeContainment(unittest.TestCase):
         (home / "opencode.key").write_text("KEY123\n")
         prompt = home / "PROMPT.md"
         prompt.write_text("do the task\n")
-        return Cell.agent_argv(_opencode_conf(home), "cid1", "/ws/art",
-                                  home / ".agent-opencode", prompt)
+        with mock.patch.dict(clients._CLASSES, {"opencode": _Proven}):
+            return Cell.agent_argv(_opencode_conf(home), "cid1", "/ws/art",
+                                   home / ".agent-opencode", prompt)
 
     def test_config_is_mounted_writable(self):
         argv = self._argv()
@@ -85,24 +101,30 @@ class TestOpencodeContainment(unittest.TestCase):
         self.assertIn("fae-agent-cid1", self._argv())
 
 
+class TestItCannotStart(unittest.TestCase):
+
+    def test_the_client_is_refused_naming_the_missing_proof(self):
+        with self.assertRaisesRegex(clients.Incomplete, "does not provide breach"):
+            clients.of("opencode")
+
+
 class TestStaging(unittest.TestCase):
     def test_stage_refuses_a_dest_that_is_not_a_per_cell_home(self):
         with self.assertRaises(RuntimeError):
-            C.stage_agent(_opencode_conf(Path("/nowhere")), "opencode",
-                          "/tmp/not-a-cell-home", ROOT)
+            OPENCODE.stage_home(_opencode_conf(Path("/nowhere")), "/tmp/not-a-cell-home", ROOT)
 
     def test_a_missing_key_halts_at_staging_not_at_the_agents_start(self):
         d = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
         with self.assertRaisesRegex(RuntimeError, "no API key"):
-            C.stage_agent(_opencode_conf(d), "opencode", str(d / ".agent-opencode"), ROOT)
+            OPENCODE.stage_home(_opencode_conf(d), str(d / ".agent-opencode"), ROOT)
 
     def test_staged_config_pins_temperature_zero_and_no_sharing(self):
         d = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
         dest = d / ".agent-opencode"
         (d / "opencode.key").write_text("KEY123\n")
-        C.stage_agent(_opencode_conf(d), "opencode", str(dest), ROOT)
+        OPENCODE.stage_home(_opencode_conf(d), str(dest), ROOT)
         body = (dest / "opencode.json").read_text()
         self.assertIn('"temperature": 0', body)
         self.assertIn('"share": "disabled"', body)

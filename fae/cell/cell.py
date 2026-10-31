@@ -42,7 +42,7 @@ from pathlib import Path
 
 from . import archive
 from fae.experiment import config as _config
-from . import confinement
+from . import clients
 from . import faults
 from . import host_sleep
 from fae.experiment import variants as _variants
@@ -2125,26 +2125,29 @@ class Cell:
             return False
         return True
 
-    OPENCODE_KEY_ENV = "OPENCODE_API_KEY"
-    AGENT_HOMES = {"agy": (".agent-gemini", "stage_agent_gemini"),
-                   "opencode": (".agent-opencode", "stage_agent_opencode"),
-                   "testagent": (".agent-testagent", "stage_agent_testagent"),
-                   "claude": (".agent-claude", "stage_agent_claude")}
-
     def stage_agent(self):
-        """Give the cell its own agent home, holding its credentials or, for
-        claude, its confinement settings, nothing else. One per cell: a shared home would let each agent read every prior
-        agent's memory and transcripts.
+        """Give the cell its own agent home, staged by its client
+        (AgentClient.stage_home). One per cell: a shared home would let each
+        agent read every prior agent's memory and transcripts.
 
         Returns the staged path, or None when the agent needs no CLI.
         """
         if self.conf.get("AGENT", os.environ.get("AGENT", "")) == "human":
             return None
-        cli = self.conf.get("AGENT_CLI", "claude")
-        rel, _ = self.AGENT_HOMES.get(cli, self.AGENT_HOMES["claude"])
-        dest = self.ws / rel
-        _config.stage_agent(self.conf, cli, dest, self.root)
+        client = self.client()
+        dest = self.ws / client.HOME
+        client.stage_home(self.conf, dest, self.root)
         return dest
+
+    def client(self):
+        """The agent client this cell runs (fae/cell/clients); Incomplete
+        when that client does not provide every guarantee, RuntimeError when
+        the experiment declares no client for the cell's agent."""
+        try:
+            return clients.of(self.conf.get("AGENT_CLI", "claude"))
+        except ValueError as e:
+            raise RuntimeError(f"no agent {self.conf.get('AGENT', '')!r} in the "
+                               f"experiment's agents.toml ({e})") from e
 
     @staticmethod
     def _tail(path, n=40):
@@ -2285,8 +2288,7 @@ class Cell:
                     return self.PAUSED
                 self.hb(Phase.AGENT, attempt)
                 continue
-            account = _config.client_reported_seconds(
-                self.conf.get("AGENT_CLI", "claude"), log)
+            account = self.client().client_seconds(log)
             self._append("AGENT", *agent_time_fields(attempt, runs, account), client)
             (self.ws / "timeout.last").unlink(missing_ok=True)
             return True
@@ -2433,8 +2435,14 @@ class Cell:
                 return subprocess.run(["cp", "-R", f"{stub_overlay}/.",
                                        str(self.artifacts)],
                                       stdout=f, stderr=f).returncode
-        cli = self.conf.get("AGENT_CLI", "claude")
-        home = self.ws / self.AGENT_HOMES.get(cli, self.AGENT_HOMES["claude"])[0]
+        override = agent_cmd or os.environ.get("AGENT_CMD")
+        try:
+            client = self.client()
+        except RuntimeError:
+            if not override:
+                raise
+            client = None       # an override runs whatever the configured client
+        home = self.ws / (client.HOME if client else clients.of("claude").HOME)
         ee = extra_env or {}
         # An AGENT_CMD in the environment (or passed in) is an override — a
         # custom agent, or a rig-test stub. The normal path builds the
@@ -2445,10 +2453,9 @@ class Cell:
         # never be forced empty here.
         base = {"CELL_ID": self.cid, "VARIANT": self.variant,
                 "SERVICE_PORT": self.conf.get("SERVICE_PORT", "8080")}
-        override = agent_cmd or os.environ.get("AGENT_CMD")
         with log.open("w") as f:
             if override:
-                if cli in ("claude", "agy"):
+                if client and client.PROVEN_BY_TRANSCRIPT:
                     self._append("ALERT", f"attempt={attempt}",
                                  "AGENT-CMD override: the agent's confinement is not checked")
                 env = self.conf.child_env(
@@ -2463,22 +2470,16 @@ class Cell:
                 return self._run_bounded(["bash", "-c", script], f, env)
             env = self.conf.child_env(base, extra_env)
             watch = None
-            if cli == "opencode":
-                env[self.OPENCODE_KEY_ENV] = _config.opencode_key_file(
-                    self.conf.get("AGENT_HOME", "")).read_text().strip()
-            if cli in ("claude", "agy"):
-                try:
-                    if cli == "claude":
-                        env[confinement.TOKEN_ENV] = confinement.token(self.conf.get("AGENT_HOME", ""))
-                        confinement.check_home(home)
-                    else:
-                        confinement.check_agy_home(home)
+            try:
+                env.update(client.env(self.conf))
+                client.check_home(home)
+                if client.PROVEN_BY_TRANSCRIPT:
                     if not self.conf.get("STREAM_AGENT", ""):
-                        raise confinement.Breach("stream_agent is off: the init line "
-                                                 "that proves confinement is never written")
-                except confinement.Breach as e:
-                    return self._unconfined(f, str(e))
-                watch = log
+                        raise clients.Breach("stream_agent is off: the transcript "
+                                             "that proves confinement is never written")
+                    watch = log
+            except clients.Breach as e:
+                return self._unconfined(f, str(e))
             prompt = self._prompt(attempt)
             fb = self.ws / "feedback"
             argv = self.agent_argv(
@@ -2501,50 +2502,18 @@ class Cell:
         config — no shell. The per-arm docker flags (network, kubeconfig mount) the
         setup hook emitted are shlex-split in; the prompt is passed as one arg."""
         import shlex
-        cli = conf.get("AGENT_CLI", "claude")
-        model = conf.get("AGENT_MODEL", "")
         image = conf.get("AGENT_IMAGE") or image or "fae-agent:latest"
         prompt = Path(prompt_file).read_text()
         common = ["docker", "run", "--rm", "--name", Cell.agent_container(cid),
                   *_agent_cpu_args(conf),
                   "-v", f"{art}:/workspace", "-w", "/workspace"]
-        add_dirs = ["--add-dir", "/workspace"]
         if feedback:
             common += ["-v", f"{feedback}:/feedback:ro"]
-            add_dirs += ["--add-dir", "/feedback"]
         net = shlex.split(docker_net) + shlex.split(kube_mount)
 
-        if cli == "agy":
-            stream = ["--output-format", "stream-json"] if conf.get("STREAM_AGENT", "") else []
-            return (common + ["-v", f"{home}:/home/node/.gemini"] + net
-                    + [image, "agy", "--sandbox", "--dangerously-skip-permissions",
-                       *confinement.AGY_CLI_LIMITS, *add_dirs, "--model", model, *stream,
-                       "--print-timeout", "60m", "--print", prompt])
-        if cli == "opencode":
-            # the key's value is in the docker client's environment, never its argv
-            return (common + ["-v", f"{home}:/home/node/.config/opencode",
-                              "-e", Cell.OPENCODE_KEY_ENV] + net
-                    + [image, "opencode", "run", "--print-logs", "--log-level",
-                       "ERROR", "--model", model, prompt])
-        if cli == "testagent":
-            return (common + ["-v", f"{home}:/home/node/.testagent",
-                              "-e", "CELL_ID", "-e", "VARIANT", "-e", "TESTAGENT_PLAN", "-e", "SERVICE_PORT"] + net
-                    + [image, "python3", "/home/node/.testagent/testagent.py", prompt])
-        # claude
-        # the token's value is in the docker client's environment, never its argv
-        tok = ["-e", confinement.TOKEN_ENV]
-        effort = conf.get("EFFORT", "")
-        stream = conf.get("STREAM_AGENT", "")
-        tail = ["claude", "-p", "--dangerously-skip-permissions", *confinement.CLI_LIMITS,
-                "--model", model]
-        if feedback:
-            tail += ["--add-dir", "/feedback"]
-        if effort:
-            tail += ["--effort", effort]
-        if stream:
-            tail += ["--output-format", "stream-json", "--verbose"]
-        return (common + ["-v", f"{home}:/home/node/.claude"] + tok + net
-                + [image, *tail, prompt])
+        client = clients.of(conf.get("AGENT_CLI", "claude"))
+        return (common + client.docker_args(home) + net
+                + [image, *client.command(conf, prompt, bool(feedback))])
 
     def _agent_timeout_s(self):
         return int(self.conf.get("AGENT_TIMEOUT_S") or self.AGENT_TIMEOUT_S)
@@ -2552,13 +2521,13 @@ class Cell:
     def _run_bounded(self, argv, f, env, watch=None):
         """Run the agent under the wall-clock limit. Killing the docker client
         leaves its container running, so the container goes too. With `watch`
-        (the transcript), the session's init line is read as soon as it is
-        written (and an agy session's steps as they are), and an agent they
-        show unconfined is killed."""
+        (the transcript), the session's lines are read as they are written,
+        and an agent its client finds unconfined (AgentClient.breach) is
+        killed."""
         limit = self._agent_timeout_s()
         deadline = time.monotonic() + limit
-        cli = self.conf.get("AGENT_CLI", "claude")
-        w = confinement.Watch(watch) if watch else None
+        client = self.client() if watch else None
+        w = clients.Watch(watch) if watch else None
         p = subprocess.Popen(argv, stdout=f, stderr=f, env=env)
         try:
             while True:
@@ -2569,13 +2538,10 @@ class Cell:
                 if w:
                     init = w.poll()
                     if init is not None:
-                        why = confinement.breach(init, cli, w.tools_used)
+                        why = client.breach(init, w.tools_used)
                         if why:
                             self._kill_agent(p)
                             return self._unconfined(f, why)
-                        if cli != "agy":
-                            # an agy session is judged by every step it takes
-                            w = None
                     elif (rc is not None and rc != self.DOCKER_RUN_FAILED
                           and self._produced_output(Path(watch))):
                         return self._unconfined(f, "the agent ran without writing an init line")
@@ -2598,14 +2564,15 @@ class Cell:
         transcript stays in `workdir`."""
         workdir = Path(workdir)
         (workdir / "art").mkdir(parents=True, exist_ok=True)
-        home = workdir / cls.AGENT_HOMES["claude"][0]
-        _config.stage_agent(conf, "claude", home, workdir)
+        client = clients.of("claude")
+        home = workdir / client.HOME
+        client.stage_home(conf, home, workdir)
         prompt = workdir / "PROMPT.md"
         prompt.write_text("Reply with just the word ok.\n")
         argv = cls.agent_argv(conf, cid, str(workdir / "art"), home, prompt)
         cell = cls.__new__(cls)
         cell.cid, cell.conf = cid, conf
-        env = {**os.environ, confinement.TOKEN_ENV: confinement.token(conf.get("AGENT_HOME", ""))}
+        env = {**os.environ, **client.env(conf)}
         log = workdir / "agent.attempt-1.log"
         with log.open("w") as f:
             rc = cell._run_bounded(argv, f, env, watch=log)
@@ -2733,6 +2700,10 @@ class Cell:
             if not stub_overlay:
                 try:
                     self.stage_agent()
+                except clients.Incomplete as e:
+                    self._append("HALT", "attempt=0", "client-incomplete")
+                    self.apply(T.CRASH, "client-incomplete")
+                    raise Halt(f"HALT[agent]: {self.cid}: {e}", 42) from e
                 except RuntimeError as e:
                     self._append("HALT", "attempt=0", "no-creds")
                     self.apply(T.CRASH, "no-creds")
@@ -2785,7 +2756,7 @@ class Cell:
                     raise Halt(f"HALT[agent]: the agent at {self.cid} attempt "
                                f"{attempt} is not confined ({self._breach}) — "
                                f"agent.attempt-{attempt}.log; fix the credential "
-                               f"or limits (fae/cell/confinement.py) before it "
+                               f"or limits (fae/cell/clients/) before it "
                                f"runs again", 42)
                 if outcome == self.AGENT_CONTAINER:
                     self.apply(T.CRASH, "agent-container")

@@ -1,4 +1,4 @@
-"""A claude agent runs confined (fae/cell/confinement.py): a setup-token
+"""A claude agent runs confined (fae/cell/clients/claude.py): a setup-token
 credential, the limits in its home and on its command line, and an init line
 that shows no MCP server and no denied tool — or the cell is interrupted."""
 from __future__ import annotations
@@ -12,13 +12,20 @@ from pathlib import Path
 from unittest import mock
 
 from _ctx import ROOT
-from fae.cell import confinement
+from fae.cell import clients
+from fae.cell.clients import claude
 from fae.cell.cell import Cell
 from fae.experiment import config as C
 
-TOKEN = confinement.TOKEN_PREFIX + "abc"
+CLAUDE = clients.of("claude")
+TOKEN = claude.TOKEN_PREFIX + "abc"
 CONFINED = {"type": "system", "subtype": "init", "mcp_servers": [],
             "skills": ["code-review", "simplify"], "tools": ["Bash", "Edit", "Read"]}
+
+
+def stage_settings(dest):
+    """The confinement settings alone in `dest`, as stage_home writes them."""
+    (Path(dest) / "settings.json").write_text(json.dumps(claude.SETTINGS, indent=2) + "\n")
 
 
 class Case(unittest.TestCase):
@@ -44,19 +51,19 @@ class TestTheCredentialIsASetupToken(Case):
     def test_a_token_is_staged_as_settings_only_and_stays_out_of_the_cells_home(self):
         home = self.home(**{".oauth_token": TOKEN + "\n", ".credentials.json": "{}"})
         dest = self.d / ".agent-claude"
-        C.stage_agent(self.conf(home), "claude", dest, ROOT)
+        CLAUDE.stage_home(self.conf(home), dest, ROOT)
         self.assertEqual([p.name for p in dest.iterdir()], ["settings.json"])
-        confinement.check_home(dest)
+        CLAUDE.check_home(dest)
 
     def test_a_login_alone_is_refused(self):
         home = self.home(**{".credentials.json": "{}"})
         with self.assertRaisesRegex(RuntimeError, "setup-token"):
-            C.stage_agent(self.conf(home), "claude", self.d / ".agent-claude", ROOT)
+            CLAUDE.stage_home(self.conf(home), self.d / ".agent-claude", ROOT)
 
     def test_a_token_that_is_not_a_setup_token_is_refused(self):
         home = self.home(**{".oauth_token": "sk-ant-api03-abc\n"})
         with self.assertRaisesRegex(RuntimeError, "not a `claude setup-token` token"):
-            C.stage_agent(self.conf(home), "claude", self.d / ".agent-claude", ROOT)
+            CLAUDE.stage_home(self.conf(home), self.d / ".agent-claude", ROOT)
 
 
 class TestTheHomeCarriesTheSettings(Case):
@@ -64,7 +71,7 @@ class TestTheHomeCarriesTheSettings(Case):
     def staged(self):
         dest = self.d / ".agent-claude"
         dest.mkdir()
-        confinement.stage(dest)
+        stage_settings(dest)
         return dest
 
     def test_the_settings_deny_the_web_connectors_and_skill_sync(self):
@@ -78,13 +85,13 @@ class TestTheHomeCarriesTheSettings(Case):
         s = json.loads((dest / "settings.json").read_text())
         s["syncClaudeAiSkills"] = True
         (dest / "settings.json").write_text(json.dumps(s))
-        with self.assertRaises(confinement.Breach):
-            confinement.check_home(dest)
-        confinement.stage(dest)
-        confinement.check_home(dest)
+        with self.assertRaises(clients.Breach):
+            CLAUDE.check_home(dest)
+        stage_settings(dest)
+        CLAUDE.check_home(dest)
         (dest / ".credentials.json").write_text("{}")
-        with self.assertRaises(confinement.Breach):
-            confinement.check_home(dest)
+        with self.assertRaises(clients.Breach):
+            CLAUDE.check_home(dest)
 
 
 class TestTheCommandLine(Case):
@@ -94,7 +101,7 @@ class TestTheCommandLine(Case):
         prompt = self.d / "PROMPT.md"
         prompt.write_text("task\n")
         argv = Cell.agent_argv(self.conf(home), "cid1", "/ws/art", self.d / "home", prompt)
-        self.assertEqual(argv[argv.index("-e") + 1], confinement.TOKEN_ENV)
+        self.assertEqual(argv[argv.index("-e") + 1], claude.TOKEN_ENV)
         self.assertFalse(any(TOKEN in a for a in argv), argv)
 
     def test_it_drops_mcp_and_the_web_keeps_skills_and_a_flag_closes_the_tool_list(self):
@@ -112,7 +119,7 @@ class TestTheCommandLine(Case):
 class TestTheInitLineIsTheProof(Case):
 
     def test_a_confined_session_with_built_in_skills_shows_nothing_denied(self):
-        self.assertEqual(confinement.breach(CONFINED, "claude"), "")
+        self.assertEqual(CLAUDE.breach(CONFINED, []), "")
 
     def test_each_denied_thing_is_named(self):
         for key, value, word in (("mcp_servers", [{"name": "claude.ai Gmail"}], "claude.ai Gmail"),
@@ -120,16 +127,16 @@ class TestTheInitLineIsTheProof(Case):
                                  ("tools", ["WebSearch"], "WebSearch"),
                                  ("tools", ["mcp__x__y"], "mcp__x__y")):
             with self.subTest(key=key, value=value):
-                self.assertIn(word, confinement.breach({**CONFINED, key: value}, "claude"))
+                self.assertIn(word, CLAUDE.breach({**CONFINED, key: value}, []))
 
     def test_an_init_line_that_cannot_prove_confinement_is_a_breach(self):
         for init in ({}, {"tools": []}, {"mcp_servers": []}):
             with self.subTest(init=init):
-                self.assertIn("init line without", confinement.breach(init, "claude"))
+                self.assertIn("init line without", CLAUDE.breach(init, []))
 
     def test_the_watch_reads_only_complete_lines_as_the_transcript_grows(self):
         log = self.d / "agent.attempt-1.log"
-        w = confinement.Watch(log)
+        w = clients.Watch(log)
         self.assertIsNone(w.poll())
         line = json.dumps(CONFINED)
         log.write_text("noise\n" + line[:20])
@@ -141,7 +148,7 @@ class TestTheInitLineIsTheProof(Case):
     def test_a_malformed_init_line_reads_as_empty_and_so_as_a_breach(self):
         log = self.d / "agent.attempt-1.log"
         log.write_text('{"type":"system","subtype":"init", broken\n')
-        self.assertIn("init line without", confinement.breach(confinement.Watch(log).poll(), "claude"))
+        self.assertIn("init line without", CLAUDE.breach(clients.Watch(log).poll(), []))
 
 
 class TestABreachInterruptsTheAgent(Case):
@@ -204,7 +211,7 @@ class TestABreachInterruptsTheAgent(Case):
         def interrupt(*a, **k):
             raise KeyboardInterrupt
         with log.open("w") as f, mock.patch.object(subprocess, "Popen", popen), \
-                mock.patch.object(confinement.Watch, "poll", interrupt):
+                mock.patch.object(clients.Watch, "poll", interrupt):
             with self.assertRaises(KeyboardInterrupt):
                 cell._run_bounded(["sleep", "30"], f, None, watch=log)
         self.assertIsNotNone(procs[0].poll())

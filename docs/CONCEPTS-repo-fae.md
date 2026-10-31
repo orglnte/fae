@@ -23,7 +23,7 @@ would not expect, and names that collide, are in
 | Experiment | One root's definition and workspace, and the actions on them as a whole | root | `Experiment`, `Definition` (`fae/experiment/`) | what is compared; run-wide actions |
 | Variant | One complete set of what the agent is given and how its work is judged | treatment, arm, condition | `Variant`, `variants/files.py` | comparability; one source per input |
 | Task | The skeleton every variant starts from, and its prompt | — | `Definition`, `prepare.py` | the problem held constant |
-| Agent | A CLI with one credential, shared by the models it runs | client, CLI | `agents.toml`, `load_agents`, `credentials.py`, `confinement.py`, `AgentImage` | who authors, and with what access |
+| Agent | A CLI with one credential, shared by the models it runs | client, CLI | `agents.toml`, `load_agents`, `credentials.py`, `clients/` (AgentClient), `AgentImage` | who authors, and with what access |
 | Model | A tag naming an agent, a model id and an effort | lane (its queue) | `agents.toml` `[models.<tag>]`, `Definition.models` | what is compared |
 | Gate | The arrangements one attempt must all pass | shape gate | `Gate`, `cell/contrib/` (external) | what green means, structurally |
 | Fingerprint | The hash of everything a verdict depends on | verify surface | `Cell.fingerprint`, `Cell.expected_fp` | provenance |

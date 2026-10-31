@@ -204,8 +204,13 @@ without a model. The experiment's `agents.toml` declares the agents and the
 models each runs; a model's tag is part of every cell id, so lanes write to
 disjoint workspaces. One credential per agent, in its credentials home
 (machine-local, `fae.toml`), shared by its models and checked before every
-attempt; a claude agent runs confined (no MCP, no web) on a setup-token
-token, checked on its init line (`fae/cell/confinement.py`). The vocabulary of provider faults (rate and quota walls with
+attempt. Each CLI is an agent client (`fae/cell/clients/`), a subclass of
+one abstract class that names what a cell needs of it: the credential, a
+home staged per attempt from an allowlist, confinement (no web, no browser,
+no MCP) proven by the agent's own transcript as it runs, the container
+command, and what its transcript records. A client that leaves any of it
+out cannot start; opencode, whose output proves nothing of its tools, is
+one. The vocabulary of provider faults (rate and quota walls with
 their reset hints, authentication walls, transient errors) decides whether a
 failed run is retried, refunded, or stood down with its lane cooled.
 
