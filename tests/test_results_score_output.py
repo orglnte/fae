@@ -44,7 +44,7 @@ class TestTheScoreOutput(unittest.TestCase):
         self.assertEqual(lines[0], "Validating, scoring, aggregating cells... "
                                    "(--unpack for details, --help for filters)")
         # green or not is the scoreboard's to say; this line is the validation's
-        self.assertEqual(lines[1], f"  [{'█' * 24}] 2/2 done: 2 VALID, 0 TAINTED")
+        self.assertEqual(lines[1], f"  [{'█' * 24}] 2/2 done: 2 valid, 0 tainted")
         self.assertEqual(lines[2], "  warnings: none")
         self.assertEqual(len(lines), 3)
         agg.assert_called_once()
@@ -57,13 +57,13 @@ class TestTheScoreOutput(unittest.TestCase):
                  "warns": ["footprint unreliable (scope=cell, 5 sample(s) disagreed: y)"]}
         lines, _ = self.run_score([("a", "green", warned), ("b", "green", other),
                                    ("c", "green", VALID)])
-        self.assertTrue(lines[1].endswith("3 VALID, 0 TAINTED, 2 with warnings"), lines[1])
+        self.assertTrue(lines[1].endswith("3 valid, 0 tainted, 2 with warnings"), lines[1])
         self.assertEqual(lines[2], "  ⚠ warnings — 2 cells: footprint unreliable · "
                                    "1 cell: verify run(s) not charged  (--unpack lists them)")
 
     def test_tainted_is_red_and_warnings_yellow_only_when_any(self):
         rows = [("a", "green", "TAINTED", "x")]
-        self.assertIn("\033[31m1 TAINTED\033[0m",
+        self.assertIn("\033[31m1 tainted\033[0m",
                       _render._validation_tally(rows, [("a", ["x"])], colour=True))
         self.assertNotIn("\033[", _render._validation_tally([("a", "green", "VALID", "-")], [],
                                                            colour=True))

@@ -471,9 +471,9 @@ def _validation_tally(rows, tainted, colour=False, outcomes=True):
     and TAINTED (red when any), and how many carry a warning (yellow)."""
     n_warn = sum(1 for r in rows if r[3] != "-" and r[2] == "VALID")
     by = collections.Counter(r[1] for r in rows)
-    taint = _paint(f"{len(tainted)} TAINTED", "red", colour and bool(tainted))
+    taint = _paint(f"{len(tainted)} tainted", "red", colour and bool(tainted))
     parts = [f"{n} {k}" for k, n in sorted(by.items())] if outcomes else []
-    parts += [f"{len(rows) - len(tainted)} VALID", taint]
+    parts += [f"{len(rows) - len(tainted)} valid", taint]
     if n_warn:
         parts.append(_paint(f"{n_warn} with warnings", "yellow", colour))
     return ", ".join(parts)
