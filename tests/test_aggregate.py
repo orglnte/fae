@@ -211,17 +211,18 @@ class TestTableColumns(unittest.TestCase):
     def test_row_order_matches_the_header(self):
         src = (Path(ROOT) / "fae" / "experiment" / "scoring" / "aggregate.py").read_text()
         row = next(l for l in src.splitlines()
-                   if "[str(n), e2e, grn, itg, agent_min, per_att, *format_usage(m), lines]" in l)
-        hdrs = [h for h, _ in aggregate.table_columns(None)]
-        self.assertLess(row.index("itg"), row.index("agent_min"))
-        self.assertLess(row.index("agent_min"), row.index("per_att"))
-        self.assertLess(row.index("per_att"), row.index("format_usage"))
-        self.assertLess(row.index("format_usage"), row.index("lines"))
+                   if "[str(n), e2e, grn, itg, out, turns, calls, agent_min, per_att, split, speed, lines]" in l)
+        names = ["itg", "out", "turns", "calls", "agent_min", "per_att", "split", "speed", "lines"]
+        self.assertEqual(sorted(names, key=row.index), names)
         cols = aggregate.table_columns(None)
         self.assertEqual(cols[[h for h, _ in cols].index("ATTEMPTS") + 1:[h for h, _ in cols].index("SLoC")],
-                         [("MINUTES", "to green"), ("MINUTES", "per try"), ("API/TOOL", "minutes"),
-                          ("TURNS", "agent"), ("TOOL", "calls"), ("OUTPUT", "ktokens"),
+                         [("OUTPUT", "ktokens"), ("TURNS", "agent"), ("TOOL", "calls"),
+                          ("MINUTES", "to green"), ("MINUTES", "per try"), ("API/TOOL", "minutes"),
                           ("API", "ms/token")])
+
+    def test_format_usage_unpacks_in_its_own_order(self):
+        src = (Path(ROOT) / "fae" / "experiment" / "scoring" / "aggregate.py").read_text()
+        self.assertIn("split, turns, calls, out, speed = format_usage(m)", src)
 
     def test_a_row_is_a_model_and_a_variant(self):
         self.assertEqual([h for h, _ in aggregate.table_columns(None)][:2], ["AGENT", "VARIANT"])
@@ -820,3 +821,25 @@ class TestTheScoreboardRunsEndToEnd(unittest.TestCase):
         self.assertTrue(all(len(l) <= table_width for l in outs[2].splitlines()
                             if l.startswith((" * ", "   "))))
         self.assertNotIn("Add --legend", outs[2])
+
+
+class TestSharedSuffix(unittest.TestCase):
+    """A token every row's variant ends in says nothing about the row: the
+    table prints it once, under the VARIANT header."""
+
+    def test_the_common_trailing_token_is_found(self):
+        self.assertEqual(aggregate.shared_suffix(
+            ["redis_open_docs", "redis_closed_docs", "memo_open_docs"]), "_docs")
+
+    def test_several_trailing_tokens_can_be_shared(self):
+        self.assertEqual(aggregate.shared_suffix(["a_x_y", "b_x_y"]), "_x_y")
+
+    def test_each_name_keeps_one_token(self):
+        self.assertEqual(aggregate.shared_suffix(["x_y", "a_x_y"]), "_y")
+
+    def test_nothing_shared_is_nothing_dropped(self):
+        self.assertEqual(aggregate.shared_suffix(["a_src", "b_docs"]), "")
+
+    def test_one_variant_keeps_its_name(self):
+        self.assertEqual(aggregate.shared_suffix(["redis_open_docs"] * 3), "")
+        self.assertEqual(aggregate.shared_suffix([]), "")

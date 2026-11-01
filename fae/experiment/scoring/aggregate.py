@@ -533,14 +533,28 @@ def format_usage(m: dict) -> list[str]:
             "-" if speed is None else f"{speed:.1f}"]
 
 
+def shared_suffix(names: list[str]) -> str:
+    """The trailing `_`-separated tokens every name ends in, with their
+    leading `_`, leaving each name at least one token of its own; '' when
+    there are fewer than two names or none is shared."""
+    split = [n.split("_") for n in names]
+    if len(set(names)) < 2:
+        return ""
+    k = 0
+    while (k + 1 < min(map(len, split))
+           and len({tuple(t[len(t) - k - 1:]) for t in split}) == 1):
+        k += 1
+    return "_" + "_".join(split[0][len(split[0]) - k:]) if k else ""
+
+
 def table_columns(vs: str | None) -> list[tuple[str, str]]:
     """(name, what it counts) per column, in print order: the header's two
     lines, so a column reads in words and is as narrow as its values."""
     return ([("AGENT", "model"), ("VARIANT", "")]
             + [("REPS", "cells"), ("E2E", "pass"), ("GREEN", "rate"),
-               ("ATTEMPTS", "to green"), ("MINUTES", "to green"), ("MINUTES", "per try"),
-               ("API/TOOL", "minutes"), ("TURNS", "agent"), ("TOOL", "calls"),
-               ("OUTPUT", "ktokens"), ("API", "ms/token"), ("SLoC", "mean -/+")]
+               ("ATTEMPTS", "to green"), ("OUTPUT", "ktokens"), ("TURNS", "agent"),
+               ("TOOL", "calls"), ("MINUTES", "to green"), ("MINUTES", "per try"),
+               ("API/TOOL", "minutes"), ("API", "ms/token"), ("SLoC", "mean -/+")]
             + ([("N: GRN%  Δpt", ""), ("ITG  Δ", ""), ("SIG(p)  GRADE", "")]
                if vs else []))
 
@@ -570,12 +584,12 @@ def legend(summary: dict, out_csv, out_json, compared: bool) -> list[str]:
     out = [
         "a/b/c = min/mean/max over the row's cells; '-' = no data. ATTEMPTS, MINUTES to green, SLoC: "
         "GREEN cells only (denominator GREEN, not REPS).",
+        "OUTPUT ktokens, TURNS, TOOL calls = output tokens, agent turns, tool calls (thinking "
+        "included) up to green, from the transcript.",
         "MINUTES to green = agent minutes over the charged attempts up to green; per try = mean "
         "minutes per charged attempt, every cell.",
         "API/TOOL minutes = MINUTES to green split into the client's API requests / the rest "
         "(the agent's commands, the CLI's own work).",
-        "TURNS, TOOL calls, OUTPUT ktokens = agent turns, tool calls, output tokens (thinking "
-        "included) up to green, from the transcript.",
         "API ms/token = API milliseconds per output token, the provider's speed: one model's "
         "rows should read alike.",
     ]
@@ -810,6 +824,9 @@ def main() -> int:
         print(f"NOTE: {flag} has no effect without --impl "
               "(there is no baseline to diverge from)")
     rows_to_print = order_rows(by_mv, compare, sort_discrepancy, sort_significant)
+    suffix = shared_suffix([key.split(" / ", 1)[1] for key, _ in rows_to_print])
+    if suffix:
+        cols[1] = (cols[1][0], f"*{suffix}")
     table = []
     for key, m in rows_to_print:
         n = m.get("n_cells", 0)
@@ -832,9 +849,11 @@ def main() -> int:
         lines = format_loc(m.get('mean_sloc'), m.get('min_sloc'), m.get('max_sloc'))
         agent_min, per_att = format_agent_time(m)
         
+        split, turns, calls, out, speed = format_usage(m)
         mod, var = key.split(" / ", 1)
+        var = var[:len(var) - len(suffix)]
         vals = [short_model(mod), var] \
-            + [str(n), e2e, grn, itg, agent_min, per_att, *format_usage(m), lines] \
+            + [str(n), e2e, grn, itg, out, turns, calls, agent_min, per_att, split, speed, lines] \
             + (list(format_compare(compare.get(key))) if compare is not None else [])
         table.append(vals)
 
