@@ -51,7 +51,7 @@ class TestScoreScoresWhatValidateFound(unittest.TestCase):
 
     def _score(self, validated, rcs):
         exp = runs.experiment.exp()
-        ws = SimpleNamespace(cell=lambda cid: SimpleNamespace(cid=cid))
+        ws = SimpleNamespace(cell=lambda cid: SimpleNamespace(cid=cid, sealed=False))
         calls = []
         from fae.experiment.scoring import score_cell
         with mock.patch.object(exp, "validate", return_value=validated), \
@@ -75,6 +75,92 @@ class TestScoreScoresWhatValidateFound(unittest.TestCase):
         self.assertEqual(n_ok, 1)
         self.assertEqual([cid for cid, _ in failed], ["a"])
         self.assertIn(("failed", "a"), calls)
+
+
+class _Cell:
+    """A sealed cell's derived files, in memory."""
+    def __init__(self, cid, sealed=True, files=None, mtimes=None):
+        self.cid, self.sealed, self.files = cid, sealed, dict(files or {})
+        self._mtimes = mtimes or {"env": 1, "ledger": 2, "metrics": 3}
+
+    @property
+    def sealed_at(self):
+        return "2026-11-01T00:00:00Z" if self.sealed else None
+
+    def mtimes(self):
+        return dict(self._mtimes)
+
+    def read_derived(self, name):
+        return self.files.get(name)
+
+    def write_derived(self, name, text):
+        self.files[name] = text
+
+
+class TestAnUnchangedCellIsNotRecomputed(unittest.TestCase):
+
+    def _done(self, rules="r1", **kw):
+        import json
+        c = _Cell("a", **kw)
+        c.files.update({"validation.json": json.dumps({"verdict": "VALID"}), "score.json": "{}"})
+        c.files["derived-key.json"] = json.dumps(
+            runs.experiment.exp()._derived_key(c, rules))
+        return c
+
+    def test_same_rules_same_inputs_sealed_is_unchanged(self):
+        self.assertTrue(runs.experiment.exp().unchanged(self._done(), "r1"))
+
+    def test_new_rules_recompute(self):
+        self.assertFalse(runs.experiment.exp().unchanged(self._done(), "r2"))
+
+    def test_a_changed_input_recomputes(self):
+        c = self._done()
+        c._mtimes["ledger"] = 99
+        self.assertFalse(runs.experiment.exp().unchanged(c, "r1"))
+
+    def test_an_unsealed_cell_or_a_missing_record_recomputes(self):
+        exp = runs.experiment.exp()
+        self.assertFalse(exp.unchanged(_Cell("a", sealed=False), "r1"))
+        c = self._done()
+        del c.files["score.json"]
+        self.assertFalse(exp.unchanged(c, "r1"))
+        c = self._done()
+        del c.files["derived-key.json"]
+        self.assertFalse(exp.unchanged(c, "r1"))
+
+    def test_score_skips_the_unchanged_and_keys_what_it_scored(self):
+        exp = runs.experiment.exp()
+        kept, fresh = self._done(), _Cell("b")
+        cells = {"a": kept, "b": fresh}
+        ws = SimpleNamespace(cell=cells.__getitem__)
+
+        def validate(selector, ws_, on_cell=None, reuse=None):
+            out = []
+            for cid, c in cells.items():
+                out.append((cid, "green", reuse(c) or {"verdict": "VALID", "fresh": True}))
+            return out
+        from fae.experiment.scoring import score_cell
+        scored = []
+        with mock.patch.object(exp, "rules_hash", return_value="r1"), \
+             mock.patch.object(exp, "validate", side_effect=validate), \
+             mock.patch.object(score_cell, "score_one",
+                               side_effect=lambda cid, cell: scored.append(cid) or 0):
+            n_ok, failed = exp.score(workspace=ws)
+        self.assertEqual((n_ok, failed, scored), (2, [], ["b"]))
+        import json
+        self.assertEqual(json.loads(fresh.files["derived-key.json"])["rules"], "r1")
+
+    def test_the_rules_hash_follows_the_experiments_code(self):
+        import tempfile
+        from fae.experiment import config as _config
+        exp = runs.experiment.exp()
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "taint.py").write_text("RULES = 1\n")
+            with mock.patch.object(_config, "experiment_dir", return_value=d):
+                h1 = exp.rules_hash()
+                self.assertEqual(h1, exp.rules_hash())
+                (Path(d) / "taint.py").write_text("RULES = 2\n")
+                self.assertNotEqual(h1, exp.rules_hash())
 
 
 class TestFinished(unittest.TestCase):

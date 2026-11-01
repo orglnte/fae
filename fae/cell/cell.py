@@ -517,7 +517,7 @@ class Cell:
 
     # Files computed from the recorded result: rewritten as their rules
     # improve, sealed or not.
-    DERIVED = ("validation.json", "score.json", "score-cache.json")
+    DERIVED = ("validation.json", "score.json", "score-cache.json", "derived-key.json")
 
     @contextlib.contextmanager
     def changing(self):

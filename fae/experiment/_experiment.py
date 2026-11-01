@@ -651,11 +651,12 @@ class Experiment:
                          looping=lambda: False, queued=lambda: False)
         return st["why"] if st["state"] == "DONE" and st["why"] != "cancelled" else None
 
-    def validate(self, selector="all", workspace=None, on_cell=None):
+    def validate(self, selector="all", workspace=None, on_cell=None, reuse=None):
         """Validate the finished cells of `workspace` (this experiment's by
         default) that `selector` matches: [(cid, outcome, doc)], doc None for
         a cell another process holds. `on_cell(i, n, cid)` runs before each
-        of the n finished cells is validated."""
+        of the n finished cells is validated; `reuse(cell)` may return the
+        cell's doc instead, and then it is not validated again."""
         from fae.cell.cell import Busy
         from fae.experiment.scoring import validate as _validate
         ws = workspace or self.workspace
@@ -669,12 +670,51 @@ class Experiment:
         for i, (cid, c, why) in enumerate(finished):
             if on_cell:
                 on_cell(i, len(finished), cid)
-            try:
-                doc = _validate.validate_cell(c, ws)
-            except Busy:
-                doc = None
+            doc = reuse(c) if reuse else None
+            if doc is None:
+                try:
+                    doc = _validate.validate_cell(c, ws)
+                except Busy:
+                    doc = None
             out.append((cid, why, doc))
         return out
+
+    def rules_hash(self):
+        """sha256 over every .py the derived files are computed by: the
+        engine's fae/cell and fae/experiment (ledger, transcript, validate,
+        score) and the experiment's own (taint rules, report text). Any edit
+        to one is a new hash, so no cell keeps a verdict of older rules."""
+        import hashlib
+        from fae import paths
+        from fae.experiment import config as _config
+        roots = [paths.ENGINE / "cell", paths.ENGINE / "experiment",
+                 Path(_config.experiment_dir(self.root))]
+        h = hashlib.sha256()
+        for root in roots:
+            for f in sorted(root.rglob("*.py")):
+                if "__pycache__" in f.parts:
+                    continue
+                h.update(f"{f.relative_to(root.parent)}\0".encode())
+                h.update(hashlib.sha256(f.read_bytes()).digest())
+        return h.hexdigest()
+
+    @staticmethod
+    def _derived_key(cell, rules):
+        return {"rules": rules, "sealed": cell.sealed_at, "inputs": cell.mtimes()}
+
+    def unchanged(self, cell, rules):
+        """True when `cell` is sealed and its validation.json and score.json
+        were written by these rules from these inputs: recomputing them would
+        give the same files."""
+        import json
+        if not cell.sealed or cell.read_derived("score.json") is None \
+                or cell.read_derived("validation.json") is None:
+            return False
+        try:
+            stored = json.loads(cell.read_derived("derived-key.json") or "null")
+        except ValueError:
+            return False
+        return stored == self._derived_key(cell, rules)
 
     def score(self, selector=None, workspace=None, on_validated=None, on_cell=None,
               on_failed=None, on_validating=None):
@@ -685,9 +725,20 @@ class Experiment:
         gets validate()'s results before any cell is scored, `on_cell(i, n,
         cid)` runs before each cell is scored, `on_failed(cid, line)` after
         each failure. Returns (scored, [(cid, one-line error)])."""
+        import json
+        from fae.cell.cell import Busy
         from fae.experiment.scoring import score_cell as _sc
         ws = workspace or self.workspace
-        validated = self.validate(selector or "all", ws, on_cell=on_validating)
+        rules = self.rules_hash()
+        kept = set()
+
+        def keep_or_validate(c):
+            if self.unchanged(c, rules):
+                kept.add(c.cid)
+                return json.loads(c.read_derived("validation.json"))
+            return None
+
+        validated = self.validate(selector or "all", ws, on_cell=on_validating, reuse=keep_or_validate)
         if on_validated:
             on_validated(validated)
         todo = [cid for cid, _why, _doc in validated]
@@ -695,16 +746,26 @@ class Experiment:
         for i, cid in enumerate(todo):
             if on_cell:
                 on_cell(i, len(todo), cid)
+            if cid in kept:
+                n_ok += 1
+                continue
             err = io.StringIO()
+            cell = ws.cell(cid)
             # one cell's scoring failure is that cell's, never the sweep's
             try:
                 with contextlib.redirect_stderr(err):
-                    rc = _sc.score_one(cid, cell=ws.cell(cid))
+                    rc = _sc.score_one(cid, cell=cell)
             except Exception as e:
                 rc = 1
                 err.write(f"{type(e).__name__}: {e}")
             if rc == 0:
                 n_ok += 1
+                if cell.sealed:
+                    try:
+                        cell.write_derived("derived-key.json",
+                                           json.dumps(self._derived_key(cell, rules)) + "\n")
+                    except (Busy, OSError):
+                        pass                # the key only saves work; the next run recomputes
                 continue
             tail = err.getvalue().strip().splitlines()
             failed.append((cid, tail[-1][:100] if tail else "(no output)"))

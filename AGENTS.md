@@ -723,7 +723,11 @@ so its proof is its steps: a call to a tool outside the list is a breach.
   `cli.py cell reverify`, which writes under `<ws>/reverify/<ts>/` and never
   appends to the ledger. Derived files (`validation.json`, `score*.json`) are
   not sealed: they are functions of the result and stay re-runnable when the
-  rules improve. **There is no unseal** — redoing a cell is a fresh requeue,
+  rules improve. `results score` recomputes them only when they could
+  change: a sealed cell whose `derived-key.json` names the current rules
+  (a hash of every `.py` under `fae/cell/`, `fae/experiment/` and the
+  experiment) and its inputs' mtimes keeps its files; any edit to that code
+  recomputes every cell. **There is no unseal** — redoing a cell is a fresh requeue,
   two-stage and auditable, and a `Retire` in the log (§7). `cli.py cell
   seal` is dry by default; `--apply` writes.
 - **The attempt budget is 10, everywhere, always.** `ATTEMPT_BUDGET` is a
