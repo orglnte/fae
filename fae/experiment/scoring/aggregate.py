@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+import shutil
 import sys
 import textwrap
 from collections import defaultdict
@@ -540,15 +541,20 @@ def table_columns(vs: str | None) -> list[tuple[str, str]]:
                if vs else []))
 
 
-def render_table(cols: list[tuple[str, str]], rows: list[list[str]]) -> list[str]:
+def render_table(cols: list[tuple[str, str]], rows: list[list[str]],
+                 max_width: int = 0) -> list[str]:
     """The table's lines: a rule, the header's name and unit lines, a rule,
     the rows, a rule. Each column is as wide as its widest cell, two spaces
-    apart, so the table is as narrow as its content."""
+    apart, so the table is as narrow as its content; one space apart when
+    two would pass `max_width` (0: no limit), so a terminal does not wrap it."""
     widths = [max([len(n), len(u)] + [len(r[i]) for r in rows]) for i, (n, u) in enumerate(cols)]
+    gap = 2
+    if max_width and sum(widths) + gap * (len(widths) - 1) > max_width:
+        gap = 1
 
     def line(cells):
-        return "  ".join(f"{c:<{w}}" for c, w in zip(cells, widths)).rstrip()
-    width = sum(widths) + 2 * (len(widths) - 1)
+        return (" " * gap).join(f"{c:<{w}}" for c, w in zip(cells, widths)).rstrip()
+    width = sum(widths) + gap * (len(widths) - 1)
     header = [line([n for n, _ in cols])]
     if any(u for _, u in cols):
         header.append(line([u for _, u in cols]))
@@ -828,7 +834,7 @@ def main() -> int:
             + (list(format_compare(compare.get(key))) if compare is not None else [])
         table.append(vals)
 
-    drawn = render_table(cols, table)
+    drawn = render_table(cols, table, shutil.get_terminal_size((0, 0)).columns)
     print()
     print("\n".join(drawn))
     if "--legend" not in sys.argv:

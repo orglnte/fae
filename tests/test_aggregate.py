@@ -242,6 +242,15 @@ class TestTableColumns(unittest.TestCase):
         self.assertEqual(lines[5], "opus-5.5   1015 -907/+1150")
         self.assertEqual(len(lines[0]), len("haiku-5.5  1015 -907/+1150"))
 
+    def test_a_table_wider_than_the_terminal_closes_to_one_space(self):
+        cols = [("AGENT", "model"), ("SLoC", "mean -/+")]
+        rows = [["haiku-5.5", " 565 -62/+84"]]
+        self.assertEqual(aggregate.render_table(cols, rows, max_width=23)[4],
+                         "haiku-5.5   565 -62/+84")
+        lines = aggregate.render_table(cols, rows, max_width=22)
+        self.assertEqual(lines[4], "haiku-5.5  565 -62/+84")
+        self.assertEqual(len(lines[0]), 22)
+
     def test_a_header_without_a_second_line_takes_one(self):
         lines = aggregate.render_table([("A", ""), ("B", "")], [["1", "2"]])
         self.assertEqual(lines, ["====", "A  B", "----", "1  2", "===="])
