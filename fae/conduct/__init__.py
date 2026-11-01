@@ -589,14 +589,19 @@ class Conduct:
                 # Starvation guard: lanes with no live cell admit first, so the lane
                 # left out by the cap rotates instead of sticking to one agent.
                 lane_live = {m: sum(1 for c in live if c.startswith(m + "_")) for m in order}
-                order.sort(key=lambda m: lane_live[m])
+                if order:
+                    k = rr % len(order)
+                    order = order[k:] + order[:k]   # lanes with equal live counts take turns
+                order.sort(key=lambda m: lane_live[m])   # stable: the rotation holds within a count
+                rr += 1
+                i = 0
                 idle_sweep = 0
                 while order and idle_sweep < len(order):
                     live = _host.loop_parents()
                     if len(live) >= n:
                         break
-                    m = order[rr % len(order)]
-                    rr += 1
+                    m = order[i % len(order)]
+                    i += 1
                     if len(qs.running_specs(m)) >= per_agent_override.get(m, args.per_agent):
                         idle_sweep += 1
                         continue

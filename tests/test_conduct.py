@@ -120,6 +120,28 @@ class TestStarvationGuard(ConductCase):
         self.assertTrue(self.spawned and self.spawned[0].startswith("zzz_"),
                         f"starved lane must admit first: {self.spawned}")
 
+    def test_a_lane_starved_in_a_later_round_admits_first(self):
+        """Three admissions in the first round leave aaa with two cells and
+        zzz with one; zzz's finishes. The next free slot is zzz's, whatever
+        lane the rotation reached."""
+        self.q("aaa", [self.spec(rep=r) for r in range(1, 6)])
+        self.q("zzz", [self.spec(rep=r) for r in range(1, 6)])
+        tick = self._tick
+
+        def finish_zzz(s):
+            if s == self.CADENCE and self.rounds == 0:
+                for cid in [c for c in self.live if c.startswith("zzz_")]:
+                    del self.live[cid]
+                for p in runs.queues.running_specs("zzz"):
+                    runs.queues.finish("zzz", p)
+            tick(s)
+
+        with mock.patch.object(runs.time, "sleep", finish_zzz):
+            self.run_conduct(n=3)
+        lanes = [c.split("_")[0] for c in self.spawned]
+        self.assertEqual(lanes[:4], ["aaa", "zzz", "aaa", "zzz"], lanes)
+        self.assertNotEqual(self.spawned[3], self.spawned[1], "a new zzz cell, not a respawn")
+
 
 class TestPerModelCap(ConductCase):
     def test_the_run_records_the_caps_it_admits_under(self):
