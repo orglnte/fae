@@ -218,6 +218,18 @@ class Queues:
         for i, p in enumerate(self.specs_in(d)):
             p.rename(d / f"{SEQ_START + i:06d}.{self.spec_cid(p)}.json")
 
+    def reorder(self, agent, key):
+        """Put one lane's pending specs in the order `key(cid)` sorts them;
+        specs with equal keys keep their order. Renamed in two passes under
+        the queues-lock, so admission never sees half a lane."""
+        with self._changing():
+            d = self.lane_dir(agent)
+            ordered = sorted(self.specs_in(d), key=lambda p: key(self.spec_cid(p)))
+            for i, p in enumerate(ordered):
+                p.rename(d / f"tmp-{i:06d}.{self.spec_cid(p)}.json")
+            for i, p in enumerate(self.specs_in(d)):
+                p.rename(d / f"{SEQ_START + i:06d}.{self.spec_cid(p)}.json")
+
     def _next_seq(self, d, front):
         seqs = self._seqs(d)
         if not seqs:
