@@ -43,8 +43,8 @@ class TestTheScoreOutput(unittest.TestCase):
         lines, agg = self.run_score([("a", "green", VALID), ("b", "failed", VALID)])
         self.assertEqual(lines[0], "Validating, scoring, aggregating cells... "
                                    "(--unpack for details, --help for filters)")
-        self.assertEqual(lines[1], f"  [{'█' * 24}] 2/2 done: 1 failed, 1 green, "
-                                   "2 VALID, 0 TAINTED")
+        # green or not is the scoreboard's to say; this line is the validation's
+        self.assertEqual(lines[1], f"  [{'█' * 24}] 2/2 done: 2 VALID, 0 TAINTED")
         self.assertEqual(lines[2], "  warnings: none")
         self.assertEqual(len(lines), 3)
         agg.assert_called_once()

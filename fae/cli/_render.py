@@ -466,15 +466,17 @@ def _colour_on():
     return sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 
 
-def _validation_tally(rows, tainted, colour=False):
-    """One line: the cells by outcome, VALID and TAINTED (red when any),
-    and how many carry a warning (yellow)."""
+def _validation_tally(rows, tainted, colour=False, outcomes=True):
+    """One line: the cells by outcome (unless `outcomes` is False), VALID
+    and TAINTED (red when any), and how many carry a warning (yellow)."""
     n_warn = sum(1 for r in rows if r[3] != "-" and r[2] == "VALID")
     by = collections.Counter(r[1] for r in rows)
     taint = _paint(f"{len(tainted)} TAINTED", "red", colour and bool(tainted))
-    return (", ".join(f"{n} {k}" for k, n in sorted(by.items()))
-            + f", {len(rows) - len(tainted)} VALID, {taint}"
-            + (", " + _paint(f"{n_warn} with warnings", "yellow", colour) if n_warn else ""))
+    parts = [f"{n} {k}" for k, n in sorted(by.items())] if outcomes else []
+    parts += [f"{len(rows) - len(tainted)} VALID", taint]
+    if n_warn:
+        parts.append(_paint(f"{n_warn} with warnings", "yellow", colour))
+    return ", ".join(parts)
 
 
 def _warning_kind(text):
@@ -563,7 +565,7 @@ def results_score(args):
     rows, tainted = _validation_rows(seen["results"])
     n = len(rows)
     colour = _colour_on()
-    end = (f"{n}/{n} done: {_validation_tally(rows, tainted, colour=colour)}"
+    end = (f"{n}/{n} done: {_validation_tally(rows, tainted, colour=colour, outcomes=False)}"
            if rows else "no DONE cells match")
     end += f"; {len(errors)} FAILED to score" if errors else ""
     if bar_on:
