@@ -22,7 +22,7 @@ from _ctx import ROOT, _EXPERIMENT
 # outputs and logs; the seed and the run archive; the infra's own files.
 NAMES = {"cell.env", "iterations.log", ".sealed", ".paused", ".cancelled",
          "reconcile.flagged", ".loop",
-         "metrics.json", "validation.json", "score.json", "score-cache.json",
+         "metrics.json", "validation.json", "score.json", "score-cache.json", "derived-key.json",
          "verify.log", "deploy.log", "service.deploy.log", "hooks.log", "run_cell.log",
          "trace.csv", "trace_events.json", "resources.json", "schedule.json",
          "PROMPT.md", ".skeleton_manifest", ".attempts.git", "arrangements", ".verify-out",
@@ -56,8 +56,8 @@ def _owners(root, engine, producers):
     return {p for p in base.rglob("*.py") if p.relative_to(base).parts[0] in dirs}
 
 
-def _names_a_cell_file(s):
-    return s in NAMES or s.startswith(PREFIXES)
+def _names_a_cell_file(s, names=()):
+    return s in NAMES or s in names or s.startswith(PREFIXES)
 
 
 def _through_cell(tree):
@@ -92,10 +92,11 @@ def _write_mode(call, at):
         and any(c in mode.value for c in "wax+")
 
 
-def offenders(root, engine=False, producers=()):
+def offenders(root, engine=False, producers=(), names=()):
     """[(file, line, what)] of every cell file named outside its owners, every
     ledger opened outside fae/cell, and every write to transitions.log that is
-    not Cell's append."""
+    not Cell's append. `names` adds the files an experiment's infra keeps in
+    a cell's folder."""
     out = []
     owners = _owners(root, engine, producers)
     for p in sorted(Path(root).rglob("*.py")):
@@ -111,7 +112,7 @@ def offenders(root, engine=False, producers=()):
             if p not in owners:
                 s = _leading(n) if isinstance(n, (ast.Constant, ast.JoinedStr)) else None
                 if s is not None and id(n) not in docs and id(n) not in routed \
-                        and _names_a_cell_file(s):
+                        and _names_a_cell_file(s, names):
                     out.append((str(p), n.lineno, s))
                 elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) \
                         and n.func.attr in LEDGER_IO and ast.unparse(n.func.value).endswith("ledger"):
@@ -155,6 +156,13 @@ class TestOnlyTheCellNamesItsFiles(unittest.TestCase):
             (Path(d) / "verifier" / "v.py").write_text('LOG = "verify.log"\n')
             self.assertEqual(offenders(d), [(str(Path(d) / "verifier" / "v.py"), 1, "verify.log")])
             self.assertEqual(offenders(d, producers=("verifier",)), [])
+
+    def test_an_experiment_names_its_own_infra_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "x.py").write_text('ENV = "stack.env"\n')
+            self.assertEqual(offenders(d), [])
+            self.assertEqual(offenders(d, names=("stack.env",)),
+                             [(str(Path(d) / "x.py"), 1, "stack.env")])
 
     def test_the_scan_sees_a_second_owner(self):
         with tempfile.TemporaryDirectory() as d:
