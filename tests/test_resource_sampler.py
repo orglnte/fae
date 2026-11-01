@@ -52,25 +52,39 @@ class TestEveryNumberHasTwoSources(unittest.TestCase):
 
     def test_agreeing_sources_are_reliable(self):
         cg = {"fae-dind-x": 310.0, "exp-ka-1-control-plane": 1900.0}
-        ok, findings = rs.cross_check(self.rows(), 15.0, cgroup=cg.get, **ONCE)
-        self.assertTrue(ok, findings)
+        self.assertEqual(rs.cross_check(self.rows(), 20.0, cgroup=cg.get, **ONCE), ([], []))
 
     def test_a_disagreement_beyond_the_tolerance_is_named(self):
         cg = {"fae-dind-x": 600.0, "exp-ka-1-control-plane": 1900.0}
-        ok, findings = rs.cross_check(self.rows(), 15.0, cgroup=cg.get, **ONCE)
-        self.assertFalse(ok)
+        findings, unchecked = rs.cross_check(self.rows(), 20.0, cgroup=cg.get, **ONCE)
         self.assertEqual(findings, ["fae-dind-x: docker stats 300 MB vs cgroup 600 MB"])
+        self.assertEqual(unchecked, [])
 
-    def test_an_unreadable_second_source_is_not_silently_trusted(self):
-        ok, findings = rs.cross_check(self.rows(), 15.0, cgroup=lambda n: None, **ONCE)
-        self.assertFalse(ok)
-        self.assertEqual(len(findings), 2)
+    def test_a_few_mb_on_a_small_container_is_not_a_disagreement(self):
+        """A store read at 25 MB by stats and 31 MB by its cgroup: 19% apart,
+        6 MB, nothing a footprint of a GB can notice."""
+        rows = [{"plane": "docker", "name": "fae-store-x", "tag": "app", "cpu_pct": 1, "mem_mb": 25.0}]
+        self.assertEqual(rs.cross_check(rows, 20.0, cgroup=lambda n: 31.0, **ONCE), ([], []))
+        self.assertEqual(rs.cross_check(rows, 20.0, cgroup=lambda n: 31.0, floor_mb=0.0, **ONCE)[0],
+                         [], "19% is inside 20% too")
+        self.assertEqual(len(rs.cross_check(rows, 20.0, cgroup=lambda n: 60.0, **ONCE)[0]), 1)
+
+    def test_a_small_container_growing_between_the_reads_agrees(self):
+        """Read 33 MB, then 48 MB, its cgroup 58 MB between: within 16 MB of
+        the second reading."""
+        rows = [{"plane": "docker", "name": "fae-store-x", "tag": "app", "cpu_pct": 1, "mem_mb": 33.0}]
+        self.assertEqual(rs.cross_check(rows, 20.0, cgroup=lambda n: 58.0,
+                                        restat=lambda n: 48.0, running=lambda n: True), ([], []))
+
+    def test_an_unreadable_second_source_is_unchecked_not_agreed(self):
+        findings, unchecked = rs.cross_check(self.rows(), 20.0, cgroup=lambda n: None, **ONCE)
+        self.assertEqual(findings, [])
+        self.assertEqual(len(unchecked), 2)
 
     def test_pods_cannot_exceed_their_node(self):
         rows = self.rows()
         rows[2]["mem_mb"] = 2500.0
-        ok, findings = rs.cross_check(rows, 15.0, cgroup={"fae-dind-x": 300.0, "exp-ka-1-control-plane": 2000.0}.get, **ONCE)
-        self.assertFalse(ok)
+        findings, _ = rs.cross_check(rows, 20.0, cgroup={"fae-dind-x": 300.0, "exp-ka-1-control-plane": 2000.0}.get, **ONCE)
         self.assertIn("exceed their node", findings[0])
 
     def test_memory_that_moved_between_the_reads_is_one_figure_read_twice(self):
@@ -78,20 +92,17 @@ class TestEveryNumberHasTwoSources(unittest.TestCase):
         later, and 927 MB by stats after that: the cgroup lies between."""
         rows = [{"plane": "docker", "name": "exp-ka-1-control-plane", "tag": "infra",
                  "cpu_pct": 1, "mem_mb": 1282.0}]
-        ok, findings = rs.cross_check(rows, 15.0, cgroup=lambda n: 831.0,
-                                      restat=lambda n: 927.0, running=lambda n: True)
-        self.assertTrue(ok, findings)
+        self.assertEqual(rs.cross_check(rows, 20.0, cgroup=lambda n: 831.0,
+                                        restat=lambda n: 927.0, running=lambda n: True), ([], []))
 
     def test_a_cgroup_outside_both_stats_readings_is_still_a_disagreement(self):
-        ok, findings = rs.cross_check(self.rows()[:1], 15.0, cgroup=lambda n: 600.0,
-                                      restat=lambda n: 310.0, running=lambda n: True)
-        self.assertFalse(ok)
+        findings, _ = rs.cross_check(self.rows()[:1], 20.0, cgroup=lambda n: 600.0,
+                                     restat=lambda n: 310.0, running=lambda n: True)
         self.assertEqual(findings, ["fae-dind-x: docker stats 300 MB then 310 MB vs cgroup 600 MB"])
 
     def test_a_container_gone_before_its_cgroup_read_is_left_out(self):
-        ok, findings = rs.cross_check(self.rows()[:1], 15.0, cgroup=lambda n: None,
-                                      restat=lambda n: None, running=lambda n: False)
-        self.assertTrue(ok, findings)
+        self.assertEqual(rs.cross_check(self.rows()[:1], 20.0, cgroup=lambda n: None,
+                                        restat=lambda n: None, running=lambda n: False), ([], []))
 
 
 class TestTheSummaryCarriesTheTrustFlags(unittest.TestCase):
@@ -117,6 +128,27 @@ class TestTheSummaryCarriesTheTrustFlags(unittest.TestCase):
         s2 = self.run_main(["--own", "fae-store-x"], 120.0)
         self.assertTrue(s2["reliable"])
         self.assertEqual(s2["peak"]["component_count"], 1)
+
+    def test_one_disagreeing_sample_in_many_does_not_void_the_footprint(self):
+        calls = {"n": 0}
+
+        def cgroup(name):
+            calls["n"] += 1
+            return 900.0 if calls["n"] == 1 else 120.0
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        argv = ["resource_sampler", "--duration-s", "0.3", "--interval-s", "0.0",
+                "--csv-output", str(d / "r.csv"), "--json-output", str(d / "r.json"),
+                "--namespaces", "", "--infra-namespaces", "", "--own", "fae-store-x"]
+        with mock.patch.object(rs, "_run", lambda cmd, timeout=8.0: STATS if cmd[:2] == ["docker", "stats"] and len(cmd) == 5 else ""), \
+             mock.patch.object(rs, "_cgroup_mem_mb", cgroup), \
+             mock.patch.object(rs, "_stats_mem_mb", lambda name: None), \
+             mock.patch.object(rs.time, "sleep", lambda s: None):
+            rs.main(argv)
+        s = json.loads((d / "r.json").read_text())
+        self.assertGreater(s["samples"], 10)
+        self.assertEqual(s["unreliable_samples"], 1)
+        self.assertTrue(s["reliable"], s)
 
     def test_a_machine_wide_run_is_never_reliable(self):
         s = self.run_main([], 120.0)

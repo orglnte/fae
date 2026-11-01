@@ -75,11 +75,15 @@ def validate_cell(cell, workspace):
     except (OSError, json.JSONDecodeError):
         res = None
     if res is not None and "reliable" in res and not res["reliable"]:
-        # the footprint's two sources disagreed, or it was sampled
-        # machine-wide: the number exists but is not to be quoted
+        # too many samples whose two sources disagreed or went unchecked, or
+        # sampled machine-wide: the number exists but is not to be quoted
+        unchecked = res.get("unchecked_samples")
+        of = res.get("samples")
         warns.append(f"footprint unreliable (scope={res.get('scope')}, "
-                     f"{res.get('unreliable_samples')} sample(s) disagreed: "
-                     f"{'; '.join(res.get('cross_check_findings') or [])[:120]})")
+                     f"{res.get('unreliable_samples')} sample(s) disagreed"
+                     + (f", {unchecked} unchecked" if unchecked else "")
+                     + (f", of {of}" if of else "") + ": "
+                     + f"{'; '.join((res.get('cross_check_findings') or []) + (res.get('cross_check_unchecked') or []))[:120]})")
     warns += archive_warns(cell.runs(), it_text)
     # the experiment's rules, and the fields it records beside the verdict
     rules = fae.experiment.exp().definition.taint_rules

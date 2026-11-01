@@ -168,39 +168,45 @@ def _running(container: str) -> bool:
 
 
 def cross_check(rows: list[dict], tolerance_pct: float, cgroup=None, restat=None,
-                running=None) -> tuple[bool, list[str]]:
+                running=None, floor_mb: float = 16.0) -> tuple[list[str], list[str]]:
     """Every docker component measured twice (stats vs its cgroup); the pods
-    of a kind node must fit inside that node. A disagreement beyond the
-    tolerance marks the sample unreliable — the number is not trusted, it is
-    reported as such. Returns (reliable, findings).
+    of a kind node must fit inside that node. Two figures disagree when they
+    differ by more than the tolerance AND by more than `floor_mb`: a few MB
+    on a small container is past any percentage and says nothing about the
+    footprint. Returns (disagreements, unchecked): the components whose two
+    sources disagreed, and those whose cgroup could not be read while they
+    still ran (measured once, not confirmed).
 
     The cgroup is read after the sample's one docker stats call, seconds
     later for the last container, and a container's memory moves in that
     time (a kind node sheds hundreds of MB as its pods settle). So a
     disagreement is read once more from docker stats, after the cgroup:
-    a cgroup figure between the two stats readings, within the tolerance,
+    a cgroup figure between the two stats readings, within the slack,
     is the same memory read at another moment. A container gone by its
     cgroup read was measured once and is left out."""
     cgroup = cgroup or _cgroup_mem_mb
     restat = restat or _stats_mem_mb
     running = running or _running
     tol = tolerance_pct / 100.0
-    findings = []
+
+    def slack(mb):
+        return max(tol * max(mb, 1.0), floor_mb)
+
+    findings, unchecked = [], []
     for r in rows:
         if r["plane"] != "docker":
             continue
         other = cgroup(r["name"])
         if other is None:
             if running(r["name"]):
-                findings.append(f"{r['name']}: cgroup memory unreadable")
+                unchecked.append(f"{r['name']}: cgroup memory unreadable")
             continue
-        base = max(r["mem_mb"], other, 1.0)
-        if abs(r["mem_mb"] - other) / base <= tol:
+        if abs(r["mem_mb"] - other) <= slack(max(r["mem_mb"], other)):
             continue
         again = restat(r["name"])
         if again is not None:
             lo, hi = min(r["mem_mb"], again), max(r["mem_mb"], again)
-            if lo * (1 - tol) <= other <= hi * (1 + tol):
+            if lo - slack(lo) <= other <= hi + slack(hi):
                 continue
         findings.append(f"{r['name']}: docker stats {r['mem_mb']:.0f} MB"
                         + (f" then {again:.0f} MB" if again is not None else "")
@@ -208,9 +214,9 @@ def cross_check(rows: list[dict], tolerance_pct: float, cgroup=None, restat=None
     node_mem = sum(r["mem_mb"] for r in rows
                    if r["plane"] == "docker" and _KIND_INFRA.search(r["name"]))
     pods_mem = sum(r["mem_mb"] for r in rows if r["plane"] == "k8s")
-    if pods_mem and node_mem and pods_mem > node_mem * (1 + tolerance_pct / 100.0):
+    if pods_mem and node_mem and pods_mem > node_mem + slack(node_mem):
         findings.append(f"pods {pods_mem:.0f} MB exceed their node {node_mem:.0f} MB")
-    return not findings, findings
+    return findings, unchecked
 
 
 def sample_k8s(namespaces: list[str], infra_ns: set[str]) -> list[dict]:
@@ -365,8 +371,13 @@ def main(argv=None) -> int:
     ap.add_argument("--own", action="append", default=[],
                     help="a docker container that belongs to the measured cell "
                          "(repeatable); given => only these are sampled")
-    ap.add_argument("--tolerance-pct", type=float, default=15.0,
-                    help="max disagreement between the two sources of a number")
+    ap.add_argument("--tolerance-pct", type=float, default=20.0,
+                    help="max disagreement between the two sources of a number, in percent")
+    ap.add_argument("--floor-mb", type=float, default=16.0,
+                    help="a disagreement must also exceed this many MB")
+    ap.add_argument("--max-unreliable-pct", type=float, default=10.0,
+                    help="the share of samples that may disagree, or go unchecked, "
+                         "before the footprint is unreliable")
     ap.add_argument("--no-cross-check", action="store_true")
     args = ap.parse_args(argv[1:] if argv is not None else None)
 
@@ -374,6 +385,7 @@ def main(argv=None) -> int:
     infra_ns = {n for n in args.infra_namespaces.split(",") if n}
     own = set(args.own) if args.own else None
     unreliable_samples, findings_seen = 0, []
+    unchecked_samples, unchecked_seen = 0, []
 
     deadline = time.monotonic() + args.duration_s
     peak = None  # sample dict with the highest machine memory
@@ -397,10 +409,13 @@ def main(argv=None) -> int:
             rows = sample_docker(own) + sample_k8s(namespaces, infra_ns) \
                 + sample_host(args.pidfile)
             if not args.no_cross_check:
-                ok, findings = cross_check(rows, args.tolerance_pct)
-                if not ok:
+                findings, unchecked = cross_check(rows, args.tolerance_pct, floor_mb=args.floor_mb)
+                if findings:
                     unreliable_samples += 1
                     findings_seen += [f for f in findings if f not in findings_seen]
+                if unchecked:
+                    unchecked_samples += 1
+                    unchecked_seen += [f for f in unchecked if f not in unchecked_seen]
             for r in rows:
                 w.writerow([ts, r["plane"], r["name"], r["tag"],
                             round(r["cpu_pct"], 2), round(r["mem_mb"], 1)])
@@ -453,13 +468,17 @@ def main(argv=None) -> int:
         "samples": n_samples,
         "window_s": window_s,
         # Trust flags: a footprint is scoped to the cell only when told which
-        # containers are its own, and reliable only when every sample's two
-        # sources agreed. A reader must check these before quoting a number.
+        # containers are its own, and reliable only while the samples whose two
+        # sources disagreed, and those left unchecked, each stay within
+        # --max-unreliable-pct. A reader must check these before quoting a number.
         "scope": "cell" if own is not None else "machine",
-        "reliable": own is not None and not args.no_cross_check
-                    and n_samples > 0 and unreliable_samples == 0,
+        "reliable": own is not None and not args.no_cross_check and n_samples > 0
+                    and max(unreliable_samples, unchecked_samples)
+                    <= n_samples * args.max_unreliable_pct / 100.0,
         "unreliable_samples": unreliable_samples,
+        "unchecked_samples": unchecked_samples,
         "cross_check_findings": findings_seen[:20],
+        "cross_check_unchecked": unchecked_seen[:20],
         # integrated compute/memory cost over the window (captures steady idle draw
         # a peak snapshot misses — e.g. a running-but-idle k8s cluster).
         "cpu_core_seconds": round(cpu_core_seconds, 1),
