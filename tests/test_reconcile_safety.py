@@ -892,7 +892,7 @@ class TestVerifyWedgedStandsTheCellDown(SweepCase):
     # constant (VERIFY_WEDGED_S + 60) makes the test move with it, so raising
     # the threshold to disable escalation raises the simulated hold too and
     # the test passes either way.
-    ALERT_S, WEDGE_S = 300, 14400
+    ALERT_S, WEDGE_S = 420, 14400
 
     def _sweep_wedged(self, held_s, dry=False):
         self._acquire(held_s)

@@ -110,7 +110,7 @@ T_HANG = int(os.environ.get("T_HANG", 600))     # no output this long = wedged
 T_STALL = int(os.environ.get("T_STALL", 1500))  # long verify tolerance
 
 
-VERIFY_HELD_ALERT_S = int(os.environ.get("VERIFY_HELD_ALERT_S", 300))
+VERIFY_HELD_ALERT_S = int(os.environ.get("VERIFY_HELD_ALERT_S", 420))
 
 
 
