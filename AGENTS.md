@@ -745,10 +745,11 @@ so its proof is its steps: a call to a tool outside the list is a breach.
 - **Never log a transition that did not happen.** A conformance log is only
   worth replaying if every line in it is real; an event emitted for a cell
   that was merely inspected desyncs the replay and cascades.
-- **FP-guarded files** — every file of the experiment tree, the trees the
-  experiment declares through `fingerprint_trees`, and every `.py` of the
-  engine's own `fae/cell/` and `fae/experiment/` packages, its `scoring/` included (found from the
-  engine, never under the root) — are hashed, content and path, into the fingerprint
+- **FP-guarded files** — every file of the experiment tree except its
+  `tests/`, the trees the experiment declares through `fingerprint_trees`,
+  and every `.py` of the engine's own `fae/cell/` and `fae/experiment/`
+  packages except `fae/experiment/scoring/` (found from the engine, never
+  under the root; scoring and tests are on no verify's path) — are hashed, content and path, into the fingerprint
   (`Cell.fingerprint()`) that pins a cell; a mismatch between a cell's
   start and any of its verifies voids that attempt. Edit them only with no
   cell running, apply multi-hunk patches whole, and run `cli.py experiment

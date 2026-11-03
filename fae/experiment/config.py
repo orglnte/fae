@@ -208,10 +208,13 @@ def _fp_extra_files(root, trees):
         parts += got
     # the engine's own cell package and the experiment package (the
     # definition reader and this config), wherever they are — never under the
-    # root: an experiment repo imports the engine and does not contain it
+    # root: an experiment repo imports the engine and does not contain it.
+    # scoring/ reads finished ledgers and renders tables; no verify imports it.
     engine = Path(__file__).resolve().parent.parent
+    scoring = engine / "experiment" / "scoring"
     parts += sorted(str(p) for p in (engine / "cell").rglob("*.py"))
-    parts += sorted(str(p) for p in (engine / "experiment").rglob("*.py"))
+    parts += sorted(str(p) for p in (engine / "experiment").rglob("*.py")
+                    if scoring not in p.parents)
     return " ".join(parts)
 
 

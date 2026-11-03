@@ -403,6 +403,22 @@ class TestTheVerifySurfaceIsFingerprinted(unittest.TestCase):
         target.write_text(target.read_text() + "\n# fingerprint probe\n")
         self.assertNotEqual(Cell.fingerprint(root, env), before)
 
+    def test_the_experiments_tests_do_not_move_the_fingerprint_its_tree_does(self):
+        import shutil, tempfile
+        from fae.cell.cell import Cell
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        shutil.copytree(ROOT / "tests" / "fixture_experiment", root / "experiment",
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        (root / "experiment" / "tests").mkdir(exist_ok=True)
+        probe = root / "experiment" / "tests" / "test_probe.py"
+        probe.write_text("")
+        before = Cell.fingerprint(root, {})
+        probe.write_text("# edited\n")
+        self.assertEqual(Cell.fingerprint(root, {}), before)
+        (root / "experiment" / "probe.txt").write_text("x")
+        self.assertNotEqual(Cell.fingerprint(root, {}), before)
+
     def test_the_cell_pins_it_once_not_once_per_arrangement(self):
         # Pinning inside each arrangement would miss a change made between
         # arrangement 3 and 4 — the case the guard exists for.

@@ -1,6 +1,6 @@
 """The fingerprint covers every .py of the engine's cell package, subpackages
-included, and the experiment package (fae/experiment/) — found where the
-engine is, never under the experiment root."""
+included, and the experiment package (fae/experiment/) except scoring/ —
+found where the engine is, never under the experiment root."""
 from __future__ import annotations
 
 import tempfile
@@ -17,8 +17,10 @@ CELL = ENGINE / "cell"
 class TestFpExtraFiles(unittest.TestCase):
     def test_every_module_of_the_cell_package_is_hashed_subpackages_included(self):
         got = C._fp_extra_files(tempfile.mkdtemp(), []).split()
+        scoring = ENGINE / "experiment" / "scoring"
         want = (sorted(str(p) for p in CELL.rglob("*.py"))
-                + sorted(str(p) for p in (ENGINE / "experiment").rglob("*.py")))
+                + sorted(str(p) for p in (ENGINE / "experiment").rglob("*.py")
+                         if scoring not in p.parents))
         self.assertEqual(got, want)
         self.assertTrue(any("/fae/cell/contrib/" in f for f in got))
 
@@ -29,6 +31,13 @@ class TestFpExtraFiles(unittest.TestCase):
         got = C._fp_extra_files(str(root), []).split()
         self.assertNotIn(str(root / "fae" / "cell" / "impostor.py"), got)
         self.assertIn(str(CELL / "cell.py"), got)
+
+    def test_scoring_is_not_hashed_the_rest_of_the_package_is(self):
+        """scoring/ reads finished ledgers; editing it while cells run must not
+        void them."""
+        got = C._fp_extra_files(tempfile.mkdtemp(), []).split()
+        self.assertFalse([f for f in got if "/fae/experiment/scoring/" in f])
+        self.assertIn(str(ENGINE / "experiment" / "_experiment.py"), got)
 
     def test_the_configuration_module_is_hashed(self):
         """It sets every value a verify reads: an edit to it mid-cell must

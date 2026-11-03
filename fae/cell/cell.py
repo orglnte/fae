@@ -1414,8 +1414,9 @@ class Cell:
         """The verify-surface fingerprint: sha256 over the `shasum -a 256` text of
         every file in the experiment tree (EXPERIMENT_DIR: task package,
         variants, contracts, bring-ups, load profiles, instruments, daemon
-        config), then the FP_EXTRA_FILES the config names (the SDK/daemon
-        sources, every module of fae/cell and fae/experiment), in that order. Raises
+        config; its tests/ excluded, no verify runs them), then the
+        FP_EXTRA_FILES the config names (the SDK/daemon sources, every module
+        of fae/cell and fae/experiment except scoring/), in that order. Raises
         RuntimeError when the experiment tree is empty or an FP_EXTRA_FILES
         entry is missing — a silently skipped file would quietly shrink the
         guarded surface."""
@@ -1425,9 +1426,11 @@ class Cell:
             if not Path(f).is_file():
                 raise RuntimeError(f"FATAL _fp: FP_EXTRA_FILES entry missing: {f}")
         exp = Path(env.get("EXPERIMENT_DIR") or root / "experiment")
+        tests = exp / "tests"
         tree = _collated(str(p) for p in exp.rglob("*")
                          if p.is_file() and "__pycache__" not in p.parts
-                         and p.suffix != ".pyc" and p.name != ".DS_Store")
+                         and p.suffix != ".pyc" and p.name != ".DS_Store"
+                         and tests not in p.parents)
         if not tree:
             raise RuntimeError(f"FATAL _fp: no experiment tree under {exp}")
         return hashlib.sha256(_shasum_lines(tree + extras).encode()).hexdigest()
