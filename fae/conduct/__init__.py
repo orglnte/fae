@@ -470,6 +470,11 @@ class Conduct:
             sys.stdout, sys.stderr = _old_out, _old_err
             return
         self._adopt_live_cells()
+        if os.environ.get("FAE_HOSTLOAD", "1") != "0":
+            from .hostload import HostLoad
+            HostLoad().start()
+            print(f"run: recording host load under the verify lock to "
+                  f"{fae.experiment.exp().workspace.conduct / 'hostload'}", flush=True)
         frozen: set[str] = set()
         rr = 0
         admitted: set[str] = set()      # narrated at admission; skip their START

@@ -46,6 +46,8 @@ os.environ.setdefault("REPO_ROOT", str(_TREE))    # one root, one experiment: th
 # (tests/fixture_experiment); the experiment suite's shim names the real one.
 _EXPERIMENT = Path(os.environ.get("FAE_TEST_EXPERIMENT") or _TREE / "tests" / "fixture_experiment")
 os.environ["EXPERIMENT_DIR"] = str(_EXPERIMENT)
+# A test run never samples the host: the recorder runs docker and top.
+os.environ.setdefault("FAE_HOSTLOAD", "0")
 
 import fae.experiment  # noqa: E402
 from fae.cli import _render as render  # noqa: E402
