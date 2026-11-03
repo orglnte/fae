@@ -576,7 +576,7 @@ def supervise_pass(alerts, dry=False, only=""):
                     _reclaim(st, dry)
                     until = _set_cooldown(agent, detail)
                     records.rec_log(f"lane {agent}: cooling until "
-                             f"{datetime.fromtimestamp(until, timezone.utc):%H:%M}Z")
+                             f"{datetime.fromtimestamp(until, timezone.utc):%m-%d %H:%M}Z")
             elif in_box and (out_size in (None, 0) or (out_age or 0) > T_HANG) \
                     and iter_age > T_HANG:
                 # A wall wearing a hang's face: some CLIs log a usage-limit

@@ -109,6 +109,21 @@ def _confirm_stop(blanket, agents, loops, pending, assume_yes):
         return False
 
 
+
+def cap_warning(n, lane_caps):
+    """The warning a global cap of n earns against the non-empty lanes and
+    their per-lane caps ({lane: cap}), or None when n is inside the range
+    the lanes can use: below one cell per lane some lane starves; above the
+    lanes' summed caps the global cap is not what limits admission."""
+    lanes, room = len(lane_caps), sum(lane_caps.values())
+    if n < lanes:
+        return (f"global cap {n} < {lanes} non-empty lane(s) — lanes will starve; "
+                f"one cell per lane needs -n {lanes}")
+    if n > room:
+        return (f"global cap {n} > {room}, the {lanes} non-empty lane(s)' summed "
+                f"per-lane caps — the cap is not what limits admission")
+    return None
+
 class Conduct:
     """The scheduler and supervisor of one experiment root."""
 
@@ -501,13 +516,11 @@ class Conduct:
                 agents = [qs.lane_agent(d) for d in qs.lane_dirs()]
                 pending = {m: len(qs.lane_specs(m)) for m in agents}
                 active = [m for m in agents if pending[m]]
-                if warned_lanes != len(active) and active and len(active) != n:
-                    print(f"  [{hhmm()}] WARNING: global cap {n} != {len(active)} "
-                          f"non-empty lane(s) — "
-                          + ("lanes will starve" if n < len(active)
-                             else "the cap is not what limits admission")
-                          + f"; one cell per lane needs -n {len(active)}",
-                          flush=True)
+                if warned_lanes != len(active) and active:
+                    msg = cap_warning(n, {m: per_agent_override.get(m, args.per_agent)
+                                          for m in active})
+                    if msg:
+                        print(f"  [{hhmm()}] WARNING: {msg}", flush=True)
                 warned_lanes = len(active)
                 live = _host.loop_parents()
                 boxes = _host.containers()

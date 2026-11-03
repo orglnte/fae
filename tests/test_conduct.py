@@ -177,7 +177,7 @@ class TestPerModelCap(ConductCase):
         self.q("aaa", [self.spec()])
         self.q("bbb", [self.spec()])
         out = self.run_conduct(n=5)
-        self.assertIn("WARNING: global cap 5 != 2", out)
+        self.assertIn("WARNING: global cap 5 > 2", out)
 
     def test_no_warning_when_the_cap_is_the_lane_count(self):
         self.per_agent = 1
