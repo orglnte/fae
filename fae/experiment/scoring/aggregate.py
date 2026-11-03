@@ -60,12 +60,16 @@ def short_model(name: str) -> str:
     25-char worst case whose bulk is a vendor prefix and a build date that
     never vary within a model.
 
-    Rule-based rather than a lookup dict on purpose: an unreleased model must
-    render sensibly without anyone remembering to add it, and a stale dict
-    would silently print the wrong short name for a new build.
+    An id the experiment pools (POOLED_MODELS) reads its row label, so every
+    line naming the model matches its table row. Otherwise rule-based rather
+    than a lookup dict on purpose: an unreleased model must render sensibly
+    without anyone remembering to add it, and a stale dict would silently
+    print the wrong short name for a new build.
     """
     if name in POOLED_LABELS:
         return name
+    if name in POOLED_MODELS:
+        return POOLED_MODELS[name]
     s = re.sub(r"\s*\([^)]*\)", "", name or "").strip().lower()  # drop "(High)"
     s = s.rsplit("/", 1)[-1]               # gateway/provider path: keep the model
     s = re.sub(r"-\d{8}$", "", s)          # trailing build date

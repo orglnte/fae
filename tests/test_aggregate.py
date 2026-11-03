@@ -142,8 +142,14 @@ class TestShortModelStripsGatewayPaths(unittest.TestCase):
 
     def test_existing_names_unchanged(self):
         self.assertEqual(aggregate.short_model("claude-sonnet-5"), "sonnet-5")
-        self.assertEqual(aggregate.short_model("Gemini 3.1 Pro (High)"),
-                         "gemini-3.1p")
+        self.assertEqual(aggregate.short_model("Gemini 3.2 Pro (High)"),
+                         "gemini-3.2p")
+
+    def test_a_pooled_id_reads_its_row_label(self):
+        """Every line that names a model by its raw id (the Spearman notes)
+        reads the label its table row carries."""
+        self.assertEqual(aggregate.short_model("Gemini 3.1 Pro (High)"), "g31pro")
+        self.assertEqual(aggregate.short_model("claude-fable-5"), "fable-5.1/5")
 
 
 class TestRowOrdering(unittest.TestCase):
