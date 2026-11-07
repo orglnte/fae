@@ -25,10 +25,10 @@ def _state(cid, phase, **over):
 
 
 class TestTheRunningTable(unittest.TestCase):
-    def _render(self, rows):
+    def _render(self, rows, expanded=False):
         states = [s for s, _ in rows]
         hbs = {s["cid"]: hb for s, hb in rows}
-        with runs.patch_host("all_states", return_value=(states, {}, [])), \
+        with runs.patch_host("all_states", return_value=(states, {}, [])) as self.all_states, \
              runs.patch_host("loop_parents", return_value={}), \
              runs.patch_host("heartbeat",
                                side_effect=lambda ws, cell=None: hbs[Path(ws).name]), \
@@ -38,7 +38,7 @@ class TestTheRunningTable(unittest.TestCase):
              mock.patch.object(fae.experiment._experiment.Experiment, "definition", new_callable=mock.PropertyMock) as d:
             d.return_value.matrix = {"alpha": ["apidocs"]}
             d.return_value.tech_of = lambda arm: arm
-            return runs.render.render(running_only=True)
+            return runs.render.render(expanded=expanded)
 
     def test_the_columns(self):
         working = _state("sonnet_high_alpha_apidocs_T1_r1", "verify", shape="2/6*")
@@ -54,6 +54,28 @@ class TestTheRunningTable(unittest.TestCase):
         self.assertTrue(w.rstrip().endswith("NO"))
         b = rows["haiku_high_alpha_apidocs_T1_r2"]
         self.assertTrue(b.rstrip().endswith("YES"))
+
+
+class TestTheCompletedCells(TestTheRunningTable):
+    def rows(self):
+        return [_state("sonnet_high_alpha_apidocs_T1_r1", "verify"),
+                _state("haiku_high_alpha_apidocs_T1_r2", "", state="DONE", why="green",
+                       green_at=3),
+                _state("haiku_high_alpha_apidocs_T1_r3", "", state="DONE", why="red", att=10)]
+
+    def test_by_default_only_the_live_and_held_cells_show(self):
+        out = self._render(self.rows())
+        self.assertNotIn("— GREEN", out)
+        self.assertNotIn("— OTHER", out)
+        self.assertIn("RUNNING (1)", out)
+        self.all_states.assert_called_once_with(running_only=True)
+
+    def test_expanded_adds_every_completed_cell(self):
+        out = self._render(self.rows(), expanded=True)
+        self.all_states.assert_called_once_with(running_only=False)
+        self.assertIn("GREEN (1)", out)
+        self.assertIn("OTHER (1)", out)
+        self.assertIn("DONE·red", out)
 
 
 class TestTheHeldCells(TestTheRunningTable):

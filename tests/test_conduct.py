@@ -719,7 +719,7 @@ class TestReapingBelongsToConduct(unittest.TestCase):
              mock.patch.object(runs.os, "system"), \
              mock.patch.object(runs.time, "sleep", side_effect=KeyboardInterrupt), \
              contextlib.redirect_stdout(out):
-            runs.render.watch(SimpleNamespace(flat=False, running_only=False, interval=1))
+            runs.render.watch(SimpleNamespace(flat=False, expanded=False, interval=1))
         return reap, out.getvalue()
 
     def test_the_console_never_reaps(self):

@@ -577,7 +577,9 @@ EXPERIMENT_DIR=shout python3 cli.py cell tail sonnet_high_python_T1_r1
 ```
 
 `experiment status` shows the cell's phase (`agent`, `verify`, a waiting phase),
-its attempt count against the budget and its gate progress. When it seals,
+its attempt count against the budget and its gate progress; once the cell is
+done it leaves that table, and `experiment status --expanded` shows it with its
+verdict. When it seals,
 the same files as in section 8 are under
 `workspaces.nosync/sonnet_high_python_T1_r1/`, plus one log per
 attempt with the agent's full transcript.

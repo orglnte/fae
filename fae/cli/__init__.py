@@ -788,20 +788,22 @@ def experiment_repair(dry_run: bool = typer.Option(False, "--dry-run",
 @experiment_app.command("status")
 def experiment_status(
     flat: bool = typer.Option(False, "--flat", help="one row per cell"),
-    running_only: bool = typer.Option(False, "--running", help="only live cells"),
+    expanded: bool = typer.Option(False, "--expanded",
+                                  help="every cell, the completed ones too"),
     watch: Optional[int] = typer.Option(None, "-w", "--watch",
                                         help="refresh every N s"),
     walls: bool = typer.Option(False, "--walls",
                                help="surface limit/AUTH walls"),
 ):
-    """The fleet table: every cell, its state and gate; --watch refreshes,
-    --walls surfaces limit/AUTH walls."""
+    """The fleet table: the live and held cells, their state and gate;
+    --expanded adds every completed cell, --watch refreshes, --walls surfaces
+    limit/AUTH walls."""
     if walls:
-        _render.monitor(_ns(interval=watch or 60))
+        _render.monitor(_ns(interval=watch or 60, expanded=expanded))
     elif watch:
-        _render.watch(_ns(interval=watch, flat=flat, running_only=running_only))
+        _render.watch(_ns(interval=watch, flat=flat, expanded=expanded))
     else:
-        _render.status(_ns(flat=flat, running_only=running_only))
+        _render.status(_ns(flat=flat, expanded=expanded))
 
 
 # --- results ----------------------------------------------------------------

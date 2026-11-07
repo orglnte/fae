@@ -168,8 +168,10 @@ def display_state(s):
     return s["state"] + (f"·{s['why']}" if s["why"] else "")
 
 
-def render(flat=False, running_only=False):
-    states, loops, boxes = fae.conduct.all_states(running_only)
+def render(flat=False, expanded=False):
+    """The fleet console: the live and held cells; `expanded` adds every
+    other cell, the completed ones included (OTHER and GREEN tables)."""
+    states, loops, boxes = fae.conduct.all_states(running_only=not expanded)
     loops = fae.conduct.loop_parents()   # real loops — tees outlive theirs
     out = []
     if flat:
@@ -259,7 +261,7 @@ def render(flat=False, running_only=False):
         # bottom-up visibility order: what scrolls away first matters least
         hdr9 = ("LABEL", "AGENT", "VER", "VARIANT·TASK·REP", "STATE",
                 "ATTEMPT", "LIVE", "GATE", "LAST REP", "DETAIL")
-        if not running_only:
+        if expanded:
             out.append(f"— OTHER ({len(other)}) — by label · agent " + "—" * 34)
             out.append(fmt_table(other, hdr9) if other else "  (none)")
             out.append(f"\n— GREEN ({len(greens)}) " + "—" * 48)
@@ -322,7 +324,7 @@ def footer(loops, boxes, held=0):
 
 
 def status(args):
-    print(render(args.flat, getattr(args, "running_only", False)))
+    print(render(args.flat, getattr(args, "expanded", False)))
 
 
 def watch(args):
@@ -337,7 +339,7 @@ def watch(args):
         while True:
             zs = Conduct.find_zombies()
             os.system("clear")
-            print(render(args.flat, getattr(args, "running_only", False)))
+            print(render(args.flat, getattr(args, "expanded", False)))
             if zs:
                 print("\nZOMBIES (listed only — `experiment run` reaps, "
                       "or `cli.py experiment repair`):")
@@ -392,7 +394,7 @@ def monitor(args):
                     eta = (f", resets {datetime.fromtimestamp(when, timezone.utc):%H:%M}Z"
                            if when else "")
                     print(f"  {cid}: usage wall, retrying same attempt{eta}")
-            print(render(False, getattr(args, "running_only", False)))
+            print(render(False, getattr(args, "expanded", False)))
             time.sleep(args.interval)
         except KeyboardInterrupt:
             try:

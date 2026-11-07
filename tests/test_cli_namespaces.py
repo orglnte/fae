@@ -216,14 +216,25 @@ class TestExperimentStatus(unittest.TestCase):
             result = runner.invoke(cli.app, ["experiment", "status", "--flat"])
         self.assertEqual(result.exit_code, 0, result.output)
         (ns,), _ = m.call_args
-        self.assertEqual(vars(ns), dict(flat=True, running_only=False))
+        self.assertEqual(vars(ns), dict(flat=True, expanded=False))
 
     def test_status_default(self):
         with mock.patch.object(cli._render, "status") as m:
             result = runner.invoke(cli.app, ["experiment", "status"])
         self.assertEqual(result.exit_code, 0, result.output)
         (ns,), _ = m.call_args
-        self.assertEqual(vars(ns), dict(flat=False, running_only=False))
+        self.assertEqual(vars(ns), dict(flat=False, expanded=False))
+
+    def test_status_expanded(self):
+        with mock.patch.object(cli._render, "status") as m:
+            result = runner.invoke(cli.app, ["experiment", "status", "--expanded"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        (ns,), _ = m.call_args
+        self.assertEqual(vars(ns), dict(flat=False, expanded=True))
+
+    def test_status_has_no_running_flag(self):
+        result = runner.invoke(cli.app, ["experiment", "status", "--running"])
+        self.assertNotEqual(result.exit_code, 0)
 
 
 class TestQueueCommands(unittest.TestCase):

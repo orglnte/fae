@@ -49,7 +49,7 @@ python3 cli.py experiment smoke      # one reference cell per way of being judge
 ```sh
 python3 cli.py cell spawn|pause|resume|stop|tail|log|seal|reverify …   # ONE cell
 python3 cli.py experiment run|pause|resume|stop|diagnose|reconcile|queue-add …
-python3 cli.py experiment status                              # read-only table
+python3 cli.py experiment status [--expanded]                 # read-only table: live and held cells; --expanded every cell
 python3 cli.py results score|validate|aggregate …
 python3 cli.py experiment init|check|infra|smoke|prepare|verb …   # the experiment this root runs; verb: its own commands
 python3 cli.py rig trace-reset|tool …                    # the harness itself

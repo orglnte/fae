@@ -82,7 +82,7 @@ the agent image once, set up Claude's credential, and start one cell.
 bash ../fae/fae/agent-container/build.sh
 python3 cli.py experiment credentials claude
 python3 cli.py cell spawn sonnet zig --rep 1
-python3 cli.py experiment status   # its phase, its attempt, its verdict
+python3 cli.py experiment status   # its phase and attempt; --expanded keeps it, and its verdict, once done
 python3 cli.py results score  # the table
 ```
 
