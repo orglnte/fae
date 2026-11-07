@@ -30,7 +30,7 @@ class TestTheVariantLabels(unittest.TestCase):
              mock.patch.object(runs.queues_module.Queues, "weekly_line", return_value=""), \
              mock.patch.object(fae.experiment._experiment.Experiment, "definition", new_callable=mock.PropertyMock) as d:
             d.return_value.variants = variants
-            return runs.render.render()
+            return runs.render.render(expanded=True)
 
     def test_the_label_groups_and_the_row_names_the_variant(self):
         variants = {"beta_sealed_apidocs": _variant("beta_sealed_apidocs", "Alpha-B"),
