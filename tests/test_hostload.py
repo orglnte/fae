@@ -35,7 +35,7 @@ class TestParsing(unittest.TestCase):
         rows = H.parse_stats(STATS)
         self.assertEqual(len(rows), 4)
         self.assertEqual(rows[0], ("fae-agent-m_high_v_access_T1_r1", 55.2, 512.5))
-        self.assertEqual(rows[1][2], 1500.0)
+        self.assertEqual(rows[1][2], 1536.0)
 
 
 class TestOwners(unittest.TestCase):
@@ -92,7 +92,11 @@ class TestRecorder(unittest.TestCase):
         d = Path(tempfile.mkdtemp())
         self.ws = SimpleNamespace(conduct=d, locks=d / "locks", cells=lambda: CIDS,
                                   cell=lambda cid: SimpleNamespace(ledger_text=lambda: LEDGER))
-        self.rec = H.HostLoad(self.ws, run=lambda argv: TOP if argv[0] == "top" else STATS)
+        self.cpus = "5 6212489216\n"
+        self.rec = H.HostLoad(self.ws, run=self.host)
+
+    def host(self, argv):
+        return {"top": TOP, "info": self.cpus}.get(argv[1] if argv[0] == "docker" else argv[0], STATS)
 
     def test_close_verify_appends_each_row_once(self):
         path = self.rec.raw_path(CIDS[1], 2)
@@ -110,6 +114,51 @@ class TestRecorder(unittest.TestCase):
         self.assertEqual(owners["ka-123-control-plane"], CIDS[0])
         self.assertEqual(owners["someone-else"], "")
         self.assertIn("cpu_idle", {r["name"] for r in got if r["scope"] == "host"})
+
+    def sampled(self):
+        with mock.patch.object(H.zombies, "_cluster_map", dict):
+            return self.rec.sample()
+
+    def test_docker_load_is_against_the_cpus_docker_has_at_that_sample(self):
+        self.assertEqual(H.docker_load(self.sampled()), {"cpu": (39.8, 5), "mem": (49.9, 5924.7)})
+        self.cpus = "2 2147483648\n"
+        self.assertEqual(H.docker_load(self.sampled()), {"cpu": (99.6, 2), "mem": (144.5, 2048.0)})
+
+    def test_a_sample_without_a_cpu_count_keeps_its_rows_and_has_no_load(self):
+        self.cpus = ""
+        with mock.patch("sys.stderr"):
+            rows = self.sampled()
+        self.assertEqual(H.docker_load(rows), {})
+        self.assertIn("someone-else", {r["name"] for r in rows})
+
+    def lines(self, verify, rows):
+        with mock.patch("builtins.print") as out:
+            self.rec.report_docker_load(verify, rows)
+        return [c.args[0] for c in out.call_args_list]
+
+    def docker(self, cpu, mem):
+        return [dict(scope="host", name="docker_cpus", cpu_pct=5, mem_mb=""),
+                dict(scope="host", name="docker_mem_mb", cpu_pct="", mem_mb=1000.0),
+                dict(scope="container", name="a", cpu_pct=cpu, mem_mb=mem)]
+
+    def test_one_line_per_verify_and_resource_at_its_limit_and_none_below_it(self):
+        self.assertEqual(self.lines(("c", 1), self.docker(299.0, 899.0)), [])
+        got = self.lines(("c", 1), self.docker(300.0, 899.0))
+        self.assertEqual(len(got), 1)
+        self.assertIn("DOCKER-CPU c a1: containers at 60.0% of Docker's 5 CPUs (limit 60%)", got[0])
+        got = self.lines(("c", 1), self.docker(300.0, 900.0))
+        self.assertEqual(len(got), 1)
+        self.assertIn("DOCKER-MEM c a1: containers at 90.0% of Docker's 1000 MiB of memory (limit 90%)",
+                      got[0])
+        self.assertEqual(self.lines(("c", 1), self.docker(300.0, 900.0)), [])
+        self.assertEqual(len(self.lines(("c", 2), self.docker(300.0, 900.0))), 2)
+
+    def test_the_cpu_count_row_stays_out_of_the_summary_figures(self):
+        rows = raw("2026-11-03T10:00:10Z", 80, 3, 100, 10, 0) + raw("2026-11-03T10:01:10Z", 20, 9, 100, 150, 40)
+        count = dict(ts=rows[0]["ts"], scope="host", name="docker_cpus", owner="", role="",
+                     cpu_pct=5, mem_mb="")
+        self.assertEqual(H.summarize(CIDS[1], 2, [count] + rows, LEDGER),
+                         H.summarize(CIDS[1], 2, rows, LEDGER))
 
 
 if __name__ == "__main__":

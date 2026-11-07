@@ -11,6 +11,10 @@ every container's CPU and memory with the cell that owns it, and writes:
                                            the CPU of its own cell, of other
                                            cells and of unowned containers
 
+It also prints one DOCKER-CPU (DOCKER-MEM) line to the run log for each
+verify whose containers reach DOCKER_CPU_LIMIT_PCT (DOCKER_MEM_LIMIT_PCT) of
+the CPUs (memory) Docker has at that sample.
+
 Recording only: nothing here changes a verdict, a refund or admission.
 """
 from __future__ import annotations
@@ -29,9 +33,12 @@ import fae.experiment
 from fae.cell.cell import Cell
 
 from . import _host, zombies
+from ._queues import hhmm
 
 PROBE_S = float(os.environ.get("HOSTLOAD_PROBE_S", 5))
 SAMPLE_S = float(os.environ.get("HOSTLOAD_SAMPLE_S", 10))
+DOCKER_CPU_LIMIT_PCT = float(os.environ.get("HOSTLOAD_DOCKER_CPU_LIMIT_PCT", 60))
+DOCKER_MEM_LIMIT_PCT = float(os.environ.get("HOSTLOAD_DOCKER_MEM_LIMIT_PCT", 90))
 RAW_FIELDS = ["ts", "scope", "name", "owner", "role", "cpu_pct", "mem_mb"]
 SUMMARY_FIELDS = ["ts", "cell", "attempt", "arrangement", "outcome", "samples",
                   "idle_min", "idle_median", "load1_max", "mem_used_gb_max",
@@ -67,11 +74,11 @@ def parse_top(text):
 
 
 def mem_mb(text):
-    """MB from a docker stats usage figure such as '512.3MiB' or '1.2GiB'."""
+    """MiB from a docker stats usage figure such as '512.3MiB' or '1.2GiB'."""
     m = re.match(r"\s*([\d.]+)\s*([KMGT]?)i?B", text or "")
     if not m:
         return None
-    scale = {"": 1e-6, "K": 1e-3, "M": 1, "G": 1e3, "T": 1e6}[m.group(2)]
+    scale = {"": 2**-20, "K": 2**-10, "M": 1, "G": 2**10, "T": 2**20}[m.group(2)]
     return round(float(m.group(1)) * scale, 1)
 
 
@@ -106,6 +113,18 @@ def owner_of(name, cids, clusters):
 
 
 # --- the per-arrangement summary --------------------------------------------
+
+def docker_load(rows):
+    """{"cpu": (containers' CPU as a percent of Docker's CPUs, Docker's CPUs),
+    "mem": (containers' memory as a percent of Docker's, Docker's in MiB)} of
+    one sample; a resource is absent when the sample holds no Docker figure."""
+    limit = {"cpu": next((r["cpu_pct"] for r in rows if r["name"] == "docker_cpus"), 0),
+             "mem": next((r["mem_mb"] for r in rows if r["name"] == "docker_mem_mb"), 0)}
+    used = {"cpu": sum(r["cpu_pct"] for r in rows if r["scope"] == "container"),
+            "mem": sum(r["mem_mb"] or 0 for r in rows if r["scope"] == "container")}
+    return {k: (round(100 * used[k] / limit[k] if k == "mem" else used[k] / limit[k], 1), limit[k])
+            for k in limit if limit[k]}
+
 
 def _median(xs):
     return round(statistics.median(xs), 1) if xs else ""
@@ -176,6 +195,7 @@ class HostLoad:
         self.run = run
         self._stop = threading.Event()
         self._errors = set()
+        self._over_limit = {}       # resource -> the (cid, attempt) last reported over its limit
 
     def holder(self):
         """The cell holding the verify lock now, or ""."""
@@ -189,9 +209,19 @@ class HostLoad:
         found = re.findall(rf"\tSTART\t{re.escape(cid)}\tattempt=(\d+)", text)
         return int(found[-1]) if found else 0
 
+    def docker_limits(self):
+        """(CPUs, memory in MiB) Docker has now; (0, 0) when Docker does not say."""
+        answer = self.run(["docker", "info", "--format", "{{.NCPU}} {{.MemTotal}}"])
+        try:
+            cpus, mem = answer.split()
+            return int(cpus), round(int(mem) / 2**20, 1)
+        except ValueError:
+            self._note("docker limits", repr(answer[:80]))
+            return 0, 0
+
     def sample(self):
-        """[raw row] of one sample: host CPU, load and memory, then every
-        container with its owner and role."""
+        """[raw row] of one sample: host CPU, load and memory, Docker's CPUs
+        and memory, then every container with its owner and role."""
         ts = stamp()
         rows = [dict(ts=ts, scope="host", name=k, owner="", role="", cpu_pct=v, mem_mb="")
                 for k, v in parse_top(self.run(["top", "-l", "2", "-s", "1", "-n", "0"])).items()]
@@ -199,6 +229,12 @@ class HostLoad:
         if mem.get("used_gb"):
             rows.append(dict(ts=ts, scope="host", name="mem_used_gb", owner="", role="",
                              cpu_pct=round(mem["used_gb"], 2), mem_mb=""))
+        cpus, mem = self.docker_limits()
+        if cpus:
+            rows += [dict(ts=ts, scope="host", name="docker_cpus", owner="", role="",
+                          cpu_pct=cpus, mem_mb=""),
+                     dict(ts=ts, scope="host", name="docker_mem_mb", owner="", role="",
+                          cpu_pct="", mem_mb=mem)]
         stats = self.run(["docker", "stats", "--no-stream", "--format",
                           "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"])
         cids = sorted(self.workspace.cells(), key=len, reverse=True)
@@ -240,6 +276,18 @@ class HostLoad:
                 if (r["cell"], str(r["attempt"]), r["ts"]) not in done]
         self._append(summary, SUMMARY_FIELDS, rows)
 
+    def report_docker_load(self, verify, rows):
+        """One DOCKER-CPU and one DOCKER-MEM line per verify, each at its
+        first sample over its limit."""
+        limits = {"cpu": DOCKER_CPU_LIMIT_PCT, "mem": DOCKER_MEM_LIMIT_PCT}
+        units = {"cpu": "CPUs", "mem": "MiB of memory"}
+        for k, (pct, has) in docker_load(rows).items():
+            if pct < limits[k] or self._over_limit.get(k) == verify:
+                continue
+            self._over_limit[k] = verify
+            print(f"  [{hhmm()}] DOCKER-{k.upper()} {verify[0]} a{verify[1]}: containers at "
+                  f"{pct}% of Docker's {has:g} {units[k]} (limit {limits[k]:g}%)", flush=True)
+
     def _note(self, what, err):
         if what not in self._errors:
             self._errors.add(what)
@@ -270,7 +318,9 @@ class HostLoad:
                 if time.time() >= next_sample:
                     next_sample = time.time() + SAMPLE_S
                     try:
-                        self._append(self.raw_path(*current), RAW_FIELDS, self.sample())
+                        rows = self.sample()
+                        self._append(self.raw_path(*current), RAW_FIELDS, rows)
+                        self.report_docker_load(current, rows)
                     except Exception as e:
                         self._note("sample", e)
             self._stop.wait(PROBE_S)
