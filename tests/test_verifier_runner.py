@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 import fae.experiment  # noqa: E402
 from fae.cell import image as _image  # noqa: E402
 from fae.cell import verify  # noqa: E402
-from fae.cell.verify import Ctx, Verdict, run_verifier, verify_argv  # noqa: E402
+from fae.cell.verify import RUN_OUT, Ctx, Verdict, run_verifier, verify_argv  # noqa: E402
 from fae.cell.infra.base import NoopInfra  # noqa: E402
 from fae.experiment.variants.base import Variant  # noqa: E402
 
@@ -371,16 +371,18 @@ class TestTheRealRoundTrip(unittest.TestCase):
         out = Path(tmp.name) / "ws" / "real-x"
         (out / "artifacts").mkdir(parents=True)
         (out / "artifacts" / "answer.txt").write_text("42\n")
+        vout = out / RUN_OUT     # the verify's own directory, as a cell's
+        vout.mkdir()
         fixture = Path(fae.experiment.exp().definition.path)      # the suite's own experiment
         ctx = Ctx(root=str(ROOT), experiment_dir=str(fixture), workspace=str(out),
-                  artifacts=str(out / "artifacts"), out=str(out), cid="real-x",
+                  artifacts=str(out / "artifacts"), out=str(vout), cid="real-x",
                   task="T1", variant="alpha", arrangement="G1")
         _image.network_up("real-x")
         self.addCleanup(_image.network_down, "real-x")
         v = run_verifier(ctx, NoopInfra(Variant, _Shim("real-x", out, ROOT)), timeout_s=600)
-        self.assertTrue(v.ok, (v, (out / "verifier.log").read_text()))
+        self.assertTrue(v.ok, (v, (vout / "verifier.log").read_text()))
         self.assertEqual(v.metrics, {"answer": "42"})
-        self.assertIn("image=fae-fixture-verifier:", (out / "verifier.log").read_text())
+        self.assertIn("image=fae-fixture-verifier:", (vout / "verifier.log").read_text())
 
 
 class TestTheWire(unittest.TestCase):
