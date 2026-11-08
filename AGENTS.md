@@ -411,6 +411,7 @@ share one class. It answers:
 | `tool(argv, env, network)` | the infra's own `cell_*` pair | a tool the host does not carry, run in a throwaway container of the variant's verify image over the daemon's socket |
 | `image_context(conf)`, `agent_image_context(conf)` | `fae/cell/image.py` | sources staged beside the variant's `[verify] image_dir` (its layer over the verifier's image, `FROM $BASE`, versions pinned; none = the verifier's image as is) and `[authoring] tools` Dockerfiles |
 | `identities(cid)` | `fae/conduct/zombies.py` | the names of what a cell provisions, from the one formula the provisioner uses |
+| `shared_containers()` | `Cell.place` | the cell's containers both phases use, by name, moved to each phase's CPUs (§6); none by default |
 | `PREFIXES`, `stray(live, workspaces)` | `fae/conduct/zombies.py` | what a reaper may DISCOVER: name prefixes to scan by, and any infra no name carries |
 
 The artifacts are the verifier's to run: `secrunner.for_variant` builds the
@@ -503,9 +504,20 @@ variant file's `[verify.run]`.
 The agent runs in its own container, capped at `AGENT_CPUS` cores (default
 1, 0 lifts it): agents run beside the one verify the fleet measures at a
 time, and an uncapped one (its own tests, a build) takes the cores the
-measurement runs on. `CPUSET_MEASURED` / `CPUSET_AGENT` pin the measured
-verify's containers and the agents to separate cores; both are empty (off)
-by default. It mounts exactly:
+measurement runs on. **Every container runs on its phase's CPUs**
+(`fae/cell/placement.py`): at the first step of each phase (`Cell.place`,
+at setup, before each agent run, and on taking and releasing the verify
+lock) the cell reads Docker's CPU count, gives the verify the first
+ceil(N/2) and the agents the rest, and writes them as `CPUSET_MEASURED` and
+`CPUSET_AGENT`, which every container start reads: the verify's, its
+runner, store and clusters on the first; the agent, the tools of the cell's
+setup and the infra the agent uses on the second. A container both phases
+use (`Infra.shared_containers`, a sidecar the agent builds in and the verify
+deploys into) is moved with `docker update --cpuset-cpus`, which reaches the
+containers a dind runs inside it: to the verify's CPUs while the cell holds
+the verify lock, to the agents' otherwise. Without the split an agent's
+build runs on the cores another cell's load test is measured on. A value the
+experiment's config names wins over placement. It mounts exactly:
 
 ```
 -v "$art":/workspace                    # the artifacts dir, nothing else

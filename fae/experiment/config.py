@@ -33,9 +33,10 @@ ENGINE_DEFAULTS = {
     # fleet measures at a time, and an uncapped one (its own tests, a build)
     # takes the cores the measurement runs on. 0: no ceiling.
     "AGENT_CPUS": "1",
-    # Optional pinning (docker --cpuset-cpus), off when empty: the measured
-    # verify's containers on CPUSET_MEASURED, agents on CPUSET_AGENT, e.g.
-    # "0-3" and "4" on a host with cores to spare.
+    # Pinning (docker --cpuset-cpus): the verify's containers on
+    # CPUSET_MEASURED, the agents' on CPUSET_AGENT. Empty here, so the sets
+    # placement writes into the environment apply (fae/cell/placement.py);
+    # a value set in the config wins over them.
     "CPUSET_MEASURED": "",
     "CPUSET_AGENT": "",
 }

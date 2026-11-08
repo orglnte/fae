@@ -229,6 +229,13 @@ class Infra:
         halts its cells before an attempt is spent."""
         return False
 
+    def shared_containers(self):
+        """The containers of this cell that both phases use (a sidecar the
+        agent and the verify both reach), by name: placement moves them to the
+        verify's CPUs while the cell holds the verify lock and to the agents'
+        otherwise. None by default."""
+        return []
+
     @classmethod
     def identities(cls, cid):
         """[(kind, name)] of the cell-lifetime infra a cell provisions, named
@@ -302,7 +309,8 @@ class Infra:
         mounts = _image.mounts_for(self.root, _paths.ENGINE.parent, self.ws)
         cmd = _image.run_argv(self.image(), name, argv, mounts=mounts, env=penv,
                               workdir=str(self.ws), network=network,
-                              labels=(("fae-cell", self.cid),), extra=_image.HOST_ALIAS)
+                              labels=(("fae-cell", self.cid),), extra=_image.HOST_ALIAS,
+                              cpuset=os.environ.get("CPUSET_AGENT") or None)
         try:
             return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:

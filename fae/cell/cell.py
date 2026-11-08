@@ -45,6 +45,7 @@ from fae.experiment import config as _config
 from . import clients
 from . import faults
 from . import host_sleep
+from . import placement as _placement
 from fae.experiment import variants as _variants
 from .checkpoints import Checkpoints
 from .surface import Surface, authorable
@@ -232,6 +233,26 @@ def _agent_cpu_args(conf):
     if cpuset:
         out += [f"--cpuset-cpus={cpuset}"]
     return out
+
+
+class _VerifyHold:
+    """The verify lock as held by a cell: closing it releases the lock and
+    places the cell's shared containers back on the agents' CPUs."""
+
+    def __init__(self, fh, cell):
+        self._fh, self._cell = fh, cell
+
+    def fileno(self):
+        return self._fh.fileno()
+
+    def close(self):
+        if self._fh is None:
+            return
+        try:
+            self._fh.close()
+        finally:
+            self._fh = None
+            self._cell.place("agent")
 
 
 class Cell:
@@ -1986,7 +2007,8 @@ class Cell:
         if (self.ws / ".paused").exists():
             fh.close()
             return None
-        return fh
+        self.place("verify")
+        return _VerifyHold(fh, self)
 
     def loop_lock(self):
         """Exclusive claim on this workspace. Returns the open file, or None if
@@ -2050,10 +2072,26 @@ class Cell:
             self._infra = _variants.for_cell(self)
         return self._infra
 
+    def place(self, phase):
+        """Placement, the first step of each phase ("agent" or "verify"):
+        Docker's CPUs read and split (fae/cell/placement.py), and the
+        containers the infra shares between both phases moved to this
+        phase's set. Returns the placement, or None when Docker did not
+        answer and nothing moved."""
+        p = _placement.apply()
+        if p is None:
+            return None
+        cpuset = p.measured if phase == "verify" else p.agent
+        for name in self.infra.shared_containers():
+            subprocess.run(["docker", "update", "--cpuset-cpus", cpuset, name],
+                           capture_output=True, text=True)
+        return p
+
     def setup(self):
         """The cell's network, then the arm's provisioning on it. Returns
         (rc, env): 0 and the agent-container env on success; 1 and the
         failure already logged on a rig fault."""
+        self.place("agent")
         started = host_sleep.reading()
         try:
             self.infra.network_up()
@@ -2485,6 +2523,7 @@ class Cell:
                 return self._unconfined(f, str(e))
             prompt = self._prompt(attempt)
             fb = self.ws / "feedback"
+            self.place("agent")
             argv = self.agent_argv(
                 self.conf, self.cid, self.artifacts, home, prompt,
                 ee.get("DOCKER_NET", ""), ee.get("KUBE_MOUNT", ""),

@@ -439,7 +439,9 @@ def teardown_argv(ctx, image, conf=None, environ=None):
                                          str(Path(ctx.out) / WORKDIR / "teardown.ctx.json")],
                            mounts=mounts, env=env, workdir=ctx.root,
                            network=_image.cell_network(ctx.cid),
-                           labels=(("fae-cell", ctx.cid),), extra=HOST_ALIAS)
+                           labels=(("fae-cell", ctx.cid),), extra=HOST_ALIAS,
+                           cpuset=(conf.get("CPUSET_MEASURED") if conf else None)
+                           or env.get("CPUSET_MEASURED") or None)
 
 
 def run_teardown(ctx, infra, timeout_s=900, log_dir=None):

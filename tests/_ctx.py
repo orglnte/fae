@@ -50,6 +50,11 @@ os.environ["EXPERIMENT_DIR"] = str(_EXPERIMENT)
 os.environ.setdefault("FAE_HOSTLOAD", "0")
 
 import fae.experiment  # noqa: E402
+# No test reads the real Docker's CPU count: placement answers "Docker did not
+# answer" and writes no CPU sets into this process's environment.
+from fae.cell import placement as _placement  # noqa: E402
+DOCKER_NCPU = _placement.docker_ncpu
+_placement.docker_ncpu = lambda: None
 from fae.cli import _render as render  # noqa: E402
 from fae.experiment import check_exp as check  # noqa: E402
 from fae import conduct  # noqa: E402

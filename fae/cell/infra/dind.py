@@ -2,6 +2,7 @@
 engine block a variant composes)."""
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 
@@ -72,7 +73,9 @@ class DindSidecar:
                     "-p", f"127.0.0.1:{self.api_port}:2375",
                     "-p", f"127.0.0.1:{self.cache_port}:{self.inner_cache_port}",
                     "-e", "DOCKER_TLS_CERTDIR=",
-                    "--memory", "1g", "--cpus", "1", self.image]):
+                    "--memory", "1g", "--cpus", "1",
+                    *(["--cpuset-cpus", os.environ["CPUSET_AGENT"]]
+                      if os.environ.get("CPUSET_AGENT") else []), self.image]):
             raise HookFailure(f"HALT[infra]: dind start failed for {self.cid}")
         for _ in range(30):
             if self.alive():

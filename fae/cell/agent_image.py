@@ -26,6 +26,7 @@ import json
 from fae import mutex, plane
 from fae.book import Book
 from . import image as _image
+from . import placement as _placement
 
 CHECK_TTL_S = 3600
 AGY_MANIFEST = ("https://antigravity-cli-auto-updater-974169037036"
@@ -150,7 +151,10 @@ class AgentImage:
     def installed(self, img=None):
         img = img or self.base()
         probe = "; ".join(f"echo {t}=$({t} --version 2>&1 | tail -n1)" for t in TOOLS)
-        r = subprocess.run(["docker", "run", "--rm", "--entrypoint", "sh", img, "-c", probe],
+        pin = _placement.current()
+        r = subprocess.run(["docker", "run", "--rm",
+                            *(["--cpuset-cpus", pin.agent] if pin else []),
+                            "--entrypoint", "sh", img, "-c", probe],
                            capture_output=True, text=True)
         return parse_versions(r.stdout) if r.returncode == 0 else {}
 
