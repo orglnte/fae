@@ -150,6 +150,17 @@ print(c.values["CALC_BIN"].endswith("/bin/calc"), c.values["CALC_CASES"] == str(
 ''')
         self.assertEqual(out.split(), ["True", "True", "lax", "['CALC_BIN',", "'CALC_CASES',", "'CALC_MODE']"])
 
+    def test_an_empty_config_value_does_not_shadow_the_environment_a_child_inherits(self):
+        out = self._run('''
+        ''', '''
+import os
+from fae.experiment import config
+os.environ["CPUSET_MEASURED"] = "0-2"
+c = config.load(os.getcwd(), env={"EXPERIMENT_DIR": str(d.path)})
+print("CPUSET_MEASURED" in c.exported, c.child_env()["CPUSET_MEASURED"])
+''')
+        self.assertEqual(out.split(), ["False", "0-2"])
+
     def test_the_gate_is_the_definitions(self):
         out = self._run('''
             from fae.experiment import Gate

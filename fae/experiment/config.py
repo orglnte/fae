@@ -323,4 +323,6 @@ def _build(root, env, toml, definition=None):
     exported = {k: v[k] for k in _EXPORT_KEYS if k in v}
     exported.update({k: v[k] for k in definition.config_keys if k in v})
     exported.update({k: val for k, val in v.items() if k.startswith("ARM_SLOTS_")})
-    return Config(v, exported)
+    # an empty value is unset (Config.get): exported, it would shadow the
+    # environment the child inherits, such as the CPU sets placement writes
+    return Config(v, {k: val for k, val in exported.items() if val != ""})
