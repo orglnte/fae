@@ -59,6 +59,9 @@ AGENT_MD = ("---\n"
             "---\n"
             f"# {AGENT}\n")
 CLI_LIMITS = ("--agent", AGENT)
+# What a tool step reports when agy's sandbox could not start the command:
+# the command never ran, through no fault of the agent.
+SANDBOX_REFUSED = "fork/exec /home/node/.local/bin/agy: operation not permitted"
 
 
 class Agy(AgentClient):
@@ -124,11 +127,15 @@ class Agy(AgentClient):
     @classmethod
     def usage(cls, log):
         results, steps = [], {"agent_response": set(), "tool": set()}
+        refused = set()
         for e in events(log):
             if e.get("event") == "step_update":
                 st = e.get("step_update") or {}
                 if st.get("step_type") in steps:
                     steps[st["step_type"]].add(st.get("step_index"))
+                out = str((st.get("tool_info") or {}).get("output") or "")
+                if SANDBOX_REFUSED in out:
+                    refused.add(st.get("step_index"))
             elif e.get("event") == "result":
                 results.append(e.get("result") or {})
         if not results:
@@ -146,6 +153,7 @@ class Agy(AgentClient):
             "retries": None,
             "retry_wait_s": None,
             "limited": None,
+            "sandbox_fails": len(refused),
         }
 
     @classmethod

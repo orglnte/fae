@@ -99,6 +99,23 @@ class TestAgy(unittest.TestCase):
         self.assertEqual((u["out_tok"], u["think_tok"], u["in_tok"]),
                          (82250, 66030, 386010 + 6996400))
 
+    def test_a_command_its_sandbox_refused_to_start_is_counted_once(self):
+        """agy's sandbox sometimes cannot start a command at all; the agent
+        loses the call through no fault of its own."""
+        from fae.cell.clients import agy
+        log = _agy((1, "agent_response"), (2, "tool"), (3, "tool"))
+        for e in log:
+            st = e.get("step_update") or {}
+            if st.get("step_index") == 2 and st.get("state") == "DONE":
+                st["tool_info"] = {"name": "run_command",
+                                   "output": f"Command failed to run: {agy.SANDBOX_REFUSED}.\n"}
+        u = clients.reader("agy").usage(_log(log))
+        self.assertEqual((u["tool_calls"], u["sandbox_fails"]), (2, 1))
+
+    def test_a_run_its_sandbox_never_refused_counts_zero(self):
+        u = clients.reader("agy").usage(_log(_agy((1, "agent_response"), (2, "tool"))))
+        self.assertEqual(u["sandbox_fails"], 0)
+
     def test_what_agy_does_not_record_is_unknown_not_zero(self):
         u = clients.reader("agy").usage(_log(_agy((1, "agent_response"))))
         for f in ("api_s", "cost_usd", "retries", "retry_wait_s", "limited"):

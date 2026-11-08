@@ -577,7 +577,8 @@ engine's clock of the judged run with the client's own account (`agree`,
 and the engine's clock, which also holds the waits between the turns, reads
 longer): a disagreement means one of the two clocks is wrong, and agent time
 is reported from the engine's. The rest of the client's account (API time,
-turns, tool calls, tokens, retries) is read from the transcript at scoring
+turns, tool calls, tokens, retries, and the tool calls the client's own
+sandbox refused to start, `sandbox_fails`) is read from the transcript at scoring
 (`fae/cell/transcript.py`), not written to the ledger, so a rescore gives it
 to every cell whose transcript is kept.
 
