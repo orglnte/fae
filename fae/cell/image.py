@@ -200,13 +200,17 @@ def child_env(base_env, **extra):
 
 
 def socket_group():
-    """The group that may use the daemon's socket: the host socket's own
-    where the host exposes one; root's where the socket is the VM's (Docker
-    Desktop mounts it root:root, group-writable)."""
+    """The group that may use the daemon's socket inside a container: the
+    host socket's own where the daemon runs on the host; root's where the
+    daemon runs in a VM (Docker Desktop and its kind), whose socket a
+    container gets root:root, group-writable. A host socket owned by the
+    operator is such a VM's forwarder, whatever group it carries."""
     try:
-        return os.stat("/var/run/docker.sock").st_gid
+        st = os.stat("/var/run/docker.sock")
     except OSError:
         return 0
+    uid = os.getuid()
+    return 0 if uid and st.st_uid == uid else st.st_gid
 
 
 def run_argv(image, name, argv, mounts=(), env=None, workdir=None, network=None,

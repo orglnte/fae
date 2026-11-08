@@ -198,6 +198,22 @@ class TestTheRunArgv(unittest.TestCase):
         self.assertEqual([argv[i + 1] for i, a in enumerate(argv) if a == "-e"], ["A=1", "B=2"])
         self.assertEqual(argv[-4:], ["img:1", "python3", "-m", "x"])
 
+    def _group_for(self, st_uid, st_gid, uid=501):
+        stat = type("S", (), {"st_uid": st_uid, "st_gid": st_gid})()
+        with mock.patch.object(image.os, "stat", return_value=stat), \
+                mock.patch.object(image.os, "getuid", return_value=uid):
+            return image.socket_group()
+
+    def test_a_socket_the_operator_owns_is_a_vms_forwarder_so_the_group_is_roots(self):
+        self.assertEqual(self._group_for(st_uid=501, st_gid=20), 0)
+
+    def test_a_root_owned_host_socket_gives_its_own_group(self):
+        self.assertEqual(self._group_for(st_uid=0, st_gid=999), 999)
+
+    def test_no_host_socket_gives_roots_group(self):
+        with mock.patch.object(image.os, "stat", side_effect=FileNotFoundError):
+            self.assertEqual(image.socket_group(), 0)
+
     def test_the_names(self):
         self.assertEqual(image.verify_container("c1"), "fae-verify-c1")
         self.assertEqual(image.cell_network("c1"), "fae-net-c1")
