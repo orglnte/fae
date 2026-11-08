@@ -45,10 +45,12 @@ TOOLS = (
     "replace_file_content", "run_command", "run_workflow", "schedule",
     "send_command_input", "send_message", "view_file", "wait", "write_to_file")
 # Tools a session may call beyond the agent file's list: agy 1.5.3 runs
-# read_file though neither its init line nor the agent file names it, and it
-# reads a file as view_file does, inside the same container mounts. Kept out of
-# the agent file, which stays the list agy has accepted.
-ALSO_ALLOWED = ("read_file",)
+# read_file, edit_file and write_file (its names for a client's Read, Edit and
+# Write) though neither its init line nor the agent file names them. They read
+# and write files as view_file, replace_file_content and write_to_file do,
+# inside the same container mounts. Kept out of the agent file, which stays the
+# list agy has accepted.
+ALSO_ALLOWED = ("read_file", "edit_file", "write_file")
 AGENT_MD = ("---\n"
             f"name: {AGENT}\n"
             "description: The agent of an FAE cell.\n"

@@ -86,9 +86,11 @@ class TestTheStepsAreTheProof(Case):
         init = {**INIT, "init": {**INIT["init"], "tools": ["search_web", "view_file"]}}
         self.assertEqual(AGY.breach(init, ["view_file", "run_command"]), "")
 
-    def test_read_file_is_kept_though_the_init_line_does_not_list_it(self):
-        self.assertEqual(AGY.breach(INIT, ["read_file", "view_file"]), "")
-        self.assertNotIn("read_file", agy.AGENT_MD)
+    def test_agys_file_tools_are_kept_though_the_init_line_does_not_list_them(self):
+        for tool in ("read_file", "edit_file", "write_file"):
+            with self.subTest(tool=tool):
+                self.assertEqual(AGY.breach(INIT, [tool, "view_file"]), "")
+                self.assertNotIn(tool, agy.AGENT_MD)
 
     def test_a_call_to_any_other_tool_is_named(self):
         for tool in ("search_web", "browser_get_dom", "a_tool_agy_added_later"):
