@@ -403,8 +403,8 @@ class Conduct:
         starves lanes. Lanes admit starved-first, round-robin.
 
         Admission takes the cell's slots, never waiting: a work slot and, for a
-        variant with a lock, a slot of the lock's pool; a lane whose lock pool is
-        full is passed over this round. The cell process is handed the open slot
+        variant with a lock, a slot of the lock's pool; a spec whose lock pool is
+        full is passed over for the lane's next spec. The cell process is handed the open slot
         files and holds them for its whole life.
 
         A lane whose spawn dies immediately with a systemic code (creds, empty
@@ -616,7 +616,11 @@ class Conduct:
                 idle_sweep = 0
                 while order and idle_sweep < len(order):
                     live = _host.loop_parents()
-                    if len(live) >= n:
+                    # a claimed cell whose loop just died keeps its place: the
+                    # repair pass respawns it, and admitting into its place
+                    # would put the run over its cap
+                    held = set(live) | {qs.spec_cid(sp) for sp in qs.running_specs()}
+                    if len(held) >= n:
                         break
                     m = order[i % len(order)]
                     i += 1

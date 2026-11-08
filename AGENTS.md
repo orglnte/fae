@@ -281,7 +281,8 @@ writes an `ALERT SETUP-FAILED` ledger line.
 - **Admission is `experiment run`'s job; `WORK_SLOTS` is the backstop.**
   `cli.py experiment run` (`fae/conduct/`) is the ONE scheduler and
   the ONE controller: it admits queued specs up to a global cap (`-n`) and
-  `--per-agent`, round-robin with starved lanes first, and every
+  `--per-agent`, round-robin with starved lanes first (a claimed cell whose
+  loop died counts toward the cap until the repair respawns it), and every
   `--supervise-interval` it repairs crashed or hung cells by requeuing them at
   the lane front (its own admission respawns them — one spawner), validates
   DONE cells, and reaps zombies on a second consecutive sighting. A cell whose

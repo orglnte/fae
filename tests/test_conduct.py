@@ -530,6 +530,26 @@ class TestGates(ConductCase):
         self.assertEqual(self.spawned, [])
         self.assertEqual(len(self.pending("aaa")), 2)
 
+    def test_a_claimed_cell_whose_loop_died_keeps_its_place_under_the_cap(self):
+        """Its spec stays claimed until the repair pass respawns it; a new
+        admission into its place put the run over its cap when the repair
+        then started it."""
+        self.q("aaa", [self.spec(rep=1), self.spec(rep=2)])
+        runs.queues.claim("aaa", runs.queues.lane_specs("aaa")[0])   # rep 1, loop dead
+        admit = runs.conduct.Conduct.admit
+        refused = []
+
+        def first_repair_finds_no_slot(conduct, cell, agent, **kw):
+            if kw.get("what") == "repair" and not refused:
+                refused.append(cell.cid)
+                return "no-slot:arm-x"
+            return admit(conduct, cell, agent, **kw)
+        with mock.patch.object(runs.conduct.Conduct, "admit", autospec=True,
+                               side_effect=first_repair_finds_no_slot):
+            self.run_conduct(n=1)
+        self.assertTrue(refused, "the repair pass ran")
+        self.assertEqual(self.spawned, [runs.cell_id("aaa", "beta_apidocs", 1, "T1")])
+
     def test_flagged_cell_is_not_admitted(self):
         """The flag quarantines from ADMISSION too: repair stops requeueing a
         flagged cell, but a spec already in the lane would respawn it right
