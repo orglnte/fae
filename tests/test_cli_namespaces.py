@@ -137,7 +137,8 @@ class TestTheRunCommands(unittest.TestCase):
         (ns,), _ = invoke("run", ["experiment", "run", "-n", "5",
                                       "--per-agent", "2", "--interval", "10"], mod=cli.conduct.Conduct)
         self.assertEqual(vars(ns), dict(limit=5, per_agent=2, per_agent_override={},
-                                        interval=10, supervise_interval=300))
+                                        interval=10, supervise_interval=300,
+                                        exclude_agent=[]))
 
     def test_run_per_model_override(self):
         (ns,), _ = invoke("run", ["experiment", "run",

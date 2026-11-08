@@ -682,7 +682,8 @@ def experiment_run(limit: int = typer.Option(7, "-n", "--limit",
         raise typer.Exit(1)
     conduct.Conduct().run(_ns(limit=limit, per_agent=per_agent,
                         per_agent_override=overrides, interval=interval,
-                        supervise_interval=supervise_interval))
+                        supervise_interval=supervise_interval,
+                        exclude_agent=list(exclude_agent)))
 
 
 def _credentials():

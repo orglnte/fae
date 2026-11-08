@@ -33,7 +33,8 @@ from ._queues import Queues, hhmm, queues  # noqa: F401
 from . import _host
 from ._host import (agent_containers, all_states, cell_state, containers,  # noqa: F401
                     heartbeat, loop_parents, loop_pids, mem_pressure, queued)
-from . import records, supervise, zombies
+from . import records, regimes, supervise, zombies
+from fae import paths as _paths
 
 # One live cell per agent, everywhere: admission enforces it and resume defers
 # respawns past it (--force overrides).
@@ -489,6 +490,10 @@ class Conduct:
         warned_lanes = None             # re-warn only when the lane count moves
         settling_told = False           # one line per wake
         override_txt = (f", override {per_agent_override}" if per_agent_override else "")
+        regimes.run_started(fae.experiment.exp().workspace.conduct, cap=n,
+                            per_agent=args.per_agent, overrides=per_agent_override,
+                            excluded=getattr(args, "exclude_agent", None) or (),
+                            engine_dir=_paths.ENGINE, experiment_root=fae.experiment.exp().root)
         print(f"run: global cap {n}, {args.per_agent}/agent{override_txt}, "
               f"round-robin, poll {args.interval}s"
               + (f", supervision every {sup_interval}s" if sup_interval else
@@ -784,6 +789,7 @@ class Conduct:
         if self.stop_conductor():
             print("stopped conduct — queued specs stay queued; restart conduct "
                   "yourself after the window")
+        regimes.record(fae.experiment.exp().workspace.conduct, "drain", cells=len(cids))
         self.request_pause(cids, "drain")
         print(f"pause requested [drain] for {len(cids)} cell(s) — waiting for loops "
               f"to reach a safe point", flush=True)
@@ -816,6 +822,7 @@ class Conduct:
                     os.kill(pid, signal.SIGTERM)
             except (ProcessLookupError, ValueError):
                 pass
+        regimes.record(fae.experiment.exp().workspace.conduct, "drained")
         print("DRAIN COMPLETE — no loops left; safe to edit FP-guarded files. "
               "Release the window with: python3 cli.py experiment resume all  "
               "(then restart the scheduler: python3 cli.py experiment run)")

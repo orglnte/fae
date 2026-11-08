@@ -288,7 +288,10 @@ writes an `ALERT SETUP-FAILED` ledger line.
   DONE cells, and reaps zombies on a second consecutive sighting. A cell whose
   validation raises is reported once (an ALERT line) and left unvalidated,
   retried every pass: one cell's evidence never stops supervision of the
-  fleet. It runs in
+  fleet. A run's start, a drain and a drain's end each write one line to
+  `.conduct/regimes.jsonl` (`fae/conduct/regimes.py`: the caps, Docker's CPUs
+  and their split, the engine's and the experiment's commits), the regimes an
+  analysis splits its cells by. It runs in
   the foreground; Ctrl-C stops admission and supervision while live cells
   keep running. `experiment diagnose` is the read-only preview; `experiment
   repair` the one-shot engine verb, and the operator's deliberate reap.
