@@ -623,17 +623,13 @@ class Conduct:
                     if len(qs.running_specs(m)) >= per_agent_override.get(m, args.per_agent):
                         idle_sweep += 1
                         continue
-                    p, cid = self._next_admissible(m, boxes)
-                    if p is None:
-                        idle_sweep += 1
-                        continue
-                    cell = self._cell(cid, qs.read_spec(p), m)
-                    slots, why = self.slots_for(cell)
-                    if slots is None:
+                    picked, why = self._first_startable(m, boxes)
+                    if picked is None:
                         idle_sweep += 1
                         if why == "no-slot:work":
                             break                  # every work slot is held: nothing admits now
                         continue
+                    p, cid, cell, slots = picked
                     claimed = qs.claim(m, p)          # QUEUED -> RUNNING, one rename
                     spec = qs.read_spec(claimed)
                     rc = self._start(cell, m, slots, fresh=bool(spec.get("fresh")), what="conduct")
@@ -1134,9 +1130,25 @@ class Conduct:
     def _cell(cid, spec, agent):
         return fae.experiment.exp().cell(cid, spec.get("task", "T1"), spec["variant"], spec["rep"], agent=agent)
 
-    def _next_admissible(self, agent, boxes):
-        """The lane's first spec that may start now, with the ones it skipped
-        accounted for. Returns (path, cid) or (None, reason).
+    def _first_startable(self, agent, boxes):
+        """The lane's first admissible spec whose slots are free, with them
+        held: ((path, cid, cell, slots), None) or (None, reason). A spec whose
+        lock pool is busy is passed over for the next one, so one busy pool
+        never idles a lane whose later specs could start now; a missing work
+        slot or agent image ends the search."""
+        why = "none-admissible"
+        for p, cid in self._admissible(agent, boxes):
+            cell = self._cell(cid, queues().read_spec(p), agent)
+            slots, why = self.slots_for(cell)
+            if slots is not None:
+                return (p, cid, cell, slots), None
+            if why in ("no-slot:work", "no-image"):
+                break
+        return None, why
+
+    def _admissible(self, agent, boxes):
+        """The lane's specs that may start now, in lane order, with the ones
+        it skipped accounted for: yields (path, cid).
 
         Nothing is moved while deciding — a spec only leaves the queue when it is
         claimed, so an interrupted decision costs nothing."""
@@ -1156,8 +1168,7 @@ class Conduct:
                     continue
             if fae.experiment.exp().cell(cid).pause_reason or _host.loop_parents().get(cid):
                 continue
-            return p, cid
-        return None, "none-admissible"
+            yield p, cid
 
     def _adopt_live_cells(self):
         """Claim any live cell conduct did not admit itself.

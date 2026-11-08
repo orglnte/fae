@@ -495,6 +495,41 @@ class TestGates(ConductCase):
         self.assertEqual(len(self.spawned), 1, self.spawned)
         self.assertEqual(self.pending("aaa"), [])
 
+    def busy_pool(self, variant_prefix):
+        """Every cell of the variant finds its lock pool full; the rest take
+        their slots for real."""
+        take = Cell.take_slots
+
+        def fake(cell):
+            if cell.variant.startswith(variant_prefix):
+                return None, "arm-x"
+            return take(cell)
+        return mock.patch.object(Cell, "take_slots", autospec=True, side_effect=fake)
+
+    def test_a_head_whose_pool_is_busy_does_not_idle_the_lane(self):
+        """One busy lock pool held back every later spec of the lane, which
+        then sat below its cap for as long as another cell held the pool."""
+        self.q("aaa", [self.spec(variant="alpha_apidocs", rep=1), self.spec(rep=2)])
+        with self.busy_pool("alpha"):
+            self.run_conduct()
+        self.assertEqual(self.spawned, [runs.cell_id("aaa", "beta_apidocs", 2, "T1")])
+        self.assertEqual([(r["variant"], r["rep"]) for r in self.pending("aaa")],
+                         [("alpha_apidocs", 1)], "the passed-over head stays first")
+
+    def test_the_head_goes_first_when_its_pool_is_free(self):
+        self.per_agent = 1
+        self.q("aaa", [self.spec(variant="alpha_apidocs", rep=1), self.spec(rep=2)])
+        self.run_conduct()
+        self.assertEqual(self.spawned, [runs.cell_id("aaa", "alpha_apidocs", 1, "T1")])
+
+    def test_a_lane_whose_specs_all_wait_on_busy_pools_admits_nothing(self):
+        self.q("aaa", [self.spec(variant="alpha_apidocs", rep=1),
+                       self.spec(variant="alpha_apidocs", rep=2)])
+        with self.busy_pool("alpha"):
+            self.run_conduct()
+        self.assertEqual(self.spawned, [])
+        self.assertEqual(len(self.pending("aaa")), 2)
+
     def test_flagged_cell_is_not_admitted(self):
         """The flag quarantines from ADMISSION too: repair stops requeueing a
         flagged cell, but a spec already in the lane would respawn it right

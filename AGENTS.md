@@ -175,7 +175,7 @@ nothing on disk is ever judged stale: no steal, no adoption, no settle
 window. **Admission takes the slots; the cell process holds them:**
 `Conduct.admit` (or a smoke) takes a free work slot and, for a variant with a
 lock, a free slot of the lock's pool (`Queues.try_slots`, never waiting; a
-busy lock pool gives the work slot back), then starts the cell process with
+busy lock pool gives the work slot back, and the lane's next spec is tried), then starts the cell process with
 the open slot files handed over (`pass_fds`, their numbers in
 `CELL_SLOT_FDS`) and closes its own copies. The cell adopts them
 (`Queues.adopt_slots`), the holder for its whole life, and refuses to start
@@ -346,8 +346,9 @@ writes an `ALERT SETUP-FAILED` ledger line.
 - **One live cell per non-empty lane.** `--per-agent` (1) enforces it; `-n`
   is the global ceiling and should equal the lane count (the run warns). A
   lane that needs more concurrency takes `--per-agent-override AGENT=N`,
-  scoped to that lane. Lock serialization is not an admission concern: a
-  cell parks on its variant's lock in-cell and takes it as soon as it frees.
+  scoped to that lane. A spec whose lock pool is busy is passed over for the
+  lane's next spec (`Conduct._first_startable`) and stays first in the lane,
+  so one busy pool never idles a lane whose later specs could start.
 - **The exactly-1 rule: a cell verb acts directly iff it matches ONE cell;
   bulk goes through the run.** `cell resume CID` lifts locks and respawns
   directly, cap-deferred (`--force` overrides). `experiment resume
