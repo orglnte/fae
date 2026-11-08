@@ -1969,19 +1969,19 @@ class Cell:
     def verify_lock_acquire(self, poll=5.0):
         """The fleet-wide verify lock: gates are serialized WHOLE, so one
         cell's six arrangements never interleave with another's and verify_s
-        never counts another cell's rig time. Blocks until owned; returns the
+        never counts another cell's rig time. Waiters take it first come,
+        first served (`mutex.queue_acquire`), so a long gate never lets a
+        later arrival overtake an earlier one. Blocks until owned; returns the
         open file (closing it is the release), or None on an operator pause —
         checked both while queued and right after winning, so the lock is
         never held by a cell that intends to exit.
         """
         d = Path(self.conf.get("VERIFY_LOCK_DIR") or self.shared_lock(self.locks, "verify"))
         d.parent.mkdir(parents=True, exist_ok=True)
-        fh = _mutex.open_lock(d)
-        while not _mutex.try_fd(fh):
-            if (self.ws / ".paused").exists():
-                fh.close()
-                return None
-            time.sleep(poll)
+        fh = _mutex.queue_acquire(d, self.cid, poll=poll,
+                                  stop=lambda: (self.ws / ".paused").exists())
+        if fh is None:
+            return None
         _mutex.note_holder(d, self.cid, os.getpid())
         if (self.ws / ".paused").exists():
             fh.close()

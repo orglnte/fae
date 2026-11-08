@@ -200,6 +200,8 @@ Two rules break mutual exclusion **silently** if violated:
 `tests/test_mutex_kernel.py` pins the mechanism, including the negative
 control that an inherited fd DOES pin a lock.
 
+**The verify lock's queue is a ticket per waiter** (`<lock>.queue/`, `mutex.queue_acquire`): each waiter holds a flock on its own ticket, made under a dot name and renamed only once locked, and tries the lock only while no older ticket is held. A visible ticket nobody holds is a dead waiter's, skipped and removed; a ticket has one owner and one life, so removing it is not the unlink-and-recreate rule 2 forbids. Without the queue, whoever polls first after a release wins, and a cell can wait hours behind later arrivals.
+
 **A queue on a lock stands down on an operator pause** (`mutex.wait_fds`'s
 `stop`, which a caller answers with `Cell.paused`): an unbounded queue that
 cannot honour a pause waits forever holding what it already took. A pause is
@@ -242,7 +244,7 @@ the probe proves exclusion across a real second process. Probe by hand:
 | Lock | Scope | Held for | Protects |
 |---|---|---|---|
 | cell lock (`.locks/loop-locks/<cid>`) | per cell | the run's lifetime, or one change to the cell's folder | two writers on one workspace corrupt it: every change goes through a `Cell` method that takes this lock; reading a cell takes nothing |
-| **verify lock** | **global, per machine** | one verify | the shared measurement surface: one load test at a time, fleet-wide |
+| **verify lock** | **global, per machine**, taken first come, first served (`mutex.queue_acquire`) | one verify | the shared measurement surface: one load test at a time, fleet-wide; the queue keeps a later arrival from overtaking a cell that waits through a long gate |
 | **variant lock** (`arm-<lock>` in the lock plane) | the `[infra] lock` a variant file names, N-ary; declared by variants whose agents hold a live infra | **cell lifetime, setup→teardown** | host contention: another live infra distorts load-test timing |
 | work slot | global semaphore, `WORK_SLOTS` | cell lifetime | total concurrent cells |
 | exclusive lock | global, the name a verifier declares in `EXCLUSIVE` (none: no lock) | one arrangement, on the cell's own fd around the verifier | whatever singleton infra a verifier declares |

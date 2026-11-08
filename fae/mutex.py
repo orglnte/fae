@@ -9,8 +9,8 @@ adoption, no settle window and no orphan grace.
 
 The holders are the work and lock slots (Queues.try_slots, taken by the
 Conduct and handed to the cell process, which keeps them by Queues.adopt_slots),
-Cell.verify_lock_acquire, Cell.loop_lock, Cell.exclusive_acquire and fs_lock
-below. Each keeps the open file
+Cell.verify_lock_acquire (through queue_acquire, first come, first served),
+Cell.loop_lock, Cell.exclusive_acquire and fs_lock below. Each keeps the open file
 OBJECT for as long as it holds the lock; closing it is the release.
 
 TWO RULES THAT BREAK MUTUAL EXCLUSION SILENTLY IF VIOLATED:
@@ -91,6 +91,71 @@ def wait_fds(fds, cid, label, poll=5.0, ppid=None, stop=None):
             _log(f"{label}: {cid} waiting ({len(fds)} candidate(s), all busy)")
         time.sleep(poll)
         waited += poll
+
+
+def _ticket_held(path):
+    """Is a queue ticket held by a live waiter? Unlike probe_held it never
+    creates the file: a ticket unlinked between the listing and this probe is
+    gone, not a new free ticket."""
+    try:
+        fd = os.open(str(path), os.O_RDWR)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return False
+    except OSError:
+        return True
+    finally:
+        os.close(fd)
+
+
+def queue_dir(path):
+    return Path(str(path) + ".queue")
+
+
+def queue_acquire(path, cid, poll=5.0, stop=None):
+    """First come, first served on one lock file. Returns the lock's open
+    file object, or None when `stop()` says to stand down.
+
+    Each waiter holds a flock on a ticket of its own in `<path>.queue/`,
+    named by its arrival, and tries the lock only while no older ticket is
+    held. A ticket is locked before it becomes visible (made under a dot
+    name, then renamed), so a visible ticket nobody holds belongs to a dead
+    waiter: it is skipped and removed. Each ticket has one owner and one
+    life, so removing it is not the unlink-and-recreate the lock file itself
+    must never undergo.
+    """
+    q = queue_dir(path)
+    q.mkdir(parents=True, exist_ok=True)
+    name = f"{time.time_ns():020d}-{os.getpid()}-{cid}"
+    tmp = q / f".{name}"
+    ticket = open(tmp, "a+")
+    fcntl.flock(ticket, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    os.rename(tmp, q / name)
+    fh = open_lock(path)
+    try:
+        while True:
+            older = sorted(p for p in q.iterdir()
+                           if not p.name.startswith(".") and p.name < name)
+            ahead = False
+            for p in older:
+                if _ticket_held(p):
+                    ahead = True
+                    break
+                p.unlink(missing_ok=True)
+            if not ahead and try_fd(fh):
+                return fh
+            if stop is not None and stop():
+                fh.close()
+                return None
+            time.sleep(poll)
+    except BaseException:
+        fh.close()
+        raise
+    finally:
+        (q / name).unlink(missing_ok=True)
+        ticket.close()
 
 
 def open_lock(path):
