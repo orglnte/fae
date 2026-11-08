@@ -227,8 +227,10 @@ class TestEveryFailureIsARefundedRigFault(RunnerCase):
         def child(argv):
             Path(argv[argv.index("--out") + 1]).write_text("{not json")
             return 0
-        v = self.run_with(exp, child)
+        with mock.patch.object(verify, "run_teardown") as td:
+            v = self.run_with(exp, child)
         self.assertEqual((v.stage, v.charge), ("verifier", False))
+        self.assertEqual(td.call_count, 1)
 
     def test_a_hang_removes_the_container(self):
         exp = _definition(self.root, "")
@@ -251,7 +253,8 @@ class TestEveryFailureIsARefundedRigFault(RunnerCase):
     def test_a_verify_that_did_not_end_on_its_own_is_torn_down(self):
         """A timeout, a signal (SIGTERM reaches the cell as KeyboardInterrupt)
         or any exception: what the verify started beside its container is
-        removed by the full teardown; a verify that ended runs none."""
+        removed by the full teardown; a verify that ended with a verdict runs
+        none."""
         exp = _definition(self.root, "")
 
         def hang(argv):
@@ -274,8 +277,16 @@ class TestEveryFailureIsARefundedRigFault(RunnerCase):
         self.assertEqual(td.call_count, 1)
         with mock.patch.object(verify, "run_teardown") as td:
             self.run_with(exp, self._child_writes(Verdict(ok=True)))
-            self.run_with(exp, lambda argv: 1)
         self.assertEqual(td.call_count, 0)
+
+    def test_a_verify_that_ended_without_a_verdict_is_torn_down(self):
+        """Its container killed under it (a Docker restart) leaves what it
+        started beside the container running: a cluster, a store."""
+        exp = _definition(self.root, "")
+        with mock.patch.object(verify, "run_teardown") as td:
+            v = self.run_with(exp, lambda argv: 137)
+        self.assertEqual(td.call_count, 1)
+        self.assertEqual((v.ok, v.stage, v.charge), (False, "verifier", False))
 
     def test_no_image_is_a_refunded_fault_not_a_verdict(self):
         exp = _definition(self.root, "")

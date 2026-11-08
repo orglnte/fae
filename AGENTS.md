@@ -448,8 +448,11 @@ the workspace, never over a host-owned name and never through a symlink;
   under `arrangements/`; the verifier's `FILES` when the Verdict names none).
 
 A verifier that crashes, hangs past `VERIFIER_TIMEOUT_S` or answers nothing
-is `charge=False` too, and the container is `docker rm -f`'d on every path,
-so nothing it started outlives it — the container IS the session. It runs
+is `charge=False` too, and the container is `docker rm -f`'d on every path.
+What it started beside its container (a cluster, a store, the runner) does not
+die with it, so a verify that did not end on its own or ended without a
+readable verdict (its container killed under it) is also torn down
+(`run_teardown`). It runs
 under the CPU cap the verifier declares (`Verifier.CPUS`), so the load side
 is the same size on every host; as the operator's uid, so what it writes is
 the operator's; and with the daemon socket's group added

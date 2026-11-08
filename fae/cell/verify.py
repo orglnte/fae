@@ -484,9 +484,10 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
     `timeout_s`, crashes, or exits without writing a verdict is a rig
     fault: `charge=False`, the attempt is retried. The container is removed
     on every path; when the verify did not end on its own (a timeout, a
-    signal, any exception) the full teardown runs too (`run_teardown`),
-    since what it started beside its container (the artifacts' runner, the
-    infra, a store) does not die with it. `log_dir` holds verifier.log (the
+    signal, any exception) or ended without a readable verdict (its
+    container killed under it, a crash), the full teardown runs too
+    (`run_teardown`), since what it started beside its container (the
+    artifacts' runner, the infra, a store) does not die with it. `log_dir` holds verifier.log (the
     host's record of the run), default `ctx.out`."""
     from . import image as _image
     work = Path(ctx.out) / WORKDIR
@@ -530,10 +531,12 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
         try:
             return Verdict.from_json(verdict_path.read_text())
         except (ValueError, TypeError) as e:
-            return Verdict(ok=False, stage="verifier", charge=False,
-                           why=f"unreadable verdict: {e}", arrangement=ctx.arrangement)
-    return Verdict(ok=False, stage="verifier", charge=False,
-                   why=f"the verifier exited {rc} without a verdict (see verifier.log)",
+            why = f"unreadable verdict: {e}"
+    else:
+        why = f"the verifier exited {rc} without a verdict (see verifier.log)"
+    _log_line(out, "verify left no verdict: running its teardown")
+    run_teardown(ctx, infra, log_dir=out)
+    return Verdict(ok=False, stage="verifier", charge=False, why=why,
                    arrangement=ctx.arrangement)
 
 
