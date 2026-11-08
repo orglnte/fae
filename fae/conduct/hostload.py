@@ -238,7 +238,7 @@ class HostLoad:
         stats = self.run(["docker", "stats", "--no-stream", "--format",
                           "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"])
         cids = sorted(self.workspace.cells(), key=len, reverse=True)
-        clusters = {ident: c for c, ident in zombies._cluster_map().items()}
+        clusters = zombies._cluster_map()
         for name, cpu, mem_used in parse_stats(stats):
             owner, role = owner_of(name, cids, clusters)
             rows.append(dict(ts=ts, scope="container", name=name, owner=owner, role=role,

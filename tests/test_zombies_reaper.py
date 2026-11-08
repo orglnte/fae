@@ -352,7 +352,23 @@ class TestClusterMapAsksTheCellsVariant(unittest.TestCase):
                     mock.patch.object(beta.INFRA, "identities",
                                       classmethod(lambda cls, c: [("cluster", f"cl-{c}")])), \
                     mock.patch.dict(zombies._CLMAP, {"key": None, "map": {}}):
-                self.assertEqual(zombies._cluster_map(), {cid: f"cl-{cid}"})
+                self.assertEqual(zombies._cluster_map(), {f"cl-{cid}": cid})
+
+    def test_every_cluster_a_cell_names_is_its_own(self):
+        """A sandbox and a per-verify cluster both: the recorder and the
+        reaper attribute each to the cell."""
+        from fae.experiment import variants as _tr
+        beta = _tr.registry()["beta_apidocs"]
+        cid = "testpy_high_beta_apidocs_T1_r1"
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            (ws / cid).mkdir()
+            with at_workspace(ws), \
+                    mock.patch.object(beta.INFRA, "identities", classmethod(
+                        lambda cls, c: [("cluster", f"cl-{c}"), ("cluster", f"cl-{c}-verify")])), \
+                    mock.patch.dict(zombies._CLMAP, {"key": None, "map": {}}):
+                self.assertEqual(zombies._cluster_map(),
+                                 {f"cl-{cid}": cid, f"cl-{cid}-verify": cid})
 
 
 class TestTheRepairReaps(unittest.TestCase):

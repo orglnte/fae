@@ -108,7 +108,7 @@ class TestRecorder(unittest.TestCase):
         self.assertEqual(len(lines), 3)       # header + BBS + BSB
 
     def test_a_sample_attributes_every_container(self):
-        with mock.patch.object(H.zombies, "_cluster_map", lambda: {CIDS[0]: "ka-123"}):
+        with mock.patch.object(H.zombies, "_cluster_map", lambda: {"ka-123": CIDS[0]}):
             got = self.rec.sample()
         owners = {r["name"]: r["owner"] for r in got if r["scope"] == "container"}
         self.assertEqual(owners["ka-123-control-plane"], CIDS[0])

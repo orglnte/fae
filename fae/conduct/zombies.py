@@ -46,10 +46,11 @@ def _workspace_entries():
 
 
 def _cluster_map():
-    """cid -> the cluster a cell of that cid owns, as its variant names it
-    (`Infra.identities`), cached per cid-set: a pure function of the cid,
-    computed in-process — an owner map that could come back empty on a
-    fault would strip every live cluster of its reaper protection."""
+    """cluster -> the cid of the cell that owns it, for every cluster a cell
+    names (`Infra.identities`: a sandbox, a per-verify cluster), cached per
+    cid-set: a pure function of the cid, computed in-process — an owner map
+    that could come back empty on a fault would strip every live cluster of
+    its reaper protection."""
     cids = tuple(sorted(p.name for p in _workspace_entries()
                         if p.is_dir() and parse_cell_id(p.name)))
     if _CLMAP["key"] != cids:
@@ -58,7 +59,7 @@ def _cluster_map():
         for c in cids:
             for kind, ident in _infra_of(parse_cell_id(c)[1], c):
                 if kind == "cluster":
-                    m[c] = ident
+                    m[ident] = c
         _CLMAP["map"] = m
     return _CLMAP["map"]
 def _infra_of(variant, cid):
@@ -249,7 +250,7 @@ def find_zombies():
             if eff is None:
                 continue          # nothing establishes its age: leave it alone
             zs.append(("container", name, cid, "no live loop"))
-    by_cluster = {v: k for k, v in _cluster_map().items()}
+    by_cluster = _cluster_map()
     cluster_prefixes = tuple(p for k, p in prefixes if k == "cluster")
     for cl in _host.sh(["kind", "get", "clusters"]).split():
         if not cluster_prefixes or not cl.startswith(cluster_prefixes):
