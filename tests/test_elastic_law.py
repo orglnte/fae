@@ -140,6 +140,51 @@ class TestASpikeThatNeverSaturatesIsAVoid(unittest.TestCase):
             self.assertTrue(p.stdout.startswith("void|spike 1 never saturated"), p.stdout)
 
 
+# two spikes 15s apart: [15, 63] then [78, 126]
+SSB = {"shape": "SSB", "events": [{"kind": "spike", "t0": 15.0, "t1": 63.0},
+                                  {"kind": "spike", "t0": 78.0, "t1": 126.0},
+                                  {"kind": "blip", "t0": 141.0, "t1": 163.0}]}
+
+
+def trace(total, hot=(), mounted=()):
+    """Per-second rows: p99 high over each [a, b) in `hot` while no cache
+    is up, the infra confirming the cache over each [a, b) in `mounted`."""
+    out = []
+    for ts in range(total):
+        up = any(a <= ts < b for a, b in mounted)
+        p99 = 800.0 if any(a <= ts < b for a, b in hot) and not up else 12.0
+        out.append({"ts": float(ts), "p99": p99, "up": up})
+    return out
+
+
+class TestACacheHeldIntoTheNextSpikeIsCharged(unittest.TestCase):
+
+    def test_a_cache_never_released_absorbs_spike_2_and_is_charged(self):
+        r = trace(175, hot=[(25, 63), (88, 126)], mounted=[(35, 175)])
+        v, why = judge(r, SSB)
+        self.assertEqual(v, "false")
+        self.assertRegex(why[0], r"episode 1 never released before spike 2 \(its cache absorbed")
+
+    def test_a_late_release_that_still_lets_spike_2_saturate_is_charged_as_late(self):
+        r = trace(175, hot=[(25, 63), (88, 126)], mounted=[(35, 90)])
+        v, why = judge(r, SSB)
+        self.assertEqual(v, "false")
+        self.assertTrue(any("episode 1 released too late" in w for w in why), why)
+
+    def test_released_in_time_an_unsaturated_spike_is_still_void(self):
+        r = trace(175, hot=[(25, 63)], mounted=[(35, 72)])
+        v, why = judge(r, SSB)
+        self.assertEqual(v, "void")
+        self.assertIn("spike 2 never saturated the store", why[0])
+
+    def test_errors_ride_along_with_the_held_cache(self):
+        r = trace(175, hot=[(25, 63), (88, 126)], mounted=[(35, 175)])
+        v, why = judge(r, SSB, errors=6)
+        self.assertEqual(v, "false")
+        self.assertIn("episode 1 never released before spike 2", why[0])
+        self.assertIn("load errors 6/6000", why[1])
+
+
 class TestTheOtherClausesStillHold(unittest.TestCase):
 
     def test_a_mount_during_a_blip_is_a_false_positive(self):

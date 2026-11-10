@@ -644,7 +644,9 @@ so its proof is its steps: a call to a tool outside the list is a breach.
   host's knee. Not when the load errors exceed the threshold: a service
   that stops answering completes no request, so its ticks carry no p99 and
   read as an idle store; that is a charged `FAIL[scaling]` naming the
-  silent spike. Every value — baseline, top, ramp, hold, thresholds, the
+  silent spike. Nor when a cache mounted for an earlier spike is still up
+  as the spike begins: the policy's own cache absorbed it, and the release
+  it missed is a charged `FAIL[scaling]`. Every value — baseline, top, ramp, hold, thresholds, the
   excess, the deadline — is the experiment's `CONFIG`, tuned per host.
 - **Tuning the load shape to a host.** Before scored cells, in order: the
   store's bench is above the verifier's floor; the spike saturates well

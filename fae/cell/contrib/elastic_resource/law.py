@@ -11,14 +11,17 @@ saturates the store is a rig fault (the ramp did not reach the host's
 knee), reported as VOID, not as a verdict against the policy — unless the
 load errors exceed the threshold: a service that stops answering completes
 no request, so its ticks carry no p99 and read as an idle store, and that
-is the policy's failure, charged.
+is the policy's failure, charged. Nor when a cache mounted for an earlier
+spike is still up as the spike begins: the policy's own cache absorbed it,
+and the release it missed is charged.
 
 Two modes:
 
 * SCHEDULE-AWARE (a schedule.json exists next to the metrics — written by
   load_shape.py): judges ANY arrangement of blips and spikes, including
   multi-spike re-acquisition. Checks:
-    1. every spike saturates the store (else: void);
+    1. every spike saturates the store (else: void — unless an earlier
+       spike's episode is still up at its start, which is check 4's failure);
     2. exactly one mount episode per SPIKE window, starting inside it —
        from the spike's start (grace) to VERIFY_MAX_MOUNT_S after its
        saturation;
@@ -109,6 +112,16 @@ def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict |
         for i, spk in enumerate(spikes, 1):
             sat_ts, peak = saturation(rows, sat_p99, spk["t0"], spk["t1"])
             if sat_ts is None:
+                held = next((n for n, (m0, m1) in enumerate(eps, 1)
+                             if m0 < spk["t0"] - GRACE_S
+                             and (m1 is None or m1 > spk["t0"] + GRACE_S)), None)
+                if held is not None:
+                    why.append("episode %d never released before spike %d (its cache "
+                               "absorbed the spike: p99 max %.0fms < %gms over [%.0f..%.0f])"
+                               % (held, i, peak, sat_p99, spk["t0"], spk["t1"]))
+                    if err_pct > max_pct:
+                        why.append(errors_why)
+                    return "false", why
                 return unsaturated(
                     "spike %d never saturated the store (p99 max %.0fms < %gms over "
                     "[%.0f..%.0f])" % (i, peak, sat_p99, spk["t0"], spk["t1"]))
