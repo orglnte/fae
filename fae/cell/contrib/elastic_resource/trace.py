@@ -91,13 +91,15 @@ class _Shared:
         self.lock = threading.Lock()
         self.fired = 0
         self.dropped = 0
+        self.main_sent = 0
+        self.main_done = 0
         self.status = {"http_2xx": 0, "http_404": 0, "http_429": 0, "http_5xx": 0, "err": 0}
         self.latencies: deque[tuple[float, float]] = deque()
         self.health: dict = {}
         self.infra = False
 
 
-def _tail_thread(path: Path, st: _Shared, stop: threading.Event) -> None:
+def _tail_thread(path: Path, st: _Shared, stop: threading.Event, main: bool = False) -> None:
     """Continuously tail k6's JSONL — the ONLY job of this thread, so it is never
     blocked by a slow network call. Batches updates into the shared state every
     ~0.1s to keep lock traffic low even at thousands of points/sec."""
@@ -114,6 +116,9 @@ def _tail_thread(path: Path, st: _Shared, stop: threading.Event) -> None:
             st.dropped += dropped
             for k, v in status.items():
                 st.status[k] += v
+            if main:
+                st.main_sent += fired
+                st.main_done += sum(status.values())
             st.latencies.extend(lat)
         fired = dropped = 0
         for k in status:
@@ -199,7 +204,8 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", default="http://127.0.0.1:8080")
     ap.add_argument("--k6-jsonl", type=Path, required=True, action="append",
-                    help="a k6 JSON output to tail; repeat for every generator (the blips')")
+                    help="a k6 JSON output to tail; the first is the main generator, "
+                         "repeat for every other one (the blips')")
     ap.add_argument("--duration-s", type=int, default=65)
     ap.add_argument("--cache-probe-cmd", default="",
                     help="shell command; exit 0 == cache backend confirmed up")
@@ -225,8 +231,8 @@ def main(argv=None) -> None:
     stop = threading.Event()
     probe_argv = shlex.split(args.cache_probe_cmd) if args.cache_probe_cmd else None
     threads = [
-        *[threading.Thread(target=_tail_thread, args=(p, st, stop), daemon=True)
-          for p in args.k6_jsonl],
+        *[threading.Thread(target=_tail_thread, args=(p, st, stop, n == 0), daemon=True)
+          for n, p in enumerate(args.k6_jsonl)],
         threading.Thread(target=_health_thread, args=(f"{args.base_url}/health", st, stop), daemon=True),
         threading.Thread(target=_infra_thread, args=(probe_argv, st, stop), daemon=True),
     ]
@@ -244,6 +250,7 @@ def main(argv=None) -> None:
         "cache_mounted", "infra_cache_up", "pool_pressure",
         "inflight", "pool_size", "pool_waiting",
         "http_2xx", "http_404", "http_429", "http_5xx", "http_err", "k6_drop",
+        "k6_sent", "k6_done",
     ])
 
     _hdr = (f"{'ts':>5} {'rps':>6} {'p90':>6} {'p99':>7} {'pp':>5} "
@@ -279,6 +286,7 @@ def main(argv=None) -> None:
                 win = [v for _, v in st.latencies]
                 fired = st.fired
                 dropped = st.dropped
+                main_sent, main_done = st.main_sent, st.main_done
                 status = dict(st.status)
                 snap = dict(st.health)
                 infra = st.infra
@@ -325,6 +333,7 @@ def main(argv=None) -> None:
                 int(snap.get("pool_waiting", 0) or 0),
                 status["http_2xx"], status["http_404"], status["http_429"],
                 status["http_5xx"], status["err"], dropped,
+                main_sent, main_done,
             ])
             cf.flush()
 

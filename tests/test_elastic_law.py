@@ -185,6 +185,103 @@ class TestACacheHeldIntoTheNextSpikeIsCharged(unittest.TestCase):
         self.assertIn("load errors 6/6000", why[1])
 
 
+def counted(rows_, t1, answered_at=None):
+    """The generator's own counts on each row: 20 requests sent a second,
+    all answered at once — except that what was sent by `t1` is only all
+    answered at `answered_at` (never, when that is past the trace)."""
+    for r in rows_:
+        r["sent"] = int(20 * r["ts"])
+        r["done"] = r["sent"]
+        if answered_at is not None and t1 - 5 <= r["ts"] < answered_at:
+            r["done"] = int(20 * (t1 - 5))
+    return rows_
+
+
+class TestTheReleaseBoundRunsFromTheObservedEndOfTraffic(unittest.TestCase):
+    # spike 1 ends at 63, spike 2 begins at 78: on schedule the cache must be
+    # gone by 81
+
+    def test_traffic_answered_on_schedule_keeps_the_scheduled_bound(self):
+        r = counted(trace(175, hot=[(25, 63), (88, 126)], mounted=[(35, 90)]), 63)
+        v, why = judge(r, SSB)
+        self.assertEqual(v, "false")
+        self.assertTrue(any("episode 1 released too late (ts=90, next spike at 78)" in w
+                            for w in why), why)
+
+    def test_a_release_inside_the_time_the_traffic_ran_over_is_the_hosts_delay(self):
+        r = counted(trace(175, hot=[(25, 63), (88, 126)], mounted=[(35, 88)]), 63,
+                    answered_at=73)
+        v, why = judge(r, SSB)
+        self.assertEqual(v, "void")
+        self.assertIn("spike 1's traffic was answered 10s past its schedule", why[0])
+
+    def test_a_release_past_the_moved_bound_is_still_late(self):
+        r = counted(trace(175, hot=[(25, 63), (88, 126)], mounted=[(35, 95), (100, 135)]),
+                    63, answered_at=73)
+        v, why = judge(r, SSB)
+        self.assertEqual(v, "false")
+        self.assertTrue(any("episode 1 released too late (ts=95, next spike at 78, "
+                            "traffic 10s past schedule)" in w for w in why), why)
+
+    def test_traffic_never_answered_moves_the_bound_by_the_request_timeout_only(self):
+        r = counted(trace(175, hot=[(25, 63), (88, 126)], mounted=[(35, 100), (105, 135)]),
+                    63, answered_at=999)
+        self.assertEqual(law.traffic_lag(r, 63.0, 20.0), 20.0)
+        v, why = judge(r, SSB)
+        self.assertEqual(v, "void")   # released at 100 <= 78 + 20 + 3
+        r = counted(trace(175, hot=[(25, 63), (88, 126)], mounted=[(35, 175)]),
+                    63, answered_at=999)
+        v, why = judge(r, SSB)
+        self.assertEqual(v, "false")
+        self.assertIn("episode 1 never released before spike 2", why[0])
+
+    def test_a_delay_under_the_clock_slack_is_the_traces_grain_not_a_delay(self):
+        r = counted(trace(175, hot=[(25, 63), (88, 126)], mounted=[(35, 82)]), 63,
+                    answered_at=65)
+        self.assertEqual(law.traffic_lag(r, 63.0, 20.0), 0.0)
+        r = counted(trace(175), 63, answered_at=66)
+        self.assertEqual(law.traffic_lag(r, 63.0, 20.0), 3.0)
+
+    def test_failed_requests_are_never_the_hosts_delay(self):
+        r = counted(trace(175, hot=[(25, 63), (88, 126)], mounted=[(35, 88)]), 63,
+                    answered_at=73)
+        v, why = judge(r, SSB, errors=6)
+        self.assertEqual(v, "false")
+        self.assertTrue(any("load errors 6/6000" in w for w in why), why)
+
+    def test_a_trace_without_the_generators_counts_is_judged_on_the_schedule(self):
+        self.assertEqual(law.traffic_lag(trace(175), 63.0, 20.0), 0.0)
+
+
+class TestTheTraceCountsTheMainGeneratorOnItsOwn(unittest.TestCase):
+
+    def tail(self, main):
+        import threading
+        import time
+        tr = _load("trace")
+        point = lambda m, **tags: json.dumps(
+            {"type": "Point", "metric": m, "data": {"value": 1, "tags": tags}}) + "\n"
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "k6.jsonl"
+            f.write_text(point("fired") * 5 + point("http_reqs", status="200") * 3
+                         + point("http_reqs", status="0"))
+            st, stop = tr._Shared(), threading.Event()
+            t = threading.Thread(target=tr._tail_thread, args=(f, st, stop, main))
+            t.start()
+            time.sleep(0.3)
+            stop.set()
+            t.join()
+        return st
+
+    def test_the_main_generators_sent_and_answered_are_counted(self):
+        st = self.tail(main=True)
+        self.assertEqual((st.main_sent, st.main_done), (5, 4), "a timeout is an answer")
+
+    def test_a_blip_generator_adds_to_the_totals_only(self):
+        st = self.tail(main=False)
+        self.assertEqual((st.fired, st.main_sent, st.main_done), (5, 0, 0))
+
+
 class TestTheOtherClausesStillHold(unittest.TestCase):
 
     def test_a_mount_during_a_blip_is_a_false_positive(self):

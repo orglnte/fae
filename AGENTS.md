@@ -646,7 +646,13 @@ so its proof is its steps: a call to a tool outside the list is a breach.
   read as an idle store; that is a charged `FAIL[scaling]` naming the
   silent spike. Nor when a cache mounted for an earlier spike is still up
   as the spike begins: the policy's own cache absorbed it, and the release
-  it missed is a charged `FAIL[scaling]`. Every value — baseline, top, ramp, hold, thresholds, the
+  it missed is a charged `FAIL[scaling]`. The release bound runs from the
+  observed end of a spike's traffic, not the scheduled one: on a slow host
+  the generator's requests are still being answered after it stops sending,
+  for at most the client's request timeout, and a cache released within
+  that time but inside the next spike is the host's delay, a void. The end
+  is read from the generator's own counts in the trace (`k6_sent`,
+  `k6_done`). Every value — baseline, top, ramp, hold, thresholds, the
   excess, the deadline — is the experiment's `CONFIG`, tuned per host.
 - **Tuning the load shape to a host.** Before scored cells, in order: the
   store's bench is above the verifier's floor; the spike saturates well
