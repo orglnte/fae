@@ -5,7 +5,9 @@ Runs alongside k6 (k6 owns load generation; this owns observation) and writes:
 
   1. a per-second CSV trace  (--csv-output) — offered load, latency percentiles,
      cache/pool state, HTTP response mix;
-  2. a small events JSON      (--events-output) — the load start_epoch, the
+  2. a small events JSON      (--events-output) — the trace's start_epoch, the
+     k6_start_epoch (the main generator's first request, which is second 0
+     of the schedule), the
      saturation_epoch (the run's first tick whose p99 reaches --sat-p99-ms,
      a blip's included; the law and k6.py take each spike's own saturation
      from the trace and the schedule), the infra-gated mount_epoch, the
@@ -40,12 +42,14 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import shlex
 import subprocess
 import threading
 import time
 import urllib.request
 from collections import deque
+from datetime import datetime
 from pathlib import Path
 
 from fae.cell import host_sleep
@@ -93,10 +97,23 @@ class _Shared:
         self.dropped = 0
         self.main_sent = 0
         self.main_done = 0
+        self.k6_start: float | None = None   # the main generator's first request, epoch
         self.status = {"http_2xx": 0, "http_404": 0, "http_429": 0, "http_5xx": 0, "err": 0}
         self.latencies: deque[tuple[float, float]] = deque()
         self.health: dict = {}
         self.infra = False
+
+
+def _epoch(stamp: str) -> float | None:
+    """A k6 point's time ("2026-01-02T03:04:05.123456789Z") as an epoch."""
+    m = re.fullmatch(r"(.+?)(\.\d+)?(Z|[+-]\d\d:\d\d)", stamp or "")
+    if not m:
+        return None
+    try:
+        whole = datetime.fromisoformat(m.group(1) + ("+00:00" if m.group(3) == "Z" else m.group(3)))
+    except ValueError:
+        return None
+    return whole.timestamp() + float(m.group(2) or 0)
 
 
 def _tail_thread(path: Path, st: _Shared, stop: threading.Event, main: bool = False) -> None:
@@ -137,6 +154,8 @@ def _tail_thread(path: Path, st: _Shared, stop: threading.Event, main: bool = Fa
         data = obj.get("data") or {}
         if metric == "fired":
             fired += int(data.get("value") or 0)
+            if main and st.k6_start is None:
+                st.k6_start = _epoch(str(data.get("time") or ""))
         elif metric == "dropped_iterations":
             dropped += int(data.get("value") or 0)
         elif metric == "http_reqs":
@@ -351,6 +370,7 @@ def main(argv=None) -> None:
         cf.close()
         events = {
             "start_epoch": round(start_epoch, 3),
+            "k6_start_epoch": round(st.k6_start, 3) if st.k6_start is not None else None,
             "decision_epoch": round(decision_epoch, 3) if decision_epoch is not None else None,
             "mount_epoch": round(mount_epoch, 3) if mount_epoch is not None else None,
             "release_epoch": round(release_epoch, 3) if release_epoch is not None else None,

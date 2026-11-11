@@ -652,7 +652,11 @@ so its proof is its steps: a call to a tool outside the list is a breach.
   for at most the client's request timeout, and a cache released within
   that time but inside the next spike is the host's delay, a void. The end
   is read from the generator's own counts in the trace (`k6_sent`,
-  `k6_done`). Every value — baseline, top, ramp, hold, thresholds, the
+  `k6_done`). The schedule counts its seconds from the generator's first
+  request, the trace from its own start, some seconds earlier; the law
+  moves every window by that difference (`k6_start_epoch` less
+  `start_epoch`, in `trace_events.json`) before judging, and a run
+  without the generator's start is a void. Every value — baseline, top, ramp, hold, thresholds, the
   excess, the deadline — is the experiment's `CONFIG`, tuned per host.
 - **Tuning the load shape to a host.** Before scored cells, in order: the
   store's bench is above the verifier's floor; the spike saturates well

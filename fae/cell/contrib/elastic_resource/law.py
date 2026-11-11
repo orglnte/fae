@@ -25,6 +25,13 @@ request timeout). A delay under the clock slack (GRACE_S) is not one: it
 is the trace's one-second grain. Both counts are the generator's own. A
 trace without them is judged on the scheduled end.
 
+The schedule counts its seconds from the load generator's first request;
+the trace counts from its own start, some seconds earlier (the generator's
+start-up, different on every run). The windows are moved onto the trace's
+clock by that difference (k6_start_epoch - start_epoch, both in the events
+file) before anything is judged. A run whose generator start was not
+recorded cannot be placed: void.
+
 Two modes:
 
 * SCHEDULE-AWARE (a schedule.json exists next to the metrics — written by
@@ -60,7 +67,7 @@ import json
 import os
 import sys
 
-GRACE_S = 3.0   # trace/k6 clock alignment slack
+GRACE_S = 3.0   # slack on every bound: the trace has one line per second
 VOID = "void"
 
 
@@ -129,6 +136,18 @@ def traffic_lag(rows: list[dict], t1: float, max_lag: float) -> float:
     return max_lag
 
 
+def on_trace_clock(sched: dict, events: dict) -> dict | None:
+    """The schedule with its windows on the trace's clock: each moved by how
+    long after the trace's start the generator sent its first request. None
+    when either start is unknown."""
+    k6, start = events.get("k6_start_epoch"), events.get("start_epoch")
+    if k6 is None or start is None:
+        return None
+    d = float(k6) - float(start)
+    return {**sched, "events": [{**w, "t0": w["t0"] + d, "t1": w["t1"] + d}
+                                for w in sched["events"]]}
+
+
 def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict | None,
           *, sat_p99: float, max_mount: float, max_pct: float,
           max_lag: float = 20.0) -> tuple[str, list[str]]:
@@ -146,6 +165,10 @@ def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict |
         return VOID, [what + " — the host's knee is above the ramp; raise [load] top"]
 
     if sched:
+        sched = on_trace_clock(sched, events)
+        if sched is None:
+            return VOID, ["the load generator's start was not recorded — its schedule "
+                          "cannot be placed on the trace"]
         spikes = [w for w in sched["events"] if w["kind"] == "spike"]
         lags = [traffic_lag(rows, w["t1"], max_lag) for w in spikes]
         sats = []

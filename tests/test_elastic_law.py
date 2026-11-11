@@ -46,10 +46,13 @@ def rows(total, saturated_from=None, mounted=(), p99_hot=800.0):
     return out
 
 
-def judge(rows_, sched, errors=0, **kw):
+STARTS = {"start_epoch": 1000.0, "k6_start_epoch": 1000.0}   # generator and trace start together
+
+
+def judge(rows_, sched, errors=0, events=STARTS, **kw):
     params = dict(sat_p99=150.0, max_mount=30.0, max_pct=0.0)
     params.update(kw)
-    return law.judge(rows_, {}, 6000, errors, sched, **params)
+    return law.judge(rows_, events, 6000, errors, sched, **params)
 
 
 class TestTheDeadlineRunsFromSaturation(unittest.TestCase):
@@ -130,7 +133,7 @@ class TestASpikeThatNeverSaturatesIsAVoid(unittest.TestCase):
                 f.write("ts_s,p99_ms,infra_cache_up\n")
                 for ts in range(100):
                     f.write(f"{ts}.0,12.0,False\n")
-            (d / "events.json").write_text("{}")
+            (d / "events.json").write_text(json.dumps(STARTS))
             (d / "schedule.json").write_text(json.dumps(SCHED))
             p = subprocess.run([sys.executable, str(CONTRIB / "law.py"), str(d / "trace.csv"),
                                 str(d / "events.json"), "6000", "0", str(d / "schedule.json")],
@@ -260,7 +263,8 @@ class TestTheTraceCountsTheMainGeneratorOnItsOwn(unittest.TestCase):
         import time
         tr = _load("trace")
         point = lambda m, **tags: json.dumps(
-            {"type": "Point", "metric": m, "data": {"value": 1, "tags": tags}}) + "\n"
+            {"type": "Point", "metric": m,
+             "data": {"time": "2026-01-02T03:04:05.25Z", "value": 1, "tags": tags}}) + "\n"
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "k6.jsonl"
             f.write_text(point("fired") * 5 + point("http_reqs", status="200") * 3
@@ -276,10 +280,60 @@ class TestTheTraceCountsTheMainGeneratorOnItsOwn(unittest.TestCase):
     def test_the_main_generators_sent_and_answered_are_counted(self):
         st = self.tail(main=True)
         self.assertEqual((st.main_sent, st.main_done), (5, 4), "a timeout is an answer")
+        self.assertAlmostEqual(st.k6_start, 1767323045.25, places=3)
 
     def test_a_blip_generator_adds_to_the_totals_only(self):
         st = self.tail(main=False)
         self.assertEqual((st.fired, st.main_sent, st.main_done), (5, 0, 0))
+        self.assertIsNone(st.k6_start)
+
+
+class TestTheScheduleIsPlacedOnTheTraceClock(unittest.TestCase):
+    """The schedule counts from the generator's first request, the trace from
+    its own start. Two spikes, the second scheduled at 78."""
+
+    SS = {"shape": "SS", "events": [{"kind": "spike", "t0": 15.0, "t1": 63.0},
+                                    {"kind": "spike", "t0": 78.0, "t1": 126.0}]}
+
+    def run_with(self, released_at, generator_after):
+        r = rows(190, saturated_from=None, mounted=[(33, released_at), (100, 170)])
+        for x in r:   # the store is hot from each spike's ramp until its cache is up
+            x["p99"] = 800.0 if (25 <= x["ts"] < 33 or 92 <= x["ts"] < 100) else 12.0
+        ev = {"start_epoch": 1000.0, "k6_start_epoch": 1000.0 + generator_after}
+        return judge(r, self.SS, events=ev)
+
+    def test_a_release_inside_the_slack_of_the_real_spike_start_passes(self):
+        # generator 4s behind the trace: spike 2 really starts at 82, limit 85
+        self.assertEqual(self.run_with(released_at=84, generator_after=4.0), ("true", []))
+
+    def test_the_same_release_fails_when_the_clocks_agree(self):
+        v, why = self.run_with(released_at=84, generator_after=0.0)
+        self.assertEqual(v, "false")
+        self.assertIn("released too late (ts=84, next spike at 78)", why[0])
+
+    def test_past_the_slack_of_the_real_start_it_still_fails(self):
+        v, why = self.run_with(released_at=87, generator_after=4.0)
+        self.assertEqual(v, "false")
+        self.assertIn("released too late (ts=87, next spike at 82)", why[0])
+
+    def test_a_run_without_the_generators_start_is_void(self):
+        r = rows(100, saturated_from=14, mounted=[(22, 70)])
+        for ev in ({}, {"start_epoch": 1000.0}, {"start_epoch": 1000.0, "k6_start_epoch": None}):
+            v, why = judge(r, SCHED, events=ev)
+            self.assertEqual(v, "void", ev)
+            self.assertIn("generator's start was not recorded", why[0])
+
+    def test_the_schedule_given_is_not_changed(self):
+        before = json.dumps(self.SS)
+        self.run_with(released_at=84, generator_after=4.0)
+        self.assertEqual(json.dumps(self.SS), before)
+
+    def test_the_trace_records_the_main_generators_first_request(self):
+        tr = _load("trace")
+        self.assertAlmostEqual(tr._epoch("2026-01-02T03:04:05.250000000Z"), 1767323045.25, places=3)
+        self.assertAlmostEqual(tr._epoch("2026-01-02T04:04:05.25+01:00"), 1767323045.25, places=3)
+        self.assertIsNone(tr._epoch(""))
+        self.assertIsNone(tr._epoch("not a time"))
 
 
 class TestTheOtherClausesStillHold(unittest.TestCase):
