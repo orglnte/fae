@@ -354,6 +354,19 @@ class TestSecondsAreReadOffTheClock(unittest.TestCase):
         self.assertEqual(tr.traffic_s(5010.0, 5000.0, 17.0), 10.0)
         self.assertEqual(tr.traffic_s(5010.0, None, 4.0), -4.0)
 
+    def test_a_generators_first_request_is_read_from_its_output(self):
+        tr = _load("trace")
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "k6.jsonl"
+            self.assertIsNone(tr.first_request_epoch(out), "no output yet")
+            out.write_text('{"type":"Metric","metric":"fired","data":{}}\n'
+                           '{"type":"Point","metric":"http_reqs","data":{"time":"2026-01-02T03:04:04Z","value":1}}\n')
+            self.assertIsNone(tr.first_request_epoch(out), "no request yet")
+            with out.open("a") as fh:
+                fh.write('{"type":"Point","metric":"fired","data":{"time":"2026-01-02T03:04:05.25Z","value":1}}\n'
+                         '{"type":"Point","metric":"fired","data":{"time":"2026-01-02T03:04:09Z","value":1}}\n')
+            self.assertAlmostEqual(tr.first_request_epoch(out), 1767323045.25, places=3)
+
     def test_the_trace_reads_the_time_of_a_generators_point(self):
         tr = _load("trace")
         self.assertAlmostEqual(tr._epoch("2026-01-02T03:04:05.250000000Z"), 1767323045.25, places=3)

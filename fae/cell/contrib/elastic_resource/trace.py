@@ -118,6 +118,25 @@ def _epoch(stamp: str) -> float | None:
     return whole.timestamp() + float(m.group(2) or 0)
 
 
+def first_request_epoch(k6_jsonl: Path) -> float | None:
+    """The clock time of a generator's first request, read from its k6 JSONL
+    output. None while it has sent none."""
+    try:
+        with open(k6_jsonl, errors="replace") as fh:
+            for line in fh:
+                if '"fired"' not in line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get("type") == "Point" and obj.get("metric") == "fired":
+                    return _epoch(str((obj.get("data") or {}).get("time") or ""))
+    except OSError:
+        pass
+    return None
+
+
 def traffic_s(wall: float, k6_start: float | None, waited: float) -> float:
     """Seconds of traffic so far: since the main generator's first request.
     Before it, the seconds waited for it, negative."""
