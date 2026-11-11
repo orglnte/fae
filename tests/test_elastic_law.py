@@ -288,33 +288,45 @@ class TestTheTraceCountsTheMainGeneratorOnItsOwn(unittest.TestCase):
         self.assertIsNone(st.k6_start)
 
 
-class TestTheScheduleIsPlacedOnTheTraceClock(unittest.TestCase):
-    """The schedule counts from the generator's first request, the trace from
-    its own start. Two spikes, the second scheduled at 78."""
+class TestSecondsAreReadOffTheClock(unittest.TestCase):
+    """The trace stamps each line with its clock time; a line's second is that
+    time less the generator's first request. Two spikes, the second at 78."""
 
     SS = {"shape": "SS", "events": [{"kind": "spike", "t0": 15.0, "t1": 63.0},
                                     {"kind": "spike", "t0": 78.0, "t1": 126.0}]}
+    ZERO = 5000.0                      # the generator's first request
 
-    def run_with(self, released_at, generator_after):
-        r = rows(190, saturated_from=None, mounted=[(33, released_at), (100, 170)])
-        for x in r:   # the store is hot from each spike's ramp until its cache is up
-            x["p99"] = 800.0 if (25 <= x["ts"] < 33 or 92 <= x["ts"] < 100) else 12.0
-        ev = {"start_epoch": 1000.0, "k6_start_epoch": 1000.0 + generator_after}
-        return judge(r, self.SS, events=ev)
+    def trace(self, d, recorder_before, released_at):
+        """One line a second from `recorder_before` seconds before the first
+        request; the cache is up over traffic seconds [33, released_at) and
+        [100, 170), the store hot while each spike ramps without it."""
+        path = Path(d) / "trace.csv"
+        with path.open("w") as f:
+            f.write("epoch,p99_ms,infra_cache_up,k6_sent,k6_done\n")
+            for n in range(-recorder_before, 190):
+                up = 33 <= n < released_at or 100 <= n < 170
+                hot = 25 <= n < 33 or 92 <= n < 100
+                f.write(f"{self.ZERO + n},{800.0 if hot else 12.0},{up},,\n")
+        return str(path)
 
-    def test_a_release_inside_the_slack_of_the_real_spike_start_passes(self):
-        # generator 4s behind the trace: spike 2 really starts at 82, limit 85
-        self.assertEqual(self.run_with(released_at=84, generator_after=4.0), ("true", []))
+    def run_with(self, recorder_before, released_at, events=None):
+        ev = {"start_epoch": self.ZERO - recorder_before, "k6_start_epoch": self.ZERO} \
+            if events is None else events
+        with tempfile.TemporaryDirectory() as d:
+            rows_ = law.read_trace(self.trace(d, recorder_before, released_at), ev)
+        return rows_, judge(rows_, self.SS, events=ev)
 
-    def test_the_same_release_fails_when_the_clocks_agree(self):
-        v, why = self.run_with(released_at=84, generator_after=0.0)
-        self.assertEqual(v, "false")
-        self.assertIn("released too late (ts=84, next spike at 78)", why[0])
+    def test_lines_taken_before_the_first_request_are_negative(self):
+        rows_, _ = self.run_with(recorder_before=4, released_at=70)
+        self.assertEqual([r["ts"] for r in rows_[:6]], [-4.0, -3.0, -2.0, -1.0, 0.0, 1.0])
 
-    def test_past_the_slack_of_the_real_start_it_still_fails(self):
-        v, why = self.run_with(released_at=87, generator_after=4.0)
-        self.assertEqual(v, "false")
-        self.assertIn("released too late (ts=87, next spike at 82)", why[0])
+    def test_the_verdict_does_not_depend_on_when_the_recorder_started(self):
+        for before in (0, 3, 7, 12):
+            _, (v, why) = self.run_with(recorder_before=before, released_at=80)
+            self.assertEqual((v, why), ("true", []), before)   # 80 <= 78 + 3
+            _, (v, why) = self.run_with(recorder_before=before, released_at=83)
+            self.assertEqual(v, "false", before)
+            self.assertIn("released too late (ts=83, next spike at 78)", why[0])
 
     def test_a_run_without_the_generators_start_is_void(self):
         r = rows(100, saturated_from=14, mounted=[(22, 70)])
@@ -323,12 +335,26 @@ class TestTheScheduleIsPlacedOnTheTraceClock(unittest.TestCase):
             self.assertEqual(v, "void", ev)
             self.assertIn("generator's start was not recorded", why[0])
 
-    def test_the_schedule_given_is_not_changed(self):
-        before = json.dumps(self.SS)
-        self.run_with(released_at=84, generator_after=4.0)
-        self.assertEqual(json.dumps(self.SS), before)
+    def test_a_trace_that_numbered_its_own_lines_keeps_its_numbers(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "trace.csv"
+            path.write_text("epoch,ts_s,p99_ms,infra_cache_up\n5003.2,1.0,12.0,False\n5004.2,2.0,12.0,False\n")
+            self.assertEqual([r["ts"] for r in law.read_trace(str(path), {})], [1.0, 2.0])
+            self.assertEqual([r["ts"] for r in law.read_trace(str(path), {"k6_start_epoch": 5000.0})],
+                             [3.2, 4.2])
 
-    def test_the_trace_records_the_main_generators_first_request(self):
+    def test_the_trace_window_is_counted_from_the_first_request(self):
+        tr = _load("trace")
+        # first request 7s after the recorder started: the window still holds 138s of traffic
+        self.assertFalse(tr.window_over(wall=5138.0, k6_start=5000.0, waited=145.0, duration_s=138))
+        self.assertTrue(tr.window_over(wall=5138.5, k6_start=5000.0, waited=145.5, duration_s=138))
+        # no request at all: it gives up after the same time
+        self.assertFalse(tr.window_over(wall=9.0, k6_start=None, waited=138.0, duration_s=138))
+        self.assertTrue(tr.window_over(wall=9.0, k6_start=None, waited=138.5, duration_s=138))
+        self.assertEqual(tr.traffic_s(5010.0, 5000.0, 17.0), 10.0)
+        self.assertEqual(tr.traffic_s(5010.0, None, 4.0), -4.0)
+
+    def test_the_trace_reads_the_time_of_a_generators_point(self):
         tr = _load("trace")
         self.assertAlmostEqual(tr._epoch("2026-01-02T03:04:05.250000000Z"), 1767323045.25, places=3)
         self.assertAlmostEqual(tr._epoch("2026-01-02T04:04:05.25+01:00"), 1767323045.25, places=3)

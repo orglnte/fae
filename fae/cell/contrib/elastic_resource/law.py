@@ -25,12 +25,12 @@ request timeout). A delay under the clock slack (GRACE_S) is not one: it
 is the trace's one-second grain. Both counts are the generator's own. A
 trace without them is judged on the scheduled end.
 
-The schedule counts its seconds from the load generator's first request;
-the trace counts from its own start, some seconds earlier (the generator's
-start-up, different on every run). The windows are moved onto the trace's
-clock by that difference (k6_start_epoch - start_epoch, both in the events
-file) before anything is judged. A run whose generator start was not
-recorded cannot be placed: void.
+Time is the clock's. The trace stamps each line with the time it was
+taken and does not number seconds; its events file holds the time of the
+load generator's first request (k6_start_epoch). The schedule counts its
+seconds from that request, so a line's second is its time less that one:
+lines taken before the traffic began are negative. A run whose generator
+start was not recorded cannot be placed against its schedule: void.
 
 Two modes:
 
@@ -75,11 +75,21 @@ def _count(v) -> int | None:
     return int(v) if v not in (None, "") else None
 
 
-def read_trace(trace: str) -> list[dict]:
+def second(row: dict, events: dict | None) -> float:
+    """A trace line's second on the schedule's clock: its own time less the
+    generator's first request. A trace that numbered its own lines (ts_s)
+    and has no such request recorded keeps its numbers."""
+    zero = (events or {}).get("k6_start_epoch")
+    if zero is not None and row.get("epoch") not in (None, ""):
+        return round(float(row["epoch"]) - float(zero), 3)
+    return float(row.get("ts_s") or 0)
+
+
+def read_trace(trace: str, events: dict | None = None) -> list[dict]:
     rows = []
     for r in csv.DictReader(open(trace)):
         rows.append({
-            "ts": float(r.get("ts_s") or 0),
+            "ts": second(r, events),
             "p99": float(r.get("p99_ms") or 0),
             "up": str(r.get("infra_cache_up", "")).strip() == "True",
             "sent": _count(r.get("k6_sent")),
@@ -136,18 +146,6 @@ def traffic_lag(rows: list[dict], t1: float, max_lag: float) -> float:
     return max_lag
 
 
-def on_trace_clock(sched: dict, events: dict) -> dict | None:
-    """The schedule with its windows on the trace's clock: each moved by how
-    long after the trace's start the generator sent its first request. None
-    when either start is unknown."""
-    k6, start = events.get("k6_start_epoch"), events.get("start_epoch")
-    if k6 is None or start is None:
-        return None
-    d = float(k6) - float(start)
-    return {**sched, "events": [{**w, "t0": w["t0"] + d, "t1": w["t1"] + d}
-                                for w in sched["events"]]}
-
-
 def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict | None,
           *, sat_p99: float, max_mount: float, max_pct: float,
           max_lag: float = 20.0) -> tuple[str, list[str]]:
@@ -165,8 +163,7 @@ def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict |
         return VOID, [what + " — the host's knee is above the ramp; raise [load] top"]
 
     if sched:
-        sched = on_trace_clock(sched, events)
-        if sched is None:
+        if events.get("k6_start_epoch") is None:
             return VOID, ["the load generator's start was not recorded — its schedule "
                           "cannot be placed on the trace"]
         spikes = [w for w in sched["events"] if w["kind"] == "spike"]
@@ -253,7 +250,7 @@ def main() -> None:
     if sched_path and os.path.isfile(sched_path):
         sched = json.load(open(sched_path))
     verdict, why = judge(
-        read_trace(trace), ev, total, errors, sched,
+        read_trace(trace, ev), ev, total, errors, sched,
         sat_p99=float(os.environ.get("VERIFY_SAT_P99_MS", "150")),
         max_mount=float(os.environ.get("VERIFY_MAX_MOUNT_S", "30")),
         max_pct=float(os.environ.get("VERIFY_MAX_LOAD_ERR_PCT", "0")),

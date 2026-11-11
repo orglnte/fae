@@ -58,12 +58,12 @@ def k6_metrics(path: str) -> tuple[int, int, int, int]:
         return 0, 0, 0, 0
 
 
-def read_mounts(csv_path: str) -> list[dict]:
+def read_mounts(csv_path: str, events: dict | None = None) -> list[dict]:
     """Per tick: ts, p99, and mounted as mount_epoch defines it (the app
     reports the resource mounted AND the infra confirms it)."""
-    out = []
+    out, second = [], _law().second
     for r in csv.DictReader(open(csv_path)):
-        out.append({"ts": float(r.get("ts_s") or 0), "p99": float(r.get("p99_ms") or 0),
+        out.append({"ts": second(r, events), "p99": float(r.get("p99_ms") or 0),
                     "mounted": (str(r.get("cache_mounted", "")).strip() == "True"
                                 and str(r.get("infra_cache_up", "")).strip() == "True")})
     return out
@@ -103,7 +103,7 @@ def mount_delay_s(csv_path: str, events_path: str, schedule_path: str = "") -> s
         try:
             spikes = [w for w in json.load(open(schedule_path))["events"] if w["kind"] == "spike"]
             sat_p99 = float(ev.get("sat_p99_ms") or os.environ.get("VERIFY_SAT_P99_MS") or 150)
-            delays = spike_mount_delays(read_mounts(csv_path), spikes, sat_p99)
+            delays = spike_mount_delays(read_mounts(csv_path, ev), spikes, sat_p99)
         except (OSError, ValueError, KeyError, json.JSONDecodeError):
             return ""
         return "" if not delays or delays[0] is None else str(delays[0])

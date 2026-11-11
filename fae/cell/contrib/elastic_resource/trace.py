@@ -4,7 +4,9 @@
 Runs alongside k6 (k6 owns load generation; this owns observation) and writes:
 
   1. a per-second CSV trace  (--csv-output) — offered load, latency percentiles,
-     cache/pool state, HTTP response mix;
+     cache/pool state, HTTP response mix. Each line carries the clock time it
+     was taken at (epoch) and no second count: a reader places a line by its
+     time less k6_start_epoch (law.second);
   2. a small events JSON      (--events-output) — the trace's start_epoch, the
      k6_start_epoch (the main generator's first request, which is second 0
      of the schedule), the
@@ -114,6 +116,21 @@ def _epoch(stamp: str) -> float | None:
     except ValueError:
         return None
     return whole.timestamp() + float(m.group(2) or 0)
+
+
+def traffic_s(wall: float, k6_start: float | None, waited: float) -> float:
+    """Seconds of traffic so far: since the main generator's first request.
+    Before it, the seconds waited for it, negative."""
+    return (wall - k6_start) if k6_start is not None else -waited
+
+
+def window_over(wall: float, k6_start: float | None, waited: float, duration_s: float) -> bool:
+    """The trace's window is `duration_s` of traffic, counted from the
+    generator's first request. A generator that never sends ends it after
+    the same time of waiting."""
+    if k6_start is None:
+        return waited > duration_s
+    return wall - k6_start > duration_s
 
 
 def _tail_thread(path: Path, st: _Shared, stop: threading.Event, main: bool = False) -> None:
@@ -265,7 +282,7 @@ def main(argv=None) -> None:
     cf = args.csv_output.open("w", newline="")
     w = csv.writer(cf)
     w.writerow([
-        "epoch", "ts_s", "offered_rps", "p90_ms", "p99_ms",
+        "epoch", "offered_rps", "p90_ms", "p99_ms",
         "cache_mounted", "infra_cache_up", "pool_pressure",
         "inflight", "pool_size", "pool_waiting",
         "http_2xx", "http_404", "http_429", "http_5xx", "http_err", "k6_drop",
@@ -287,14 +304,25 @@ def main(argv=None) -> None:
     last_tick_wall = time.time()
     host_sleep_s = 0.0
     try:
-        for tick in range(1, args.duration_s + 1):
+        # The window is --duration-s of TRAFFIC: it is counted from the main
+        # generator's first request, which comes some seconds after this
+        # starts. A generator that never sends ends the trace after the same
+        # time of waiting.
+        tick = 0
+        while True:
+            tick += 1
             target = started + tick
             now = time.monotonic()
             if target > now:
                 time.sleep(target - now)
             now = time.monotonic()
-            elapsed = now - started
             wall = time.time()
+            k6_start = st.k6_start
+            # seconds of traffic so far (what the live table shows); before the
+            # first request, seconds of waiting, negative
+            elapsed = traffic_s(wall, k6_start, now - started)
+            if window_over(wall, k6_start, now - started, args.duration_s):
+                break
             host_sleep_s += host_sleep.gap(wall - last_tick_wall, now - last_tick_mono)
             last_tick_wall = wall
 
@@ -344,7 +372,7 @@ def main(argv=None) -> None:
                           f"(p99 {p99:.0f}ms >= {args.sat_p99_ms:g}ms at {offered_rps} rps)", flush=True)
 
             w.writerow([
-                round(time.time(), 3), round(elapsed, 1), offered_rps,
+                round(wall, 3), offered_rps,
                 round(p90, 1), round(p99, 1),
                 cache_self, infra, pp,
                 int(snap.get("inflight", 0) or 0),
