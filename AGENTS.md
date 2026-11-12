@@ -307,6 +307,13 @@ writes an `ALERT SETUP-FAILED` ledger line.
   first); what a verifier provisions for a cell is declared on the verifier
   (`PREFIXES`, `identities`). All are reaped like a
   variant's infra, a network only past the long grace.
+- **Low Power Mode.** A verify is timed, and Low Power Mode slows the CPU
+  (`fae/host_power.py`; macOS, read from `pmset -g`). While it is on,
+  `experiment check` fails and `experiment run` refuses to start. When it
+  turns on under a live run, the run asks every running cell to pause at
+  its next safe point (pause `low-power-mode`, by=the run) and exits;
+  `experiment resume all` lifts it. On another system the mode is not
+  read: check and run print a warning and go on.
 - **Walls and stand-downs.** A cell waiting on a provider limit is stood
   down (pause `limit-wall`, by=the run), requeued at the front, and its lane
   cools (`.queues/cooldown.<agent>`: the provider's reset hint, or 3 h);

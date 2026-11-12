@@ -27,7 +27,7 @@ import fae.experiment
 from fae.cell import host_sleep
 from fae.cell.cell import Cell
 from fae import experiment as _experiment
-from fae import mutex
+from fae import host_power, mutex
 from . import _queues
 from ._queues import Queues, hhmm, queues  # noqa: F401
 from . import _host
@@ -503,6 +503,10 @@ class Conduct:
             while True:
                 _host.host_sleep_observe()
                 self.act_on_requests()
+                if host_power.low_power_mode():
+                    self._drain_on_low_power()
+                    pidfile.unlink(missing_ok=True)
+                    return
                 # A lid-shut laptop wakes for under a minute at a time and runs
                 # this loop then: a cell judged in such a wake reads as stalled.
                 settling = _host.host_settling()
@@ -699,6 +703,17 @@ class Conduct:
         finally:
             sys.stdout, sys.stderr = _old_out, _old_err
             _logf.close()
+
+    def _drain_on_low_power(self):
+        """The host went into Low Power Mode under a live run: every running
+        cell is asked to pause at its next safe point (`low-power-mode`), and
+        the caller ends the run so nothing new starts."""
+        asked = self.request_pause(sorted(_host.loop_parents()), "low-power-mode", who="conduct")
+        regimes.record(fae.experiment.exp().workspace.conduct, "low-power-mode", cells=len(asked))
+        print(f"  [{hhmm()}] LOW-POWER-MODE on the host: {len(asked)} cell(s) pause at their "
+              f"next safe point and the run exits; nothing new starts. Fix: "
+              f"{host_power.FIX}, then `experiment resume all` and `experiment run`.",
+              flush=True)
 
     def pause(self, args):
         """GRACEFUL bulk pause (the old `drain`); nothing is killed mid-attempt;
@@ -1026,6 +1041,12 @@ class Conduct:
             print("run: STOP — the docker daemon is not reachable. Start "
                   "Docker, then run `experiment run` again.", flush=True)
             return False
+        if host_power.low_power_mode():
+            print(f"run: STOP — the host is in Low Power Mode, and a verify is timed. "
+                  f"Fix: {host_power.FIX}, then run `experiment run` again.", flush=True)
+            return False
+        if not host_power.readable():
+            print(f"run: WARNING — {host_power.UNREAD}.", flush=True)
         local, fstype = mutex.fs_is_local(fae.experiment.exp().workspace.path)
         if local is False:
             print(f"run: WARNING — {fae.experiment.exp().workspace.path} is on {fstype}, not a local disk. Cells and "

@@ -191,6 +191,12 @@ def _prerequisites(ctx):
             ok = False
         out.append(Finding(ok, "docker daemon " + ("answers" if ok else "unreachable"),
                            "start Docker, then `docker info` must succeed"))
+        from fae import host_power
+        low = host_power.low_power_mode()
+        out.append(Finding(not low, "Low Power Mode " + ("on" if low else "off"),
+                           host_power.FIX)
+                   if host_power.readable() else
+                   Finding(True, f"WARNING: {host_power.UNREAD}"))
     from fae import mutex as _mutex
     local, fstype = _mutex.fs_is_local(fae.experiment.exp().workspace.path)
     if local is False:

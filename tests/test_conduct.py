@@ -90,6 +90,31 @@ class ConductCase(OrchTmpCase):
         return out.getvalue()
 
 
+class TestLowPowerMode(ConductCase):
+    """A host that goes into Low Power Mode under a live run."""
+
+    def test_running_cells_are_asked_to_pause_and_the_run_exits(self):
+        self.q("aaa", [self.spec(rep=r) for r in (1, 2)])
+        self.live["aaa_high_beta_apidocs_T1_r9"] = 4242
+        asked = []
+        with mock.patch.object(runs.conduct.host_power, "low_power_mode", return_value=True), \
+                mock.patch.object(runs.conduct.Conduct, "request_pause",
+                                  side_effect=lambda cids, reason, who="operator":
+                                  asked.append((list(cids), reason, who)) or list(cids)):
+            out = self.run_conduct()
+        self.assertEqual(asked, [(["aaa_high_beta_apidocs_T1_r9"], "low-power-mode", "conduct")])
+        self.assertEqual(self.spawned, [], "nothing is admitted in Low Power Mode")
+        self.assertEqual(self.rounds, 0, "the run exits at once, it does not poll on")
+        self.assertIn("LOW-POWER-MODE", out)
+        self.assertFalse(runs.conduct.Conduct().pidfile.exists())
+
+    def test_a_host_out_of_low_power_mode_is_left_alone(self):
+        self.q("aaa", [self.spec(rep=1)])
+        out = self.run_conduct()
+        self.assertNotIn("LOW-POWER-MODE", out)
+        self.assertEqual(len(self.spawned), 1)
+
+
 class TestFairness(ConductCase):
     def test_round_robin_interleaves_lanes(self):
         self.q("aaa", [self.spec(rep=r) for r in (1, 2)])
@@ -319,6 +344,22 @@ class TestPreflight(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(len(calls), 1, "nothing else runs once docker is out")
         self.ensured.assert_not_called()
+
+    def test_low_power_mode_stops_conduct_before_it_admits(self):
+        with mock.patch.object(runs.conduct.host_power, "low_power_mode", return_value=True):
+            ok, _ = self._run({})
+        self.assertFalse(ok)
+        self.ensured.assert_not_called()
+
+    def test_a_system_whose_power_mode_is_not_read_is_warned_and_runs(self):
+        out = io.StringIO()
+        with mock.patch.object(runs.conduct.host_power, "readable", return_value=False), \
+                mock.patch.object(runs.subprocess, "run", return_value=mock.Mock(returncode=0)), \
+                mock.patch("fae.cell.agent_image.AgentImage.ready", return_value=True), \
+                contextlib.redirect_stdout(out):
+            ok = runs.conduct.Conduct().preflight()
+        self.assertTrue(ok)
+        self.assertIn("WARNING — this system's power-saving mode is not read", out.getvalue())
 
     def test_the_agent_image_is_ensured_base_and_layer(self):
         # missing base built, clients current, every variant's layer over

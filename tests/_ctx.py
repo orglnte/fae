@@ -67,6 +67,11 @@ fae.experiment._experiment.load(_EXPERIMENT)
 exp1 = importlib.import_module("experiment.exp1") if (_EXPERIMENT / "exp1.py").is_file() else None
 from fae.experiment.scoring import validate as taint           # noqa: E402
 from fae import mutex  # noqa: E402
+from fae import host_power  # noqa: E402
+
+# the tests never read the machine's power mode: a laptop in Low Power Mode
+# would refuse every run under test
+host_power._pmset = lambda: ""
 from fae.experiment import cell_id, parse_cell_id  # noqa: E402
 from fae.cell import ledger  # noqa: E402
 

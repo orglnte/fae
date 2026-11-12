@@ -57,6 +57,22 @@ class TestTheFixtureIsReady(CheckCase):
         self.assertIn("python3 cli.py experiment run -n 2 --per-agent 1", self.text())
         self.assertIn("python3 cli.py experiment smoke --full-gate", self.text())
 
+    def test_low_power_mode_fails_the_prerequisites(self):
+        with mock.patch.object(check.subprocess, "run", return_value=mock.Mock(returncode=0)), \
+                mock.patch("fae.host_power.low_power_mode", return_value=True):
+            found = check._prerequisites(check.Ctx(root=self.root))
+        bad = [f for f in found if not f.ok]
+        self.assertEqual([f.text for f in bad], ["Low Power Mode on"])
+        self.assertIn("lowpowermode 0", bad[0].fix)
+
+    def test_a_system_whose_power_mode_is_not_read_gets_a_warning(self):
+        with mock.patch.object(check.subprocess, "run", return_value=mock.Mock(returncode=0)), \
+                mock.patch("fae.host_power.readable", return_value=False):
+            found = check._prerequisites(check.Ctx(root=self.root))
+        self.assertTrue(all(f.ok for f in found))
+        self.assertTrue(any(f.text.startswith("WARNING: this system's power-saving mode is not read")
+                            for f in found))
+
     def test_the_seeds_leave_nothing_under_the_root(self):
         self.run_check()
         self.assertEqual(sorted(p.name for p in self.root.iterdir()), ["fae.toml"])
