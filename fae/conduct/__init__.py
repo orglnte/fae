@@ -589,6 +589,7 @@ class Conduct:
                         continue
                     print(f"  [{hhmm()}] backlog empty, no loops — done.", flush=True)
                     pidfile.unlink(missing_ok=True)
+                    self.verify_host_down()
                     return
                 parked_announced = False
                 # Limit cooldowns: an expired one lifts the lane's limit-wall
@@ -838,6 +839,7 @@ class Conduct:
             except (ProcessLookupError, ValueError):
                 pass
         regimes.record(fae.experiment.exp().workspace.conduct, "drained")
+        self.verify_host_down()
         print("DRAIN COMPLETE — no loops left; safe to edit FP-guarded files. "
               "Release the window with: python3 cli.py experiment resume all  "
               "(then restart the scheduler: python3 cli.py experiment run)")
@@ -975,6 +977,8 @@ class Conduct:
             print(f"note: {len(_held)} cell(s) stay paused ({', '.join(_held[:3])}"
                   f"{'...' if len(_held) > 3 else ''}) — release with: "
                   f"cli.py experiment resume {' '.join(agents) if agents else 'all'}")
+        if blanket:
+            self.verify_host_down()
         print(f"stopped [{'all' if blanket else ', '.join(agents)}]: "
               f"{'conduct stopped, ' if blanket else ''}"
               f"{len(loops)} loop(s) TERMed, containers removed "
@@ -1014,6 +1018,18 @@ class Conduct:
         pf.unlink(missing_ok=True)
         return stopped
 
+    @staticmethod
+    def verify_host():
+        from fae.cell.verify_host import VerifyHost
+        return VerifyHost.from_conf(fae.experiment.exp().config())
+
+    def verify_host_down(self):
+        """Stop the verify host's machine (VERIFY_HOST_DOWN), once no loop is
+        left to verify on it."""
+        host = self.verify_host()
+        if host.remote and not _host.loop_parents():
+            host.down(log=lambda t: print(f"run: {t}", flush=True))
+
     def preflight(self):
         """Make the infra usable before admitting anything, or say why not.
 
@@ -1040,6 +1056,11 @@ class Conduct:
         if subprocess.run(["docker", "info"], capture_output=True).returncode != 0:
             print("run: STOP — the docker daemon is not reachable. Start "
                   "Docker, then run `experiment run` again.", flush=True)
+            return False
+        vhost = self.verify_host()
+        if vhost.remote and not vhost.ensure_up(log=lambda t: print(f"run: {t}", flush=True)):
+            print(f"run: STOP — the verify host {vhost.docker_host} does not answer "
+                  f"(VERIFY_HOST_UP {'ran' if vhost.up_cmd else 'is not set'}).", flush=True)
             return False
         if host_power.low_power_mode():
             print(f"run: STOP — the host is in Low Power Mode, and a verify is timed. "

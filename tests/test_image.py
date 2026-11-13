@@ -149,7 +149,7 @@ class TestTheDeclarations(ImageCase):
         d, var = self._definition(self.d, vdir)
         seen = []
 
-        def ens(name, dockerfile_dir, context=(), base=None, log=None):
+        def ens(name, dockerfile_dir, context=(), base=None, log=None, env=None):
             seen.append((name, base))
             return f"fae-{name}:t"
         with mock.patch.object(image, "ensure", side_effect=ens):

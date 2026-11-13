@@ -76,12 +76,12 @@ def tag(name, dockerfile_dir, context=(), base=None):
     return f"{TAG_PREFIX}{name}:{content_hash(dockerfile_dir, context, base)[:12]}"
 
 
-def present(image):
+def present(image, env=None):
     return subprocess.run(["docker", "image", "inspect", image],
-                          capture_output=True).returncode == 0
+                          capture_output=True, env=env).returncode == 0
 
 
-def build(image, dockerfile_dir, context=(), base=None, log=print, labels=()):
+def build(image, dockerfile_dir, context=(), base=None, log=print, labels=(), env=None):
     """`docker build` the staged tree: the Dockerfile directory's files plus
     each context entry copied under its `dest` name. Raises on failure."""
     with tempfile.TemporaryDirectory(prefix="fae-build-") as tmp:
@@ -103,17 +103,18 @@ def build(image, dockerfile_dir, context=(), base=None, log=print, labels=()):
         for k, v in labels:
             argv += ["--label", f"{k}={v}"]
         log(f"image: building {image} from {dockerfile_dir}")
-        r = subprocess.run(argv + [str(stage)], capture_output=True, text=True)
+        r = subprocess.run(argv + [str(stage)], capture_output=True, text=True, env=env)
     if r.returncode != 0:
         raise RuntimeError(f"docker build failed for {image}:\n{(r.stderr or r.stdout)[-2000:]}")
     log(f"image: built {image}")
 
 
-def ensure(name, dockerfile_dir, context=(), base=None, log=print):
-    """The image's tag, built first when the daemon does not have it."""
+def ensure(name, dockerfile_dir, context=(), base=None, log=print, env=None):
+    """The image's tag, built first when the daemon (`env`'s DOCKER_HOST, else
+    the local one) does not have it."""
     image = tag(name, dockerfile_dir, context, base)
-    if not present(image):
-        build(image, dockerfile_dir, context, base, log)
+    if not present(image, env):
+        build(image, dockerfile_dir, context, base, log, env=env)
     return image
 
 
@@ -131,25 +132,25 @@ def dir_tag_name(definition, directory):
     return "-".join((definition.name, *rel.parts))
 
 
-def for_verifier(definition, conf, log=print):
+def for_verifier(definition, conf, log=print, env=None):
     """The experiment verifier's image: its tools and the engine's runtime."""
     cls = definition.verifier_class()
     if not cls.IMAGE_DIR:
         raise RuntimeError(f"{cls.__name__} declares no IMAGE_DIR: the verifier "
                            f"runs only in a container")
     return ensure(f"{definition.name}-verifier", cls.IMAGE_DIR,
-                  cls.image_context(conf), log=log)
+                  cls.image_context(conf), log=log, env=env)
 
 
-def for_variant(variant_cls, definition, conf, log=print):
+def for_variant(variant_cls, definition, conf, log=print, env=None):
     """The image a cell of this variant is verified in: the variant's own
     layer ([verify] image_dir) on the verifier's, or the verifier's when it
     declares none."""
-    base = for_verifier(definition, conf, log)
+    base = for_verifier(definition, conf, log, env=env)
     if not variant_cls.IMAGE_DIR:
         return base
     return ensure(dir_tag_name(definition, variant_cls.IMAGE_DIR), variant_cls.IMAGE_DIR,
-                  variant_cls.INFRA.image_context(conf), base=base, log=log)
+                  variant_cls.INFRA.image_context(conf), base=base, log=log, env=env)
 
 
 # --- the agent image -------------------------------------------------------------
@@ -170,8 +171,8 @@ def network_down(cid):
     subprocess.run(["docker", "network", "rm", cell_network(cid)], capture_output=True)
 
 
-def remove_container(name):
-    subprocess.run(["docker", "rm", "-f", "-v", name], capture_output=True, timeout=60)
+def remove_container(name, env=None):
+    subprocess.run(["docker", "rm", "-f", "-v", name], capture_output=True, timeout=60, env=env)
 
 
 # --- running a tool of an image ----------------------------------------------
@@ -214,21 +215,24 @@ def socket_group():
 
 
 def run_argv(image, name, argv, mounts=(), env=None, workdir=None, network=None,
-             user=True, socket=True, labels=(), extra=(), cpus=None, cpuset=None):
+             user=True, socket=True, labels=(), extra=(), cpus=None, cpuset=None,
+             identity=None):
     """`docker run --rm` of `argv` in `image`: every mount at its own host
     path, so paths in the ctx mean the same inside; the daemon's socket for
     what the tool provisions; the caller's uid so files are the operator's,
     with the socket's group so the daemon still answers; `cpus` caps the
-    container's CPU time (docker --cpus)."""
+    container's CPU time (docker --cpus). `identity` (uid, gid, socket gid)
+    replaces the caller's where the daemon runs on another host."""
     out = ["docker", "run", "--rm", "--name", name]
     if cpus is not None:
         out += [f"--cpus={cpus}"]
     if cpuset:
         out += [f"--cpuset-cpus={cpuset}"]
     if user:
-        out += ["--user", f"{os.getuid()}:{os.getgid()}"]
+        uid, gid, sock = identity or (os.getuid(), os.getgid(), None)
+        out += ["--user", f"{uid}:{gid}"]
         if socket:
-            out += ["--group-add", str(socket_group())]
+            out += ["--group-add", str(sock if sock is not None else socket_group())]
     for k, v in labels:
         out += ["--label", f"{k}={v}"]
     if network:

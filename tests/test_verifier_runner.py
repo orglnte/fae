@@ -463,7 +463,7 @@ class TestTheTeardownRunsInAFreshContainer(RunnerCase):
                 pass
 
         with mock.patch.object(_image, "for_variant", return_value="fae-mini-verifier:abc"), \
-                mock.patch.object(_image, "remove_container", side_effect=lambda n: seen.append(("rm", n))), \
+                mock.patch.object(_image, "remove_container", side_effect=lambda n, **kw: seen.append(("rm", n))), \
                 mock.patch.object(verify.subprocess, "Popen", FakePopen):
             rc = verify.run_teardown(self.ctx(exp), self.variant())
         self.assertEqual(rc, 0)

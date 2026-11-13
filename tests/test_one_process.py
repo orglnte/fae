@@ -94,6 +94,7 @@ class TestNoPythonChildProcesses(unittest.TestCase):
         allowed = {"bash", "docker", "kubectl", "cp", "k6", "git",
                    "kind", "curl", "ps", "lsof",   # the variants' infra CLIs
                    "caffeinate",                   # macOS idle-sleep assertion
+                   "ssh",                          # a remote verify host (verify_host.py)
                    "npm"}                          # the agent clients' upstream versions
         found = set()
         for f in sorted(PKG.glob("*.py")):

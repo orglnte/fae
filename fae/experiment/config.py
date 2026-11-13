@@ -39,6 +39,12 @@ ENGINE_DEFAULTS = {
     # a value set in the config wins over them.
     "CPUSET_MEASURED": "",
     "CPUSET_AGENT": "",
+    # The Docker daemon verifies run on (fae/cell/verify_host.py): empty is
+    # the local one; ssh://user@host a dedicated host the verify's files are
+    # copied to. UP / DOWN: shell commands that start and stop its machine.
+    "VERIFY_DOCKER_HOST": "",
+    "VERIFY_HOST_UP": "",
+    "VERIFY_HOST_DOWN": "",
 }
 
 # The agent container's name, `<prefix><cell id>`: the engine's own label

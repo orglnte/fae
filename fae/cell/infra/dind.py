@@ -101,3 +101,78 @@ class DindSidecar:
                               f"into {self.name} failed")
 
 
+
+
+class VerifyDind:
+    """A docker-in-docker daemon of one verify, separate from the cell's
+    sidecar the agent uses: started from inside the verify container on the
+    daemon behind its socket (the verify host), on the cell network, reached
+    by its name only (no published port), seeded with the cache image, and
+    removed when the arrangement is torn down. Nothing the agent did inside
+    its own sidecar is visible here."""
+
+    PREFIX = "fae-vdind-"
+    API_PORT = 2375
+
+    def __init__(self, cid, image, cache_image, network, log=print):
+        self.cid = cid
+        self.name = self.name_for(cid)
+        self.image = image
+        self.cache_image = cache_image
+        self.network = network
+        self.log = log
+
+    @classmethod
+    def name_for(cls, cid):
+        return f"{cls.PREFIX}{cid}"
+
+    @classmethod
+    def url_for(cls, cid):
+        return f"tcp://{cls.name_for(cid)}:{cls.API_PORT}"
+
+    @property
+    def url(self):
+        return self.url_for(self.cid)
+
+    @classmethod
+    def remove_for(cls, cid):
+        base._run(["docker", "rm", "-f", "-v", cls.name_for(cid)])
+
+    def alive(self):
+        return base._ok(["docker", "-H", self.url, "info"])
+
+    def _have(self, image):
+        return base._ok(["docker", "image", "inspect", image]) or \
+            base._ok(["docker", "pull", "-q", image])
+
+    def start(self):
+        """A fresh daemon (any earlier one of this cell removed first), its
+        API answering and the cache image loaded. Raises HookFailure."""
+        self.remove_for(self.cid)
+        for img in (self.image, self.cache_image):
+            if not self._have(img):
+                raise HookFailure(f"verify dind: image {img} not present and not pullable")
+        cpuset = os.environ.get("CPUSET_MEASURED")
+        self.log(f"verify dind: starting {self.name} on {self.network}")
+        if not base._ok(["docker", "run", "-d", "--privileged", "--name", self.name,
+                         "--label", f"fae-cell={self.cid}", "--network", self.network,
+                         "-e", "DOCKER_TLS_CERTDIR=", "--memory", "1g", "--cpus", "1",
+                         *(["--cpuset-cpus", cpuset] if cpuset else []), self.image]):
+            raise HookFailure(f"verify dind: start failed for {self.cid}")
+        for _ in range(45):
+            if self.alive():
+                break
+            time.sleep(2)
+        else:
+            self.remove_for(self.cid)
+            raise HookFailure(f"verify dind: API never came up for {self.cid}")
+        save = subprocess.Popen(["docker", "save", self.cache_image],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        load = subprocess.run(["docker", "-H", self.url, "load"],
+                              stdin=save.stdout, capture_output=True)
+        save.stdout.close()
+        save.wait()
+        if save.returncode != 0 or load.returncode != 0:
+            raise HookFailure(f"verify dind: seeding {self.cache_image} into {self.name} failed")
+        self.log(f"verify dind: {self.name} ready at {self.url}")
+        return self.url

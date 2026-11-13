@@ -286,7 +286,7 @@ class Verifier(ABC):
     REQUIRED_OUTPUTS = ()
     # The stages at which the verifier never ran to its end (no image, a
     # crash, a timeout): its outputs are not expected there.
-    NOT_RUN_STAGES = frozenset({"verifier", "verifier-timeout", "verifier-image"})
+    NOT_RUN_STAGES = frozenset({"verifier", "verifier-timeout", "verifier-image", "verifier-host"})
     PREFIXES = {}   # {kind: name prefix} of what a verify provisions, for the reaper
     RUN_LOG = "run.log"   # under the verify's out: what the variant's program printed
     # A charged fail at one of these stages is voided when the variant's
@@ -393,7 +393,18 @@ def verify_mounts(ctx, root_reads=None):
             + [(str(out), "rw")])
 
 
-def verify_argv(ctx, image, conf=None, environ=None, cpus=None):
+def _host_args(host, extra):
+    """What a container on a dedicated verify host differs by: no core
+    pinning (its cores are the verify's alone, CPUSET_MEASURED emptied for
+    what it starts) and the remote user's identity. (cpuset override or
+    False to keep the config's, identity)."""
+    if host is None or not host.remote:
+        return False, None
+    extra["CPUSET_MEASURED"] = ""
+    return None, host.identity()
+
+
+def verify_argv(ctx, image, conf=None, environ=None, cpus=None, host=None):
     """The `docker run` that is one arrangement's child: the variant's
     image, the roots mounted at their own paths, the cell's network, the
     daemon's socket, the driver's environment minus the host's own, the
@@ -408,6 +419,9 @@ def verify_argv(ctx, image, conf=None, environ=None, cpus=None):
                  FAE_VERIFY_CONTAINER=_image.verify_container(ctx.cid),
                  FAE_VERIFY_IMAGE=image, FAE_VERIFY_OUT=ctx.out,
                  FAE_CELL_NET=_image.cell_network(ctx.cid))
+    cpuset, identity = _host_args(host, extra)
+    if cpuset is False:
+        cpuset = conf.get("CPUSET_MEASURED") if conf else None
     env = _image.child_env(environ if environ is not None else os.environ, **extra)
     mounts = verify_mounts(ctx)
     return _image.run_argv(image, _image.verify_container(ctx.cid),
@@ -416,13 +430,13 @@ def verify_argv(ctx, image, conf=None, environ=None, cpus=None):
                            mounts=mounts, env=env, workdir=ctx.root,
                            network=_image.cell_network(ctx.cid),
                            labels=(("fae-cell", ctx.cid),), extra=HOST_ALIAS,
-                           cpus=cpus, cpuset=(conf.get("CPUSET_MEASURED") if conf else None))
+                           cpus=cpus, cpuset=cpuset, identity=identity)
 
 
 from .image import CONTAINER_USER, HOST_ALIAS  # noqa: E402
 
 
-def teardown_argv(ctx, image, conf=None, environ=None):
+def teardown_argv(ctx, image, conf=None, environ=None, host=None):
     """A fresh container of the variant's image running its
     `verify_teardown` alone: the verify's own container is gone (killed,
     timed out) and what it provisioned outside itself is not."""
@@ -432,7 +446,10 @@ def teardown_argv(ctx, image, conf=None, environ=None):
     extra.update(REPO_ROOT=ctx.root, EXPERIMENT_DIR=ctx.experiment_dir,
                  PYTHONPATH=os.pathsep.join([ctx.root, str(HARNESS.parent)]),
                  HOME=str(home), USER=CONTAINER_USER, FAE_VERIFY_OUT=ctx.out)
+    cpuset, identity = _host_args(host, extra)
     env = _image.child_env(environ if environ is not None else os.environ, **extra)
+    if cpuset is False:
+        cpuset = (conf.get("CPUSET_MEASURED") if conf else None) or env.get("CPUSET_MEASURED") or None
     mounts = verify_mounts(ctx)
     return _image.run_argv(image, f"{_image.verify_container(ctx.cid)}-teardown",
                            CHILD_ARGV + ["--teardown", "--ctx",
@@ -440,56 +457,79 @@ def teardown_argv(ctx, image, conf=None, environ=None):
                            mounts=mounts, env=env, workdir=ctx.root,
                            network=_image.cell_network(ctx.cid),
                            labels=(("fae-cell", ctx.cid),), extra=HOST_ALIAS,
-                           cpuset=(conf.get("CPUSET_MEASURED") if conf else None)
-                           or env.get("CPUSET_MEASURED") or None)
+                           cpuset=cpuset, identity=identity)
 
 
 def run_teardown(ctx, infra, timeout_s=900, log_dir=None):
     """Run the teardown for `ctx` — the artifacts' runner stopped, its
     infra's `verify_teardown`, then the verifier's own `teardown` — in a fresh container of
-    its image (see `teardown_argv`); returns the child's exit code, or None
-    when no container could run (no image, no daemon). Best effort: the
-    reaper covers what this leaves. `log_dir` holds verifier.log (the host's
-    record of the run), default `ctx.out`."""
+    its image (see `teardown_argv`), on the verify host; returns the child's
+    exit code, or None when no container could run (no image, no daemon).
+    Best effort: the reaper covers what this leaves. `log_dir` holds
+    verifier.log (the host's record of the run), default `ctx.out`."""
     from . import image as _image
+    from .verify_host import VerifyHost
     work = Path(ctx.out) / WORKDIR
     out = Path(log_dir or ctx.out)
     (work / "home").mkdir(parents=True, exist_ok=True)
     (work / "teardown.ctx.json").write_text(ctx.to_json())
     conf = getattr(infra, "conf", None)
+    host = VerifyHost.from_conf(conf)
+    denv = host.env()
+    log = lambda m: _log_line(out, m)  # noqa: E731
     try:
         image = _image.for_variant(infra.variant, fae.experiment.exp().definition, conf,
-                                   log=lambda m: _log_line(out, m))
-    except RuntimeError as e:
+                                   log=log, env=denv)
+        if host.remote:
+            host.network_up(_image.cell_network(ctx.cid), ctx.cid)
+            host.push([p for p, _ in verify_mounts(ctx)], log)
+        argv = teardown_argv(ctx, image, conf, host=host)
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
         _log_line(out, f"teardown image: {e}")
         return None
     name = f"{_image.verify_container(ctx.cid)}-teardown"
-    _image.remove_container(name)
-    _log_line(out, f"teardown start image={image} container={name}")
-    with (out / "verifier.log").open("a") as log:
-        p = subprocess.Popen(teardown_argv(ctx, image, conf), cwd=ctx.root,
-                             stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-        try:
-            return p.wait(timeout=timeout_s)
-        except subprocess.TimeoutExpired:
-            _log_line(out, f"teardown ran past {timeout_s}s; its container was removed")
-            return None
-        finally:
-            _end(p, name)
+    _image.remove_container(name, env=denv)
+    _log_line(out, f"teardown start image={image} container={name}"
+                   + (f" host={host.docker_host}" if host.remote else ""))
+    try:
+        with (out / "verifier.log").open("a") as lf:
+            p = subprocess.Popen(argv, cwd=ctx.root, env=denv,
+                                 stdout=lf, stderr=subprocess.STDOUT, start_new_session=True)
+            try:
+                return p.wait(timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                _log_line(out, f"teardown ran past {timeout_s}s; its container was removed")
+                return None
+            finally:
+                _end(p, name, env=denv)
+    finally:
+        _pull(host, ctx, out)
+
+
+def _pull(host, ctx, out):
+    """The verify host's output directory back over the local one."""
+    if not host.remote:
+        return
+    try:
+        host.pull(ctx.out, lambda m: _log_line(out, m))
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+        _log_line(out, f"verify host: could not copy {ctx.out} back: {e}")
 
 
 def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
     """Run the experiment's verifier on `ctx` inside a container of the
-    image of `infra`'s variant and return its Verdict. A verifier that hangs past
-    `timeout_s`, crashes, or exits without writing a verdict is a rig
-    fault: `charge=False`, the attempt is retried. The container is removed
-    on every path; when the verify did not end on its own (a timeout, a
-    signal, any exception) or ended without a readable verdict (its
+    image of `infra`'s variant, on the verify host (verify_host.py), and
+    return its Verdict. A verifier that hangs past `timeout_s`, crashes,
+    exits without writing a verdict, or a verify host that cannot be reached
+    is a rig fault: `charge=False`, the attempt is retried. The container is
+    removed on every path; when the verify did not end on its own (a timeout,
+    a signal, any exception) or ended without a readable verdict (its
     container killed under it, a crash), the full teardown runs too
     (`run_teardown`), since what it started beside its container (the
-    artifacts' runner, the infra, a store) does not die with it. `log_dir` holds verifier.log (the
-    host's record of the run), default `ctx.out`."""
+    artifacts' runner, the infra, a store) does not die with it. `log_dir`
+    holds verifier.log (the host's record of the run), default `ctx.out`."""
     from . import image as _image
+    from .verify_host import VerifyHost
     work = Path(ctx.out) / WORKDIR
     out = Path(log_dir or ctx.out)
     (work / "home").mkdir(parents=True, exist_ok=True)
@@ -497,23 +537,41 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
     verdict_path.unlink(missing_ok=True)
     ctx_path.write_text(ctx.to_json())
     conf = getattr(infra, "conf", None)
+    host = VerifyHost.from_conf(conf)
+    denv = host.env()
+    log = lambda m: _log_line(out, m)  # noqa: E731
+
+    def host_fault(why):
+        _log_line(out, f"verify host: {why}")
+        return Verdict(ok=False, stage="verifier-host", charge=False,
+                       why=f"verify host {host.docker_host}: {why}", arrangement=ctx.arrangement)
+
+    if host.remote and not host.ensure_up(log):
+        return host_fault("the daemon does not answer")
     try:
         image = _image.for_variant(infra.variant, fae.experiment.exp().definition, conf,
-                                   log=lambda m: _log_line(out, m))
+                                   log=log, env=denv)
     except RuntimeError as e:
         _log_line(out, f"verifier image: {e}")
         return Verdict(ok=False, stage="verifier-image", charge=False,
                        why=f"no verify image: {str(e).splitlines()[0]}", arrangement=ctx.arrangement)
     name = _image.verify_container(ctx.cid)
-    _image.remove_container(name)                 # a previous run's, if any
     cls = fae.experiment.exp().definition.verifier_class()
-    argv = verify_argv(ctx, image, conf, cpus=cls.CPUS)
+    try:
+        _image.remove_container(name, env=denv)          # a previous run's, if any
+        if host.remote:
+            host.network_up(_image.cell_network(ctx.cid), ctx.cid)
+            host.push([p for p, _ in verify_mounts(ctx)], log)
+        argv = verify_argv(ctx, image, conf, cpus=cls.CPUS, host=host)
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+        return host_fault(str(e).splitlines()[0] if str(e) else type(e).__name__)
     _log_line(out, f"verifier start arrangement={ctx.arrangement or 'seed'} "
                    f"image={image} container={name}"
-                   + (f" cpus={cls.CPUS}" if cls.CPUS is not None else ""))
+                   + (f" cpus={cls.CPUS}" if cls.CPUS is not None else "")
+                   + (f" host={host.docker_host}" if host.remote else ""))
     ended = False
-    with (out / "verifier.log").open("a") as log:
-        p = subprocess.Popen(argv, cwd=ctx.root, stdout=log, stderr=subprocess.STDOUT,
+    with (out / "verifier.log").open("a") as lf:
+        p = subprocess.Popen(argv, cwd=ctx.root, env=denv, stdout=lf, stderr=subprocess.STDOUT,
                              start_new_session=True)
         try:
             rc = p.wait(timeout=timeout_s)
@@ -523,7 +581,8 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
                            why=f"the verifier ran past {timeout_s}s; its container was removed",
                            arrangement=ctx.arrangement)
         finally:
-            _end(p, name)
+            _end(p, name, env=denv)
+            _pull(host, ctx, out)
             if not ended:
                 _log_line(out, "verify did not end on its own: running its teardown")
                 run_teardown(ctx, infra, log_dir=out)
@@ -540,11 +599,11 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
                    arrangement=ctx.arrangement)
 
 
-def _end(p, name):
+def _end(p, name, env=None):
     """End the verify: remove its container (everything it started goes
     with it) and reap the client."""
     from . import image as _image
-    _image.remove_container(name)
+    _image.remove_container(name, env=env)
     try:
         p.kill()
     except OSError:
