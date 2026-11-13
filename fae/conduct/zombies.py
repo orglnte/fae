@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import fae.experiment
+from fae import mutex
 from fae.cell.cell import Cell
 from fae.experiment import parse_cell_id
 from . import _host, _queues
@@ -198,11 +199,13 @@ def _leaked_lock_holders():
     reads a live `experiment verb` verify as a leak and reaps it mid-run.
     """
     out = []
-    for name in ("rig", "verify"):
-        if not Cell.shared_lock_held(fae.experiment.exp().workspace.locks, name) \
+    locks = fae.experiment.exp().workspace.locks
+    paths = [Cell.shared_lock(locks, "rig"),
+             *Cell.verify_lock_paths(fae.experiment.exp().config(), locks)]
+    for p in paths:
+        if not (p.exists() and mutex.probe_held(p)) \
                 or _host.loop_parents() or _verify_holders_alive():
             continue
-        p = Cell.shared_lock(fae.experiment.exp().workspace.locks, name)
         for pid in _fd_holders(p):
             if _pid_alive(pid) and not _is_driver_pid(pid):
                 out.append((p.name, pid))

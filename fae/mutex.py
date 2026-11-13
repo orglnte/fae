@@ -115,25 +115,29 @@ def queue_dir(path):
 
 
 def queue_acquire(path, cid, poll=5.0, stop=None):
-    """First come, first served on one lock file. Returns the lock's open
-    file object, or None when `stop()` says to stand down.
+    """First come, first served on one lock file, or on the first free of
+    several (`path` a list: one queue, in front of all of them). Returns the
+    won lock's open file object (its `name` says which), or None when
+    `stop()` says to stand down.
 
-    Each waiter holds a flock on a ticket of its own in `<path>.queue/`,
-    named by its arrival, and tries the lock only while no older ticket is
+    Each waiter holds a flock on a ticket of its own in `<first path>.queue/`,
+    named by its arrival, and tries the locks only while no older ticket is
     held. A ticket is locked before it becomes visible (made under a dot
     name, then renamed), so a visible ticket nobody holds belongs to a dead
     waiter: it is skipped and removed. Each ticket has one owner and one
     life, so removing it is not the unlink-and-recreate the lock file itself
     must never undergo.
     """
-    q = queue_dir(path)
+    paths = [path] if isinstance(path, (str, os.PathLike)) else list(path)
+    q = queue_dir(paths[0])
     q.mkdir(parents=True, exist_ok=True)
     name = f"{time.time_ns():020d}-{os.getpid()}-{cid}"
     tmp = q / f".{name}"
     ticket = open(tmp, "a+")
     fcntl.flock(ticket, fcntl.LOCK_EX | fcntl.LOCK_NB)
     os.rename(tmp, q / name)
-    fh = open_lock(path)
+    fhs = [open_lock(p) for p in paths]
+    won = None
     try:
         while True:
             older = sorted(p for p in q.iterdir()
@@ -144,16 +148,17 @@ def queue_acquire(path, cid, poll=5.0, stop=None):
                     ahead = True
                     break
                 p.unlink(missing_ok=True)
-            if not ahead and try_fd(fh):
-                return fh
+            if not ahead:
+                won = next((fh for fh in fhs if try_fd(fh)), None)
+                if won is not None:
+                    return won
             if stop is not None and stop():
-                fh.close()
                 return None
             time.sleep(poll)
-    except BaseException:
-        fh.close()
-        raise
     finally:
+        for fh in fhs:
+            if fh is not won:
+                fh.close()
         (q / name).unlink(missing_ok=True)
         ticket.close()
 

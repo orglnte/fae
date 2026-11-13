@@ -460,13 +460,14 @@ def teardown_argv(ctx, image, conf=None, environ=None, host=None):
                            cpuset=cpuset, identity=identity)
 
 
-def run_teardown(ctx, infra, timeout_s=900, log_dir=None):
+def run_teardown(ctx, infra, timeout_s=900, log_dir=None, host=None):
     """Run the teardown for `ctx` — the artifacts' runner stopped, its
     infra's `verify_teardown`, then the verifier's own `teardown` — in a fresh container of
     its image (see `teardown_argv`), on the verify host; returns the child's
     exit code, or None when no container could run (no image, no daemon).
     Best effort: the reaper covers what this leaves. `log_dir` holds
-    verifier.log (the host's record of the run), default `ctx.out`."""
+    verifier.log (the host's record of the run), default `ctx.out`; `host`
+    is the verify host, default the config's one (VerifyHost.from_conf)."""
     from . import image as _image
     from .verify_host import VerifyHost
     work = Path(ctx.out) / WORKDIR
@@ -474,7 +475,7 @@ def run_teardown(ctx, infra, timeout_s=900, log_dir=None):
     (work / "home").mkdir(parents=True, exist_ok=True)
     (work / "teardown.ctx.json").write_text(ctx.to_json())
     conf = getattr(infra, "conf", None)
-    host = VerifyHost.from_conf(conf)
+    host = host or VerifyHost.from_conf(conf)
     denv = host.env()
     log = lambda m: _log_line(out, m)  # noqa: E731
     try:
@@ -523,7 +524,7 @@ def _pull(host, ctx, out):
         pass
 
 
-def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
+def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
     """Run the experiment's verifier on `ctx` inside a container of the
     image of `infra`'s variant, on the verify host (verify_host.py), and
     return its Verdict. A verifier that hangs past `timeout_s`, crashes,
@@ -534,7 +535,8 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
     container killed under it, a crash), the full teardown runs too
     (`run_teardown`), since what it started beside its container (the
     artifacts' runner, the infra, a store) does not die with it. `log_dir`
-    holds verifier.log (the host's record of the run), default `ctx.out`."""
+    holds verifier.log (the host's record of the run), default `ctx.out`;
+    `host` is the verify host, default the config's one (VerifyHost.from_conf)."""
     from . import image as _image
     from .verify_host import VerifyHost
     work = Path(ctx.out) / WORKDIR
@@ -544,7 +546,7 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
     verdict_path.unlink(missing_ok=True)
     ctx_path.write_text(ctx.to_json())
     conf = getattr(infra, "conf", None)
-    host = VerifyHost.from_conf(conf)
+    host = host or VerifyHost.from_conf(conf)
     denv = host.env()
     log = lambda m: _log_line(out, m)  # noqa: E731
 
@@ -592,7 +594,7 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
             _pull(host, ctx, out)
             if not ended:
                 _log_line(out, "verify did not end on its own: running its teardown")
-                run_teardown(ctx, infra, log_dir=out)
+                run_teardown(ctx, infra, log_dir=out, host=host)
     if verdict_path.is_file():
         try:
             return Verdict.from_json(verdict_path.read_text())
@@ -601,7 +603,7 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):
     else:
         why = f"the verifier exited {rc} without a verdict (see verifier.log)"
     _log_line(out, "verify left no verdict: running its teardown")
-    run_teardown(ctx, infra, log_dir=out)
+    run_teardown(ctx, infra, log_dir=out, host=host)
     return Verdict(ok=False, stage="verifier", charge=False, why=why,
                    arrangement=ctx.arrangement)
 

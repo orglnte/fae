@@ -1,7 +1,8 @@
 """The Docker daemon a verify runs on, and how its files get there.
 
 `VERIFY_DOCKER_HOST` names it as Docker does (`ssh://user@host`,
-`tcp://...`); empty is the daemon the authoring runs on, which shares this
+`tcp://...`), or several, one verify on each at a time (`VerifyHost.pool`);
+empty is the daemon the authoring runs on, which shares this
 host's filesystem. Any other daemon is a host of its own: the paths a verify
 reads are copied to it at the same absolute paths before the verify, and its
 output directory is copied back after, so the ctx, the mounts and the
@@ -17,6 +18,7 @@ daemon does not answer before a verify, down when the run stops.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -34,9 +36,25 @@ class VerifyHost:
         self._identity = None
 
     @classmethod
-    def from_conf(cls, conf):
+    def pool(cls, conf):
+        """Every verify host the config names, in order: VERIFY_DOCKER_HOST
+        lists one or more daemons, comma- or space-separated; the local
+        daemon alone when it names none. Each serves one verify at a time
+        (Cell.verify_lock_acquire). VERIFY_HOST_UP/DOWN cover them all."""
         get = (lambda k: conf.get(k) or "") if conf is not None else (lambda k: os.environ.get(k, ""))
-        return cls(get("VERIFY_DOCKER_HOST"), get("VERIFY_HOST_UP"), get("VERIFY_HOST_DOWN"))
+        names = [n for n in re.split(r"[,\s]+", get("VERIFY_DOCKER_HOST")) if n]
+        return [cls(n, get("VERIFY_HOST_UP"), get("VERIFY_HOST_DOWN")) for n in names or [""]]
+
+    @classmethod
+    def from_conf(cls, conf):
+        """The one host a verify runs on. A config that lists several names
+        none of them: the cell's verify lock picks one and narrows the
+        cell's config to it while held."""
+        hosts = cls.pool(conf)
+        if len(hosts) > 1:
+            raise ValueError(f"VERIFY_DOCKER_HOST lists {len(hosts)} hosts; a verify runs on "
+                             f"the one its verify lock names")
+        return hosts[0]
 
     @property
     def remote(self):

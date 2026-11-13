@@ -907,6 +907,48 @@ class TestGatesAreSerializedWhole(CellTestCase):
         self.assertTrue(_mutex.try_fd(probe), "the lock leaked on the pause path")
         probe.close()
 
+    def test_each_verify_host_has_its_own_lock_and_a_hold_names_its_host(self):
+        hosts = "ssh://u@vm1, ssh://u@vm2"
+        a, b, c = self.locked_cell(), self.locked_cell(), self.locked_cell()
+        for x in (a, b, c):
+            x.conf.values["VERIFY_DOCKER_HOST"] = hosts
+            x.place = lambda phase: None
+        fa, fb = a.verify_lock_acquire(), b.verify_lock_acquire()
+        self.assertEqual((a.verify_host.docker_host, b.verify_host.docker_host),
+                         ("ssh://u@vm1", "ssh://u@vm2"))
+        self.assertEqual(a.conf.values["VERIFY_DOCKER_HOST"], hosts, "the shared config is untouched")
+        self.assertEqual(b.recorded_verify_host(), "ssh://u@vm2")   # one workspace here: the last hold
+        from fae.cell.cell import _mutex
+        for name in ("verify-lock", "verify-lock-2"):
+            probe = _mutex.open_lock(self.root / name)
+            self.assertFalse(_mutex.try_fd(probe), f"{name} is not held")
+            probe.close()
+        (c.ws / ".paused").write_text("1\n")
+        self.assertIsNone(c.verify_lock_acquire(poll=0.01), "a third verify found no free host")
+        fa.close()
+        self.assertIsNone(a.verify_host)
+        fb.close()
+
+    def test_a_kill_tears_down_on_the_host_of_the_last_verify(self):
+        from unittest import mock
+        from fae.cell import verify as _verify
+        c = self.cell()
+        c.conf.values["VERIFY_DOCKER_HOST"] = "ssh://u@vm1 ssh://u@vm2"
+        c.artifacts.mkdir(parents=True, exist_ok=True)
+        seen = []
+        record = lambda ctx, infra, **kw: seen.append(kw["host"].docker_host)  # noqa: E731
+        with mock.patch.object(type(c), "variant_cls", new_callable=mock.PropertyMock,
+                               return_value=mock.Mock(INFRA=mock.Mock(identities=lambda cid: []))), \
+                mock.patch.object(type(c), "infra", new_callable=mock.PropertyMock, return_value=None), \
+                mock.patch.object(_verify, "run_teardown", side_effect=record), \
+                mock.patch.object(c, "teardown"), mock.patch("subprocess.run"):
+            c.clean_up()
+            self.assertEqual(seen, ["ssh://u@vm1", "ssh://u@vm2"], "no record: every host")
+            seen.clear()
+            (c.ws / c.VERIFY_HOST_FILE).write_text("ssh://u@vm2\n")
+            c.clean_up()
+            self.assertEqual(seen, ["ssh://u@vm2"])
+
     def test_the_run_loop_acquires_before_the_model_transition(self):
         src = (Path(ROOT) / "fae" / "cell" / "cell.py").read_text()
         body = src[src.index("    def run(self"):]

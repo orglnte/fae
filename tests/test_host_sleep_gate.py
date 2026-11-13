@@ -52,7 +52,7 @@ class CellCase(unittest.TestCase):
 class TestTheVerifyVoidsASleep(CellCase):
 
     def verify_with(self, verdict, sleep_s):
-        def runner(ctx, variant, timeout_s, log_dir=None):
+        def runner(ctx, variant, timeout_s, log_dir=None, host=None):
             self.clocks.sleep(sleep_s)
             return verdict
         self.c._infra = mock.Mock(alive=lambda: True)

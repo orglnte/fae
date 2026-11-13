@@ -236,11 +236,14 @@ def _agent_cpu_args(conf):
 
 
 class _VerifyHold:
-    """The verify lock as held by a cell: closing it releases the lock and
-    places the cell's shared containers back on the agents' CPUs."""
+    """The verify lock as held by a cell, on the verify host that lock
+    stands for: while held, the cell's verifies run there
+    (`Cell.verify_host`). Closing it releases the lock and places the cell's
+    shared containers back on the agents' CPUs."""
 
-    def __init__(self, fh, cell):
+    def __init__(self, fh, cell, host):
         self._fh, self._cell = fh, cell
+        cell.verify_host = host
 
     def fileno(self):
         return self._fh.fileno()
@@ -252,6 +255,7 @@ class _VerifyHold:
             self._fh.close()
         finally:
             self._fh = None
+            self._cell.verify_host = None
             self._cell.place("agent")
 
 
@@ -272,6 +276,7 @@ class Cell:
         self.artifacts = self.ws / "artifacts"
         self.state = State()
         self._conf, self._agent_tag = None, None
+        self.verify_host = None     # the VerifyHost of the verify lock held now
         self._queues = queues
         self.locks = Path(locks) if locks else _plane.locks(self.root)
         self._transitions = Path(transitions) if transitions else None
@@ -931,7 +936,11 @@ class Cell:
             ctx = Ctx(root=str(self.root), experiment_dir=str(self.conf.get("EXPERIMENT_DIR")),
                       workspace=str(self.ws), artifacts=str(self.artifacts), out=str(run_out),
                       cid=self.cid, task=self.task, variant=self.variant)
-            run_teardown(ctx, self.infra, timeout_s=timeout_s, log_dir=self.ws)
+            from .verify_host import VerifyHost
+            pool, recorded = VerifyHost.pool(self.conf), self.recorded_verify_host()
+            hosts = [h for h in pool if h.docker_host == recorded] or pool
+            for host in hosts:
+                run_teardown(ctx, self.infra, timeout_s=timeout_s, log_dir=self.ws, host=host)
         boxes = [i for k, i in self.variant_cls.INFRA.identities(self.cid) if k == "container"]
         subprocess.run(["docker", "rm", "-f", "-v", self.agent_container(self.cid), *boxes],
                        capture_output=True)
@@ -1534,7 +1543,7 @@ class Cell:
         try:
             v = run_verifier(ctx, self.infra,
                              timeout_s=int(self.conf.get("VERIFIER_TIMEOUT_S") or 7200),
-                             log_dir=out)
+                             log_dir=out, host=self.verify_host)
         finally:
             if fh is not None:
                 fh.close()
@@ -1987,28 +1996,67 @@ class Cell:
         from fae.conduct import Queues
         return Queues(_plane.queues(self.root), locks=self.locks)
 
+    @staticmethod
+    def verify_locks(base, n):
+        """The verify lock of each of `n` verify hosts, in VerifyHost.pool's
+        order: `base` for the first, `<base>-<i>` for the i-th after it."""
+        base = Path(base)
+        return [base] + [base.with_name(f"{base.name}-{i}") for i in range(2, n + 1)]
+
+    @classmethod
+    def verify_lock_paths(cls, conf, locks, base=None):
+        """Every verify lock the config's verify hosts have: from `base`, else
+        the fleet-wide verify lock under `locks`."""
+        from .verify_host import VerifyHost
+        return cls.verify_locks(base or cls.shared_lock(locks, "verify"),
+                                len(VerifyHost.pool(conf)))
+
+    @classmethod
+    def verify_holders(cls, conf, locks):
+        """The cells holding a verify lock now, one per busy verify host."""
+        return [_mutex.holder_name(p) or "" for p in cls.verify_lock_paths(conf, locks)
+                if p.exists() and _mutex.probe_held(p)]
+
+    VERIFY_HOST_FILE = ".verify-host"
+
     def verify_lock_acquire(self, poll=5.0):
-        """The fleet-wide verify lock: gates are serialized WHOLE, so one
-        cell's six arrangements never interleave with another's and verify_s
-        never counts another cell's rig time. Waiters take it first come,
-        first served (`mutex.queue_acquire`), so a long gate never lets a
-        later arrival overtake an earlier one. Blocks until owned; returns the
-        open file (closing it is the release), or None on an operator pause —
-        checked both while queued and right after winning, so the lock is
-        never held by a cell that intends to exit.
+        """A verify lock, one per verify host (VerifyHost.pool): gates are
+        serialized WHOLE on each host, so one cell's six arrangements never
+        interleave with another's on the host they are measured on and
+        verify_s never counts another cell's rig time. Waiters take the first
+        free lock first come, first served (`mutex.queue_acquire`), so a long
+        gate never lets a later arrival overtake an earlier one. Blocks until
+        owned; returns the hold (closing it is the release), which sets
+        `verify_host` to the won lock's host and records that host in
+        `.verify-host` for a teardown after a kill; or None on an operator
+        pause — checked both while queued and right after winning, so the
+        lock is never held by a cell that intends to exit.
         """
-        d = Path(self.conf.get("VERIFY_LOCK_DIR") or self.shared_lock(self.locks, "verify"))
-        d.parent.mkdir(parents=True, exist_ok=True)
-        fh = _mutex.queue_acquire(d, self.cid, poll=poll,
+        from .verify_host import VerifyHost
+        hosts = VerifyHost.pool(self.conf)
+        paths = self.verify_lock_paths(self.conf, self.locks, base=self.conf.get("VERIFY_LOCK_DIR"))
+        paths[0].parent.mkdir(parents=True, exist_ok=True)
+        fh = _mutex.queue_acquire(paths, self.cid, poll=poll,
                                   stop=lambda: (self.ws / ".paused").exists())
         if fh is None:
             return None
-        _mutex.note_holder(d, self.cid, os.getpid())
+        i = [str(p) for p in paths].index(fh.name)
+        _mutex.note_holder(paths[i], self.cid, os.getpid())
         if (self.ws / ".paused").exists():
             fh.close()
             return None
+        if not self.sealed:      # a sealed cell's reverify writes nothing into it
+            (self.ws / self.VERIFY_HOST_FILE).write_text(hosts[i].docker_host + "\n")
+        hold = _VerifyHold(fh, self, hosts[i])
         self.place("verify")
-        return _VerifyHold(fh, self)
+        return hold
+
+    def recorded_verify_host(self):
+        """The verify host this cell's last verify lock named, or None."""
+        try:
+            return (self.ws / self.VERIFY_HOST_FILE).read_text().strip()
+        except OSError:
+            return None
 
     def loop_lock(self):
         """Exclusive claim on this workspace. Returns the open file, or None if
@@ -2079,7 +2127,7 @@ class Cell:
         phase's set. Returns the placement, or None when Docker did not
         answer and nothing moved."""
         from .verify_host import VerifyHost
-        p = _placement.apply(verify_remote=VerifyHost.from_conf(self.conf).remote)
+        p = _placement.apply(verify_remote=any(h.remote for h in VerifyHost.pool(self.conf)))
         if p is None:
             return None
         cpuset = (p.measured or p.agent) if phase == "verify" else p.agent

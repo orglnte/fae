@@ -815,7 +815,7 @@ class Experiment:
         """
         import fae.conduct
         loops = fae.conduct.loop_parents()
-        slot_holders, verify_holder = self.slot_holders(), self.verify_holder()
+        slot_holders, verify_holders = self.slot_holders(), self.verify_holders()
         out = []
         for cid in self.workspace.cells():
             c = self.workspace.cell(cid)
@@ -834,7 +834,7 @@ class Experiment:
                 loop = "none"
             out.append(dict(cid=cid, outcome=L["verdict"] or "none", intent=intent,
                             loop=loop, attempts=len(L["iters"]),
-                            slot=slot, verify=cid == verify_holder))
+                            slot=slot, verify=cid in verify_holders))
         return out
 
     def slot_holders(self):
@@ -843,12 +843,10 @@ class Experiment:
         q = fae.conduct.queues(self.workspace)
         return {n[0] for n in (q.slot_note(s) for s in q.slot_files() if q.slot_held(s)) if n}
 
-    def verify_holder(self):
-        """The cell holding the verify lock now, or ''."""
+    def verify_holders(self):
+        """The cells holding a verify lock now, one per busy verify host."""
         from fae.cell.cell import Cell
-        locks = self.workspace.locks
-        return Cell.shared_lock_holder(locks, "verify") if Cell.shared_lock_held(locks, "verify") \
-            else ""
+        return Cell.verify_holders(self.config(), self.workspace.locks)
 
     def reset_trace(self, dry_run=False):
         """Re-anchor transitions.log on a RECORDED state.

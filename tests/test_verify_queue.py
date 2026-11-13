@@ -115,3 +115,35 @@ class TestPause(Case):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSeveralLocksOneQueue(Case):
+
+    def test_the_first_free_lock_is_won_and_order_is_kept(self):
+        second = self.d / "verify-lock-2"
+        holder = self.hold()
+        fh = mutex.queue_acquire([self.lock, second], "a", poll=0.01)
+        self.assertEqual(fh.name, str(second))
+        order = []
+        def run(cid):
+            got = mutex.queue_acquire([self.lock, second], cid, poll=0.01)
+            order.append((cid, got.name))
+            got.close()
+        b = threading.Thread(target=run, args=("b",))
+        b.start()
+        self.until(lambda: len(tickets(self.lock)) == 1)
+        fh.close()
+        b.join(5)
+        self.assertEqual(order, [("b", str(second))])
+        holder.close()
+
+    def test_a_stand_down_holds_none_of_the_locks(self):
+        second = self.d / "verify-lock-2"
+        a, b = self.hold(), mutex.open_lock(second)
+        self.assertTrue(mutex.try_fd(b))
+        self.assertIsNone(mutex.queue_acquire([self.lock, second], "c", poll=0.01, stop=lambda: True))
+        a.close(), b.close()
+        for p in (self.lock, second):
+            probe = mutex.open_lock(p)
+            self.assertTrue(mutex.try_fd(probe))
+            probe.close()

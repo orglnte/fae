@@ -82,7 +82,7 @@ class TestSharedContainersFollowThePhase(unittest.TestCase):
                 mock.patch.dict(os.environ, {}), \
                 mock.patch("fae.cell.cell.subprocess.run",
                            side_effect=lambda argv, **k: calls.append(argv)):
-            _VerifyHold(fh, c).close()
+            _VerifyHold(fh, c, None).close()
         fh.close.assert_called_once()
         self.assertEqual(calls, [["docker", "update", "--cpuset-cpus", "3-5", "fae-dind-x"]])
 

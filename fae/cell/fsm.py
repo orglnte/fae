@@ -14,7 +14,7 @@ verifying). PHASE_TO_LOOP is
 the only place those two are related, and it is total: a phase with no loop
 would let the console and the model describe the same cell differently.
 
-ONLY PER-CELL GUARDS LIVE HERE. `WorkCap`, `VerifyMutualExclusion` and
+ONLY PER-CELL GUARDS LIVE HERE. `WorkCap`, `VerifyCap` and
 `RigOnlyUnderVerify` quantify over the whole fleet; one cell cannot see them.
 They are enforced by the flocks — the only thing that can — and checked
 globally by tla_verify.

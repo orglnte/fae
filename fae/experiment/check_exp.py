@@ -424,11 +424,14 @@ def _trace(ctx):
         return [Finding(True, "no transitions recorded yet: nothing to replay")]
     spec = sorted(TLA_DIR.glob("*.tla"))
     # the checker's constants are the fleet's, not this shell's
-    slots = str(_config.load(ctx.root).values.get("WORK_SLOTS") or 8)
+    from fae.cell.verify_host import VerifyHost
+    conf = _config.load(ctx.root)
+    slots = str(conf.values.get("WORK_SLOTS") or 8)
     r = subprocess.run(["python3", tool, "--live-trace", str(log)]
                        + ([str(spec[0])] if spec else []) + conformance_since(),
                        cwd=ctx.root, capture_output=True, text=True,
-                       env=dict(os.environ, WORK_SLOTS=slots))
+                       env=dict(os.environ, WORK_SLOTS=slots,
+                                VERIFY_SLOTS=str(len(VerifyHost.pool(conf)))))
     judged = [l for l in r.stdout.splitlines()
               if "judging" in l or l.startswith("tla_verify --live-trace OK")]
     if r.returncode != 0:

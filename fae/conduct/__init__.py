@@ -1019,16 +1019,16 @@ class Conduct:
         return stopped
 
     @staticmethod
-    def verify_host():
+    def verify_hosts():
         from fae.cell.verify_host import VerifyHost
-        return VerifyHost.from_conf(fae.experiment.exp().config())
+        return VerifyHost.pool(fae.experiment.exp().config())
 
     def verify_host_down(self):
-        """Stop the verify host's machine (VERIFY_HOST_DOWN), once no loop is
-        left to verify on it."""
-        host = self.verify_host()
-        if host.remote and not _host.loop_parents():
-            host.down(log=lambda t: print(f"run: {t}", flush=True))
+        """Stop the verify hosts' machines (VERIFY_HOST_DOWN, one command for
+        all of them), once no loop is left to verify on them."""
+        remote = [h for h in self.verify_hosts() if h.remote]
+        if remote and not _host.loop_parents():
+            remote[0].down(log=lambda t: print(f"run: {t}", flush=True))
 
     def preflight(self):
         """Make the infra usable before admitting anything, or say why not.
@@ -1057,11 +1057,11 @@ class Conduct:
             print("run: STOP — the docker daemon is not reachable. Start "
                   "Docker, then run `experiment run` again.", flush=True)
             return False
-        vhost = self.verify_host()
-        if vhost.remote and not vhost.ensure_up(log=lambda t: print(f"run: {t}", flush=True)):
-            print(f"run: STOP — the verify host {vhost.docker_host} does not answer "
-                  f"(VERIFY_HOST_UP {'ran' if vhost.up_cmd else 'is not set'}).", flush=True)
-            return False
+        for vhost in self.verify_hosts():
+            if vhost.remote and not vhost.ensure_up(log=lambda t: print(f"run: {t}", flush=True)):
+                print(f"run: STOP — the verify host {vhost.docker_host} does not answer "
+                      f"(VERIFY_HOST_UP {'ran' if vhost.up_cmd else 'is not set'}).", flush=True)
+                return False
         if host_power.low_power_mode():
             print(f"run: STOP — the host is in Low Power Mode, and a verify is timed. "
                   f"Fix: {host_power.FIX}, then run `experiment run` again.", flush=True)

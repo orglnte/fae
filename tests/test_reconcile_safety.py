@@ -208,7 +208,7 @@ class TestTheEpochSeedIsComplete(unittest.TestCase):
             (Path(d) / ".locks" / "verify-lock.holder").write_text("cell-b 99 123\n")
             exp = runs.experiment.exp()
             self.assertEqual(exp.slot_holders(), {"cell-a"})
-            self.assertEqual(exp.verify_holder(), "cell-b")
+            self.assertEqual(exp.verify_holders(), ["cell-b"])
 
     def test_a_released_verify_lock_names_no_holder(self):
         # the holder note outlives the release; the kernel decides
@@ -217,14 +217,14 @@ class TestTheEpochSeedIsComplete(unittest.TestCase):
             (Path(d) / ".locks").mkdir()
             (Path(d) / ".locks" / "verify-lock").touch()
             (Path(d) / ".locks" / "verify-lock.holder").write_text("cell-b 99 123\n")
-            self.assertEqual(runs.experiment.exp().verify_holder(), "")
+            self.assertEqual(runs.experiment.exp().verify_holders(), [])
 
     def test_no_locks_held_reads_empty(self):
         with tempfile.TemporaryDirectory() as d, \
                 at_workspace(plane=Path(d)):
             exp = runs.experiment.exp()
             self.assertEqual(exp.slot_holders(), set())
-            self.assertEqual(exp.verify_holder(), "")
+            self.assertEqual(exp.verify_holders(), [])
 
 
 class TestTheConformanceWindow(unittest.TestCase):

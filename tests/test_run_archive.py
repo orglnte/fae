@@ -27,7 +27,7 @@ class TestRunArchive(unittest.TestCase):
         self.ws = self.c.ws
 
     def verify(self, verdict, exclusive=None, lock=True, during=None):
-        def runner(ctx, variant, timeout_s, log_dir=None):
+        def runner(ctx, variant, timeout_s, log_dir=None, host=None):
             out = Path(ctx.out)
             (out / "verify.log").write_text(f"run {ctx.arrangement}\n")
             (out / "trace.csv").write_text("t\n")
@@ -160,7 +160,7 @@ class TestTheVerifyWritesOnlyItsOwnDirectory(TestRunArchive):
         out = self.ws / "reverify" / "t1"
         out.mkdir(parents=True)
 
-        def runner(ctx, variant, timeout_s, log_dir=None):
+        def runner(ctx, variant, timeout_s, log_dir=None, host=None):
             _verify.record_event(ctx.out, "ALERT", "LOAD-SHAPE x")
             return Verdict(ok=True, arrangement="A")
         vcls = mock.Mock(REQUIRED_OUTPUTS=(), NOT_RUN_STAGES=frozenset(), MEASURED_STAGES=None, FILES=(), FEEDBACK_LOGS=())
@@ -258,7 +258,7 @@ class TestRequiredOutputs(unittest.TestCase):
         (self.ws / "iterations.log").write_text("")
 
     def verify(self, writes, verdict=None, required=("verify.log", "resources.json")):
-        def runner(ctx, variant, timeout_s, log_dir=None):
+        def runner(ctx, variant, timeout_s, log_dir=None, host=None):
             for name in writes:
                 (Path(ctx.out) / name).write_text("x\n")
             return verdict or Verdict(ok=True, arrangement="A")

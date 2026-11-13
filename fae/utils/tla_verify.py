@@ -5,9 +5,9 @@ A repo carries its model in .tla/<Name>.tla; this one script validates any
 of them, and replays a recorded transitions log against one (--live-trace).
 The spec is SELF-DESCRIBING via structured header comments:
 
-    \\* CHECK-CONSTANTS: Cells={"c1","c2"}; Budget=2; Slots=1
+    \\* CHECK-CONSTANTS: Cells={"c1","c2"}; Budget=2; Slots=1; VerifySlots=1
     \\* CHECK-ACTIONS: Spawn AcquireSlot StandDown ... (cell-argument ops)
-    \\* CHECK-INVARIANTS: TypeOK VerifyMutualExclusion ...
+    \\* CHECK-INVARIANTS: TypeOK VerifyCap ...
     \\* CHECK-ARGS: Cells          (the constant whose members are action args)
 
 Exhaustiveness contract (the "checker-friendly" style this checker
@@ -222,7 +222,7 @@ def check_live_trace(path, spec=None, since=None):
       - every event is an ENABLED transition given prior history (an
         illegal transition — e.g. two cells both holding AcquireVerify —
         is flagged at the event, with a shortest-trace-style citation)
-      - TypeOK, VerifyMutualExclusion, WorkCap, KilledStaysDead hold after
+      - TypeOK, VerifyCap, WorkCap, KilledStaysDead hold after
         every step (NoBudgetOverrun is deliberately excluded: it's a
         per-cell property the ledger's own rules check with each cell's
         ATTEMPT_BUDGET (fae/cell/ledger.py: check); the model's one global Budget constant
@@ -247,7 +247,7 @@ def check_live_trace(path, spec=None, since=None):
         spec = cands[0]
     spec = os.path.abspath(spec)
     _, LIVE_ACTIONS, _, _ = load_header(spec)
-    LIVE_INVARIANTS = ("TypeOK", "VerifyMutualExclusion", "WorkCap", "KilledStaysDead")
+    LIVE_INVARIANTS = ("TypeOK", "VerifyCap", "WorkCap", "KilledStaysDead")
 
     events = _incarnations(_from_last_epoch(_parse_transitions(path)))
     if not events:
@@ -256,7 +256,8 @@ def check_live_trace(path, spec=None, since=None):
     cells = frozenset(e["cid"] for e in events if e["cid"])
     min_verify_s = int(os.environ.get("TRACE_MIN_VERIFY_S", 45))
     consts = {"Cells": cells, "Budget": 100,
-              "Slots": int(os.environ.get("WORK_SLOTS", 7))}
+              "Slots": int(os.environ.get("WORK_SLOTS", 7)),
+              "VerifySlots": int(os.environ.get("VERIFY_SLOTS", 1))}
 
     pp_mod.pluspypath = ":".join(
         [".", os.path.dirname(spec)]

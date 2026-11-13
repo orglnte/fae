@@ -6,7 +6,8 @@
 (* the actors that move cells (loops, the operator, reconcile, worker).    *)
 (*                                                                         *)
 (* The model checks the invariants the rig's incident history violated:    *)
-(*   VerifyMutualExclusion  one verify at a time (verdict attributability) *)
+(*   VerifyCap              at most VerifySlots verifies at a time, one per *)
+(*                          verify host (verdict attributability)         *)
 (*   OneLoopPerCell         the loop lock's purpose (TOCTOU double-spawn)  *)
 (*   WorkCap                at most SLOTS cells hold a work slot           *)
 (*   VerdictStable          a finished cell never un-finishes (2026-07-25: *)
@@ -19,16 +20,17 @@
 (* which reads the CHECK-* headers below; `runs.py selftest` replays the    *)
 (* live transitions.log against this spec (tla_verify --live-trace).       *)
 (***************************************************************************)
-\* CHECK-CONSTANTS: Cells={"c1","c2"}; Budget=2; Slots=1
+\* CHECK-CONSTANTS: Cells={"c1","c2"}; Budget=2; Slots=2; VerifySlots=2
 \* CHECK-ACTIONS: Admit ReleaseSlot StandDown AcquireVerify AcquireRig ReleaseRig VerifyGreen VerifyFail Crash Pause Resume Kill
-\* CHECK-INVARIANTS: TypeOK VerifyMutualExclusion WorkCap KilledStaysDead NoBudgetOverrun NoLockWithoutLoop RigOnlyUnderVerify
+\* CHECK-INVARIANTS: TypeOK VerifyCap WorkCap KilledStaysDead NoBudgetOverrun NoLockWithoutLoop RigOnlyUnderVerify
 \* CHECK-ARGS: Cells
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS
   Cells,      \* e.g. {c1, c2}
   Budget,     \* attempt budget per cell, e.g. 2
-  Slots       \* global work-slot cap, e.g. 1
+  Slots,      \* global work-slot cap, e.g. 1
+  VerifySlots \* verify hosts, one verify lock each, e.g. 1
 
 VARIABLES
   outcome,    \* [Cells -> {"none", "green", "failed", "revoked"}]  (ledger)
@@ -36,7 +38,7 @@ VARIABLES
   loop,       \* [Cells -> {"none", "idle", "agent", "verify"}]     (liveness)
   attempts,   \* [Cells -> 0..Budget]
   slotHeld,   \* [Cells -> {TRUE, FALSE}]   holds a work slot
-  verifyHeld, \* {} or {c}            the global verify lock holder
+  verifyHeld, \* the cells holding a verify lock, one per busy verify host
   rigHeld     \* {} or {c}            a verifier's declared exclusive lock (Cell.exclusive_acquire); none declared today
 
 vars == <<outcome, intent, loop, attempts, slotHeld, verifyHeld, rigHeld>>
@@ -49,7 +51,7 @@ TypeOK ==
   /\ loop    \in [Cells -> {"none", "idle", "agent", "verify"}]
   /\ attempts \in [Cells -> 0..Budget]
   /\ slotHeld \in [Cells -> {TRUE, FALSE}]
-  /\ verifyHeld \in SUBSET Cells /\ Cardinality(verifyHeld) <= 1
+  /\ verifyHeld \in SUBSET Cells /\ Cardinality(verifyHeld) <= VerifySlots
   /\ rigHeld \in SUBSET Cells /\ Cardinality(rigHeld) <= 1
 
 Init ==
@@ -91,9 +93,9 @@ StandDown(c) ==
 
 AcquireVerify(c) ==
   /\ loop[c] = "agent"
-  /\ verifyHeld = {}
+  /\ Cardinality(verifyHeld) < VerifySlots   \* a verify host's lock is free
   /\ intent[c] = "run"                      \* vlock queue + post-acquire check
-  /\ verifyHeld' = {c}
+  /\ verifyHeld' = verifyHeld \cup {c}
   /\ loop' = [loop EXCEPT ![c] = "verify"]
   /\ UNCHANGED <<outcome, intent, attempts, slotHeld, rigHeld>>
 
@@ -104,7 +106,7 @@ AcquireVerify(c) ==
    ordering is what makes a deadlock impossible: a cell waiting for the rig
    cannot be holding anything another rig holder needs. *)
 AcquireRig(c) ==
-  /\ loop[c] = "verify" /\ verifyHeld = {c}
+  /\ loop[c] = "verify" /\ c \in verifyHeld
   /\ rigHeld = {}
   /\ rigHeld' = {c}
   /\ UNCHANGED <<outcome, intent, loop, attempts, slotHeld, verifyHeld>>
@@ -115,17 +117,17 @@ ReleaseRig(c) ==
   /\ UNCHANGED <<outcome, intent, loop, attempts, slotHeld, verifyHeld>>
 
 VerifyGreen(c) ==
-  /\ loop[c] = "verify" /\ verifyHeld = {c}
+  /\ loop[c] = "verify" /\ c \in verifyHeld
   /\ outcome' = [outcome EXCEPT ![c] = "green"]
-  /\ verifyHeld' = {}
+  /\ verifyHeld' = verifyHeld \ {c}
   /\ rigHeld' = rigHeld \ {c}
   /\ loop' = [loop EXCEPT ![c] = "none"]     \* END written, loop exits
   /\ slotHeld' = [slotHeld EXCEPT ![c] = FALSE]
   /\ UNCHANGED <<intent, attempts>>
 
 VerifyFail(c) ==
-  /\ loop[c] = "verify" /\ verifyHeld = {c}
-  /\ verifyHeld' = {}
+  /\ loop[c] = "verify" /\ c \in verifyHeld
+  /\ verifyHeld' = verifyHeld \ {c}
   /\ rigHeld' = rigHeld \ {c}
   /\ IF attempts[c] >= Budget
      THEN /\ outcome' = [outcome EXCEPT ![c] = "failed"]   \* budget exhausted
@@ -210,7 +212,7 @@ Spec == Init /\ [][Next]_vars
 (***************************************************************************)
 (* Invariants                                                              *)
 (***************************************************************************)
-VerifyMutualExclusion == Cardinality(verifyHeld) <= 1
+VerifyCap == Cardinality(verifyHeld) <= VerifySlots
 
 OneLoopPerCell == TRUE  \* structural here (loop is a function); the python
                         \* checker additionally asserts Admit is disabled
@@ -246,7 +248,7 @@ PausedNeverVerifies == \A c \in Cells :
 
 NoBudgetOverrun == \A c \in Cells : attempts[c] <= Budget
 
-Invariants == TypeOK /\ VerifyMutualExclusion /\ WorkCap
+Invariants == TypeOK /\ VerifyCap /\ WorkCap
               /\ KilledStaysDead /\ NoBudgetOverrun /\ RigOnlyUnderVerify
 
 =============================================================================

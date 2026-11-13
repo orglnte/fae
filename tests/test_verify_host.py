@@ -130,6 +130,21 @@ class TestARemoteDaemon(unittest.TestCase):
         self.assertEqual((v.ok, v.stage, v.charge), (False, "verifier-host", False))
 
 
+class TestSeveralHosts(unittest.TestCase):
+
+    def conf(self, v):
+        return SimpleNamespace(get=lambda k, default=None: v if k == "VERIFY_DOCKER_HOST" else "start-all")
+
+    def test_the_list_is_read_in_order_and_one_host_is_never_guessed(self):
+        pool = VerifyHost.pool(self.conf("ssh://u@a, ssh://u@b  ssh://u@c"))
+        self.assertEqual([h.docker_host for h in pool], ["ssh://u@a", "ssh://u@b", "ssh://u@c"])
+        self.assertTrue(all(h.up_cmd == "start-all" for h in pool))
+        self.assertEqual([h.docker_host for h in VerifyHost.pool(self.conf(""))], [""])
+        with self.assertRaises(ValueError):
+            VerifyHost.from_conf(self.conf("ssh://u@a,ssh://u@b"))
+        self.assertEqual(VerifyHost.from_conf(self.conf("ssh://u@a")).docker_host, "ssh://u@a")
+
+
 class TestTheAuthoringHostGetsEveryCoreWhenVerifiesRunElsewhere(unittest.TestCase):
 
     def test_split_or_all(self):
