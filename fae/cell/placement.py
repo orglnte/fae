@@ -43,18 +43,23 @@ def docker_ncpu():
         return None
 
 
-def current():
+def current(verify_remote=False):
+    """The split of the local Docker's CPUs; with verifies on another host
+    (fae/cell/verify_host.py) nothing is measured here, so every CPU is the
+    agents' and the measured set is empty."""
     n = docker_ncpu()
-    return split(n) if n else None
+    if not n:
+        return None
+    return Placement("", _cores(0, n - 1)) if verify_remote else split(n)
 
 
-def apply(environ=None):
+def apply(environ=None, verify_remote=False):
     """Reads Docker's CPU count and writes both sets into `environ` (this
     process's environment by default), which every container start of this
     process and of its children reads. Returns the placement, or None when
     Docker did not answer and the previous sets stay."""
     environ = os.environ if environ is None else environ
-    p = current()
+    p = current(verify_remote)
     if p is not None:
         environ["CPUSET_MEASURED"] = p.measured
         environ["CPUSET_AGENT"] = p.agent

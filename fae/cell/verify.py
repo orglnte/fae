@@ -507,13 +507,20 @@ def run_teardown(ctx, infra, timeout_s=900, log_dir=None):
 
 
 def _pull(host, ctx, out):
-    """The verify host's output directory back over the local one."""
+    """The verify host's output directory back over the local one, and the
+    cell network there removed: nothing of the cell stays on a verify host
+    between verifies (the next one creates the network again)."""
     if not host.remote:
         return
     try:
         host.pull(ctx.out, lambda m: _log_line(out, m))
     except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
         _log_line(out, f"verify host: could not copy {ctx.out} back: {e}")
+    from . import image as _image
+    try:
+        host.docker("network", "rm", _image.cell_network(ctx.cid))
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def run_verifier(ctx, infra, timeout_s=7200, log_dir=None):

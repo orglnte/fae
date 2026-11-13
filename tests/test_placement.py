@@ -52,6 +52,7 @@ class TestSharedContainersFollowThePhase(unittest.TestCase):
         from fae.cell.cell import Cell
         c = Cell.__new__(Cell)
         c._infra = mock.Mock(shared_containers=mock.Mock(return_value=shared))
+        c._conf = mock.Mock(get=mock.Mock(return_value=None))   # verifies on the local daemon
         return c
 
     def updates(self, c, phase):

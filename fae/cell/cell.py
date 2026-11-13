@@ -2078,10 +2078,11 @@ class Cell:
         containers the infra shares between both phases moved to this
         phase's set. Returns the placement, or None when Docker did not
         answer and nothing moved."""
-        p = _placement.apply()
+        from .verify_host import VerifyHost
+        p = _placement.apply(verify_remote=VerifyHost.from_conf(self.conf).remote)
         if p is None:
             return None
-        cpuset = p.measured if phase == "verify" else p.agent
+        cpuset = (p.measured or p.agent) if phase == "verify" else p.agent
         for name in self.infra.shared_containers():
             subprocess.run(["docker", "update", "--cpuset-cpus", cpuset, name],
                            capture_output=True, text=True)

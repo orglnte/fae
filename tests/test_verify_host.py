@@ -79,6 +79,13 @@ class TestARemoteDaemon(unittest.TestCase):
         self.assertIn("/verifier.log", argv)
         self.assertEqual(argv[argv.index("/verifier.log") - 1], "--exclude")
 
+    def test_after_a_verify_its_cell_network_leaves_the_host(self):
+        h = VerifyHost(REMOTE)
+        ctx = SimpleNamespace(out="/w/.verify-out", cid="cell-x")
+        with mock.patch.object(h, "pull"), mock.patch.object(h, "docker") as d:
+            verify._pull(h, ctx, Path(tempfile.gettempdir()))
+        d.assert_called_once_with("network", "rm", "fae-net-cell-x")
+
     def test_a_failed_copy_raises(self):
         with mock.patch.object(verify_host.subprocess, "run",
                                return_value=SimpleNamespace(returncode=12, stderr="broken pipe", stdout="")):
@@ -121,6 +128,15 @@ class TestARemoteDaemon(unittest.TestCase):
             with mock.patch.object(VerifyHost, "answers", return_value=False):
                 v = run_verifier(_ctx(ws), infra, timeout_s=5)
         self.assertEqual((v.ok, v.stage, v.charge), (False, "verifier-host", False))
+
+
+class TestTheAuthoringHostGetsEveryCoreWhenVerifiesRunElsewhere(unittest.TestCase):
+
+    def test_split_or_all(self):
+        from fae.cell import placement
+        with mock.patch.object(placement, "docker_ncpu", return_value=6):
+            self.assertEqual(placement.current(), placement.Placement("0-2", "3-5"))
+            self.assertEqual(placement.current(verify_remote=True), placement.Placement("", "0-5"))
 
 
 if __name__ == "__main__":
