@@ -223,6 +223,29 @@ _loaded: dict = {"def": None}
 _lock = threading.Lock()
 
 
+TEARDOWN_GRACE_S = 900
+
+
+def _run_to_teardown(argv, **kw):
+    """subprocess.run for a cell process: when this process is interrupted,
+    the cell gets SIGTERM, which its own teardown answers (removing what its
+    verify started, on a remote host too), and up to TEARDOWN_GRACE_S to
+    finish it; subprocess.run would SIGKILL it and leave that running."""
+    import signal
+    proc = subprocess.Popen(argv, **kw)
+    try:
+        proc.wait()
+    except BaseException:
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=TEARDOWN_GRACE_S)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        raise
+    return subprocess.CompletedProcess(argv, proc.returncode)
+
+
 def load(path):
     """The definition under `path`, loaded once. A different path while one
     is loaded is an error, not a swap."""
@@ -638,9 +661,9 @@ class Experiment:
                 results.append((vid, False, f"NOT ADMITTED — {why}", c))
                 continue
             try:
-                p = subprocess.run(c.process_argv() + ["--stub", str(empty)], cwd=str(self.root),
-                                   env=dict(env, **{Cell.SLOT_FDS_ENV: slots.handover()}),
-                                   pass_fds=tuple(slots.fds()))
+                p = _run_to_teardown(c.process_argv() + ["--stub", str(empty)], cwd=str(self.root),
+                                     env=dict(env, **{Cell.SLOT_FDS_ENV: slots.handover()}),
+                                     pass_fds=tuple(slots.fds()))
             finally:
                 slots.close()
             done = self.beside(c.ws.parent).cell(c.ws.name)
