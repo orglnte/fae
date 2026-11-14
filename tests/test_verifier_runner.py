@@ -191,7 +191,8 @@ class TestTheChildIsAContainer(RunnerCase):
         ws = self.out
         for d in ("arrangements/01-a1-BSB-green", ".attempts.git", ".agent-claude", ".tool-home/.kube"):
             (ws / d).mkdir(parents=True, exist_ok=True)
-        for f in (".attempts.index", "agent.attempt-1.log", "trace.csv"):
+        for f in (".attempts.index", "agent.attempt-1.log", "trace.csv", ".paused", ".loop",
+                  ".cancelled", "reconcile.flagged", ".verify-host", ".verify-inflight.json"):
             (ws / f).write_text("")
         out = ws / ".verify-out"
         out.mkdir(exist_ok=True)

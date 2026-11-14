@@ -1601,14 +1601,18 @@ class Cell:
     # live cell's ledger while it verifies, and nothing else may.
     RECORD_FILES = ("cell.env", ".skeleton_manifest", ".sealed")
     RECORD_TREES = ("arrangements", ".attempts.git/refs", "artifacts")
-    # Workspace entries a verify never reads, left out of its mounts and so
-    # never copied to a verify host: the cell's archive and attempt history,
-    # and the agent's own state and transcripts.
     # A remote verify host's CPU busy share while the verifier ran
     # (VerifyHost.sample_load), archived with the arrangement.
     HOST_LOAD = "host-load.csv"
+    # Workspace entries a verify never reads, left out of its mounts and so
+    # never copied to a verify host: the cell's archive and attempt history,
+    # the agent's own state and transcripts, and the control markers the
+    # loop and the operator write while a verify runs (mounted, a marker
+    # that appears mid-verify is made a root-owned directory on a remote
+    # host by the daemon, and the next copy to that path fails).
     VERIFY_UNREAD = ("arrangements", ".attempts.git", ".attempts.index", ".agent-*",
-                     ".tool-home", "agent.attempt-*.log")
+                     ".tool-home", "agent.attempt-*.log", ".paused", ".cancelled", ".loop",
+                     "reconcile.flagged", ".verify-host", ".verify-inflight.json")
     SUPERVISOR_EVENTS = frozenset({"ALERT"})
 
     def _record_snapshot(self):
