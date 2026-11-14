@@ -943,6 +943,19 @@ class TestDiagnose(ConductCase):
         self.assertIn("would admit", out)
         self.assertIn("run DOWN", out)
 
+    def test_a_spec_whose_lock_pool_is_full_is_passed_over_as_admission_does(self):
+        self.q("aaa", [self.spec()])
+        with mock.patch.object(Cell, "full_pool", return_value="lock"):
+            out, _ = self._diagnose()
+        self.assertNotIn("would admit", out)
+        self.assertIn("1 waiting for their lock's slot", out)
+
+    def test_a_full_work_pool_admits_nothing(self):
+        self.q("aaa", [self.spec()])
+        with mock.patch.object(Cell, "full_pool", return_value="work"):
+            out, _ = self._diagnose()
+        self.assertIn("every work slot is held — nothing admits now", out)
+
     def test_the_run_is_up_only_while_its_pid_is_alive(self):
         conduct = runs.conduct.Conduct()
         conduct.pidfile.parent.mkdir(parents=True, exist_ok=True)

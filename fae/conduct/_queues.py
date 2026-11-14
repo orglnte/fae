@@ -529,6 +529,17 @@ class Queues:
             raise
         return Slots(files)
 
+    def full_pool(self, work_slots, lock=None, lock_slots=1):
+        """The pool try_slots would find without a free slot ("work" /
+        "lock"), or None; read with probe_held, for display: takes nothing."""
+        pools = [("work", self._pool_dir(), work_slots)]
+        if lock:
+            pools.append(("lock", self._pool_dir(lock), lock_slots))
+        for pool, d, n in pools:
+            if all(self.slot_held(d / f"slot-{i}") for i in range(1, n + 1)):
+                return pool
+        return None
+
     def try_slots(self, cid, work_slots, lock=None, lock_slots=1):
         """The slots a cell needs, taken now or not at all: a free work slot and,
         for a variant with a lock, a free slot of the lock's pool. Never waits.

@@ -51,6 +51,25 @@ class TestOpeningTheSlots(SlotCase):
         self.assertEqual(s.held, [])
 
 
+class TestFullPoolReadsWithoutTaking(SlotCase):
+    def test_free_pools_are_none_and_a_held_lock_slot_is_lock(self):
+        self.assertIsNone(self.q.full_pool(1, lock="beta", lock_slots=1))
+        slots, _ = self.q.try_slots("c1", 2, lock="beta", lock_slots=1)
+        self.addCleanup(slots.close)
+        self.assertEqual(self.q.full_pool(2, lock="beta", lock_slots=1), "lock")
+        self.assertIsNone(self.q.full_pool(2))
+
+    def test_a_full_work_pool_is_work_and_reading_it_takes_nothing(self):
+        slots, _ = self.q.try_slots("c1", 1)
+        self.addCleanup(slots.close)
+        self.assertEqual(self.q.full_pool(1), "work")
+        slots.close()
+        self.assertIsNone(self.q.full_pool(1))
+        again, pool = self.q.try_slots("c2", 1)
+        self.addCleanup(again.close)
+        self.assertIsNone(pool)
+
+
 class TestTakingASlot(SlotCase):
 
     def test_the_work_slot_then_the_lock_slot(self):

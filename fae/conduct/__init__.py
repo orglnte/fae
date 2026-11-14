@@ -354,7 +354,7 @@ class Conduct:
                 held = ", ".join(sorted(qs.spec_cid(p) for p in claims))
                 note = f"HELD at {cap}/lane — claimed: {held}"
             else:
-                skipped = 0
+                skipped = slot_waits = 0
                 for p in paths:
                     cid = qs.spec_cid(p)
                     ws = fae.experiment.exp().workspace.path / cid
@@ -369,12 +369,21 @@ class Conduct:
                     if fae.experiment.exp().cell(cid).pause_reason or live.get(cid):
                         skipped += 1
                         continue
-                    note = f"next: {cid} — would admit"
+                    # admission passes over a spec whose lock pool is full and
+                    # stops at a full work pool (_first_startable)
+                    full = self._cell(cid, qs.read_spec(p), m).full_pool()
+                    if full == "lock":
+                        slot_waits += 1
+                        continue
+                    note = ("every work slot is held — nothing admits now" if full == "work"
+                            else f"next: {cid} — would admit")
                     break
                 else:
                     note = "nothing admissible"
                 if skipped:
                     note += f" ({skipped} flagged/done/paused ahead of it)"
+                if slot_waits:
+                    note += f" ({slot_waits} waiting for their lock's slot)"
             print(f"  {m:<8}{len(paths):>4} pending{' [PAUSED]' if parked else '':<9} "
                   f"{len(claims)} claimed  {note}")
         for l in zombies.janitor_lines():

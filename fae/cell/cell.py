@@ -2118,6 +2118,12 @@ class Cell:
                 int(self.conf.get(f"ARM_SLOTS_{(self.arm or '').upper()}",
                                   s.LOCK_SLOTS if s else 1)))
 
+    def full_pool(self):
+        """The pool take_slots would find full right now ("work" / "lock"),
+        or None; takes nothing (Queues.full_pool)."""
+        work, lock_n = self.slot_counts()
+        return self.queues.full_pool(work, lock=self.arm, lock_slots=lock_n)
+
     def take_slots(self):
         """This cell's slots, taken now or not at all (Queues.try_slots):
         (slots, None), or (None, pool) naming the pool with none free."""
