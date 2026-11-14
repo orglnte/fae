@@ -186,6 +186,22 @@ class TestTheChildIsAContainer(RunnerCase):
         self.assertNotIn(str(ws / "reverify"), paths)
         self.assertIn(str(out), paths)
 
+    def test_what_the_cell_keeps_for_itself_and_the_agent_is_not_mounted(self):
+        exp = _definition(self.root, "")
+        ws = self.out
+        for d in ("arrangements/01-a1-BSB-green", ".attempts.git", ".agent-claude", ".tool-home/.kube"):
+            (ws / d).mkdir(parents=True, exist_ok=True)
+        for f in (".attempts.index", "agent.attempt-1.log", "trace.csv"):
+            (ws / f).write_text("")
+        out = ws / ".verify-out"
+        out.mkdir(exist_ok=True)
+        ctx = Ctx(root=str(ROOT), experiment_dir=str(exp), workspace=str(ws),
+                  artifacts=str(ws / "artifacts"), out=str(out), cid="cell-x",
+                  task="T1", variant="only", arrangement="A")
+        names = {Path(m[0]).name for m in verify.verify_mounts(ctx, root_reads=())
+                 if Path(m[0]).parent == ws}
+        self.assertEqual(names, {"artifacts", "trace.csv", ".verify-out"})
+
     def test_an_experiment_outside_the_root_is_mounted_too(self):
         # unmounted, the child cannot load the definition and every verify halts
         exp = _definition(self.root, "")

@@ -408,23 +408,28 @@ def verify_mounts(ctx, root_reads=None):
     vanishes from the container within a second on Docker Desktop, and the
     verify then writes into the read-only parent. So the root and the
     workspace are not mounted whole; the workspace entry that holds `ctx.out`
-    is left out."""
+    is left out, and so is what the cell keeps for itself and the agent
+    (`Cell.VERIFY_UNREAD`): no verify reads it."""
+    from fnmatch import fnmatch
     from . import image as _image
+    from .cell import Cell
     if root_reads is None:
         root_reads = fae.experiment.exp().definition.verifier_class().ROOT_READS
     out = Path(ctx.out)
     root, ws = Path(ctx.root), Path(ctx.workspace)
 
-    def entries(d, files_only=False):
+    def entries(d, files_only=False, unread=()):
         try:
             found = sorted(d.iterdir())
         except OSError:
             return []
         return [p for p in found
                 if not p.is_symlink() and p != out and p not in out.parents
-                and not (files_only and not p.is_file())]
+                and not (files_only and not p.is_file())
+                and not any(fnmatch(p.name, u) for u in unread)]
     ro = [ctx.experiment_dir, HARNESS.parent, *entries(root, files_only=True),
-          *[root / r for r in root_reads if (root / r).exists()], *entries(ws)]
+          *[root / r for r in root_reads if (root / r).exists()],
+          *entries(ws, unread=Cell.VERIFY_UNREAD)]
     return ([(p, "ro") for p in _image.mounts_for(*ro) if p != str(out)]
             + [(str(out), "rw")])
 

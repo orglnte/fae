@@ -1601,6 +1601,11 @@ class Cell:
     # live cell's ledger while it verifies, and nothing else may.
     RECORD_FILES = ("cell.env", ".skeleton_manifest", ".sealed")
     RECORD_TREES = ("arrangements", ".attempts.git/refs", "artifacts")
+    # Workspace entries a verify never reads, left out of its mounts and so
+    # never copied to a verify host: the cell's archive and attempt history,
+    # and the agent's own state and transcripts.
+    VERIFY_UNREAD = ("arrangements", ".attempts.git", ".attempts.index", ".agent-*",
+                     ".tool-home", "agent.attempt-*.log")
     SUPERVISOR_EVENTS = frozenset({"ALERT"})
 
     def _record_snapshot(self):
