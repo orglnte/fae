@@ -29,6 +29,9 @@ class TestAgyArgv(unittest.TestCase):
         tail = self.argv("1")
         self.assertEqual(tail[tail.index("--agent") + 1], "fae")
 
+    def test_it_asks_for_no_sandbox_the_container_cannot_start(self):
+        self.assertNotIn("--sandbox", self.argv("1"))
+
     def test_stream_agent_off_prints_text(self):
         self.assertNotIn("--output-format", self.argv(""))
 

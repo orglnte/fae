@@ -120,7 +120,9 @@ class Agy(AgentClient):
     def command(self, conf, prompt, feedback):
         dirs = ["--add-dir", "/workspace"] + (["--add-dir", "/feedback"] if feedback else [])
         stream = ["--output-format", "stream-json"] if conf.get("STREAM_AGENT", "") else []
-        return ["agy", "--sandbox", "--dangerously-skip-permissions", *CLI_LIMITS, *dirs,
+        # no --sandbox: agy's sandbox re-executes itself in a new user namespace,
+        # which the agent container's default seccomp profile refuses
+        return ["agy", "--dangerously-skip-permissions", *CLI_LIMITS, *dirs,
                 "--model", conf.get("AGENT_MODEL", ""), *stream,
                 "--print-timeout", "60m", "--print", prompt]
 
