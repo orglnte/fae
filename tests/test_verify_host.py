@@ -135,6 +135,7 @@ class TestARemoteDaemon(unittest.TestCase):
                       task="T1", variant="only", arrangement="BSB")
             section = HostTimings(host=REMOTE, date="d", fae_commit="a", experiment_commit="b")
             with mock.patch.object(h, "ensure_up", return_value=True), \
+                    mock.patch.object(h, "wait_idle", return_value=(True, [0.0])), \
                     mock.patch.object(_timings, "calibration_of", return_value=(section, None)), \
                     mock.patch.object(_image, "for_variant", return_value="img:1"), \
                     mock.patch.object(_image, "remove_container"), \
