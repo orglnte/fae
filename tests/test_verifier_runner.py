@@ -410,7 +410,9 @@ class TestTheRealRoundTrip(unittest.TestCase):
                   task="T1", variant="alpha", arrangement="G1")
         _image.network_up("real-x")
         self.addCleanup(_image.network_down, "real-x")
-        v = run_verifier(ctx, NoopInfra(Variant, _Shim("real-x", out, ROOT)), timeout_s=600)
+        calibrated = HostTimings(host="local", date="d", fae_commit="a", experiment_commit="b")
+        with mock.patch.object(_timings, "calibration_of", return_value=(calibrated, None)):
+            v = run_verifier(ctx, NoopInfra(Variant, _Shim("real-x", out, ROOT)), timeout_s=600)
         self.assertTrue(v.ok, (v, (vout / "verifier.log").read_text()))
         self.assertEqual(v.metrics, {"answer": "42"})
         self.assertIn("image=fae-fixture-verifier:", (vout / "verifier.log").read_text())
