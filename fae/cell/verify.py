@@ -44,6 +44,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field, replace
@@ -374,6 +375,23 @@ def take_events(out):
     return events
 
 
+class _Steps:
+    """The seconds each step before the verifier took, for its start line."""
+
+    def __init__(self, out):
+        self.out, self.took = out, []
+
+    def timed(self, name, fn):
+        t0 = time.monotonic()
+        try:
+            return fn()
+        finally:
+            self.took.append((name, time.monotonic() - t0))
+
+    def __str__(self):
+        return " ".join(f"{n}={s:.1f}s" for n, s in self.took) or "-"
+
+
 def _log_line(out, text):
     with (Path(out) / "verifier.log").open("a") as log:
         log.write(f"{_now()}  {text}\n")
@@ -574,7 +592,8 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
         return Verdict(ok=False, stage="verifier-host", charge=False,
                        why=f"verify host {host.docker_host}: {why}", arrangement=ctx.arrangement)
 
-    if host.remote and not host.ensure_up(log):
+    steps = _Steps(out)
+    if host.remote and not steps.timed("host up", lambda: host.ensure_up(log)):
         return host_fault("the daemon does not answer")
     timings, uncalibrated = calibration_of(fae.experiment.exp().root, host)
     if uncalibrated:
@@ -584,8 +603,8 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
     if conf is not None and timings.load:
         conf = conf.with_values(timings.load)
     try:
-        image = _image.for_variant(infra.variant, fae.experiment.exp().definition, conf,
-                                   log=log, env=denv)
+        image = steps.timed("image", lambda: _image.for_variant(
+            infra.variant, fae.experiment.exp().definition, conf, log=log, env=denv))
     except RuntimeError as e:
         _log_line(out, f"verifier image: {e}")
         return Verdict(ok=False, stage="verifier-image", charge=False,
@@ -593,17 +612,18 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
     name = _image.verify_container(ctx.cid)
     cls = fae.experiment.exp().definition.verifier_class()
     try:
-        _image.remove_container(name, env=denv)          # a previous run's, if any
+        steps.timed("stale container", lambda: _image.remove_container(name, env=denv))
         if host.remote:
-            host.network_up(_image.cell_network(ctx.cid), ctx.cid)
-            host.push([p for p, _ in verify_mounts(ctx)], log)
+            steps.timed("network", lambda: host.network_up(_image.cell_network(ctx.cid), ctx.cid))
+            steps.timed("push", lambda: host.push([p for p, _ in verify_mounts(ctx)], log))
         argv = verify_argv(ctx, image, conf, cpus=cls.CPUS, host=host)
     except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
         return host_fault(str(e).splitlines()[0] if str(e) else type(e).__name__)
     _log_line(out, f"verifier start arrangement={ctx.arrangement or 'seed'} "
                    f"image={image} container={name}"
                    + (f" cpus={cls.CPUS}" if cls.CPUS is not None else "")
-                   + (f" host={host.docker_host}" if host.remote else ""))
+                   + (f" host={host.docker_host}" if host.remote else "")
+                   + f" before: {steps}")
     ended = False
     with (out / "verifier.log").open("a") as lf:
         p = subprocess.Popen(argv, cwd=ctx.root, env=denv, stdout=lf, stderr=subprocess.STDOUT,

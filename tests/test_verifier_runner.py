@@ -220,6 +220,13 @@ class TestTheChildIsAContainer(RunnerCase):
         self.assertIn("image=fae-mini-verifier:abc", log)
         self.assertIn("container=fae-verify-cell-x", log)
 
+    def test_the_start_line_times_each_step_before_it(self):
+        exp = _definition(self.root, "")
+        self.run_with(exp, self._child_writes(Verdict(ok=True)))
+        start = next(l for l in (self.out / "verifier.log").read_text().splitlines()
+                     if "verifier start" in l)
+        self.assertRegex(start, r"before: image=\d+\.\ds stale container=\d+\.\ds$")
+
 
 class TestEveryFailureIsARefundedRigFault(RunnerCase):
     def test_a_crash_is_stage_verifier_uncharged(self):
