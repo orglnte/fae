@@ -11,7 +11,8 @@ write its section of fae_verify_timings.toml.
    stage, is refunded there.
 5. The section is written: the config values the verifier names in
    CALIBRATION_KEYS, the probe's numbers, and per (variant, arrangement) the
-   mean of each value with its spread, measured from `repeats` >= 2 runs,
+   mean of each value (the verifier's, and `arrangement_s`, its seconds from
+   start to verdict) with its spread, measured from `repeats` >= 2 runs,
    else the verifier's `estimated_spread()`.
 
 Nothing is written unless the host was idle, every reference was green and
@@ -31,6 +32,9 @@ from fae.cell.verify_timings import HostTimings, Reference, VerifyTimings, host_
 
 IDLE_MAX = 0.10
 IDLE_SAMPLE_S = 5
+# The value the engine adds to every reference arrangement: its seconds
+# from start to verdict (the supervisor's measure of a stalled verify).
+ARRANGEMENT_S = "arrangement_s"
 
 
 class CalibrationError(RuntimeError):
@@ -69,6 +73,20 @@ def cpu_busy(before, after):
 def arrangement_dirs(cell):
     """{arrangement: archived dir} of a cell's green verify runs."""
     return {label: d for label, _, end, d, _ in cell.archived_runs() if end == "green"}
+
+
+def arrangement_seconds(cell):
+    """{arrangement: seconds from its start to its verdict} of a cell's green
+    runs: what one arrangement takes on the host it ran on."""
+    out = {}
+    for label, _, end, _, v in cell.archived_runs():
+        try:
+            t0, t1 = (datetime.strptime(v[k], "%Y-%m-%dT%H:%M:%SZ") for k in ("started", "ended"))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if end == "green":
+            out[label] = (t1 - t0).total_seconds()
+    return out
 
 
 def aggregate(runs, estimated_spread):
@@ -129,14 +147,16 @@ def calibrate(exp, name, repeats=1, log=print, idle_max=IDLE_MAX):
                                                          env=pin):
             if not green:
                 raise CalibrationError(f"reference {vid} (run {r}) not green: {verdict}")
-            dirs = arrangement_dirs(cell)
+            dirs, took = arrangement_dirs(cell), arrangement_seconds(cell)
             labels = [a or "seed" for a in d.gate.arrangements]
             missing = [a for a in labels if a not in dirs]
             if missing:
                 raise CalibrationError(f"reference {vid} (run {r}): no green {missing}")
             for label in labels:
-                runs.setdefault((vid, label), []).append(
-                    verifier.calibration_values(dirs[label]))
+                values = dict(verifier.calibration_values(dirs[label]))
+                if label in took:
+                    values[ARRANGEMENT_S] = took[label]
+                runs.setdefault((vid, label), []).append(values)
     _guard(exp, verifier, d, pin, repeats + 1, log)
 
     refs = []

@@ -111,6 +111,28 @@ T_STALL = int(os.environ.get("T_STALL", 1500))  # long verify tolerance
 
 
 VERIFY_HELD_ALERT_S = int(os.environ.get("VERIFY_HELD_ALERT_S", 420))
+# A calibrated host's verify reads as slow after this many times the longest
+# arrangement its reference of the same variant took there, when that is
+# longer than VERIFY_HELD_ALERT_S.
+VERIFY_SLOW_FACTOR = float(os.environ.get("VERIFY_SLOW_FACTOR", 1.5))
+
+
+def _slow_after(cell, cid):
+    """Seconds without a verify mark after which `cell`'s verify is slow:
+    VERIFY_SLOW_FACTOR x the longest calibrated arrangement of its variant on
+    the host its verify runs on, never under VERIFY_HELD_ALERT_S."""
+    from fae.cell.verify_timings import LOCAL, TimingsError, VerifyTimings
+    from fae.experiment.calibrate import ARRANGEMENT_S
+    parsed, host = _experiment.parse_cell_id(cid), cell.recorded_verify_host()
+    if not parsed or host is None:
+        return VERIFY_HELD_ALERT_S
+    try:
+        section = VerifyTimings.read(fae.experiment.exp().root).host(host or LOCAL)
+    except TimingsError:
+        section = None
+    longest = max((r.values.get(ARRANGEMENT_S, 0.0) for r in (section.references if section else ())
+                   if r.variant == parsed[1]), default=0.0)
+    return max(VERIFY_HELD_ALERT_S, VERIFY_SLOW_FACTOR * longest)
 
 
 
@@ -410,13 +432,14 @@ def supervise_pass(alerts, dry=False, only=""):
                     _mark_ts, _quiet = _verify_progress(ws, _ts)
                     _slow = _held if _quiet is None else _quiet
                     _key = (_ts, _mark_ts)
-                    if _slow is not None and _slow > VERIFY_HELD_ALERT_S \
+                    _limit = _slow_after(c, cid) if _slow is not None else None
+                    if _slow is not None and _slow > _limit \
                             and alerts.verify_slow.get(cid) != _key:
                         records.rec_log(f"{cid} ALERT — verify quiet {int(_slow)}s > "
-                                 f"{VERIFY_HELD_ALERT_S}s (lock held {int(_held or 0)}s)"
+                                 f"{int(_limit)}s (lock held {int(_held or 0)}s)"
                                  + (" [dry-run]" if dry else ""))
                         if not dry:
-                            fae.experiment.exp().cell(cid).alert(f"VERIFY-SLOW no progress for {int(_slow)}s > {VERIFY_HELD_ALERT_S}s (global verify-lock held {int(_held or 0)}s) — every other lane queues behind it")
+                            fae.experiment.exp().cell(cid).alert(f"VERIFY-SLOW no progress for {int(_slow)}s > {int(_limit)}s (global verify-lock held {int(_held or 0)}s) — every other lane queues behind it")
                             alerts.verify_slow[cid] = _key
                     # Past the wedge threshold, end it. The alert above is
                     # report-only, and a global lock nobody frees stalls every

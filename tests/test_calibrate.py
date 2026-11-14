@@ -167,6 +167,19 @@ class TestPieces(unittest.TestCase):
                 (Path(td) / "arrangements" / n).mkdir(parents=True)
             self.assertEqual(sorted(cal.arrangement_dirs(cell_at(Path(td)))), ["BSB", "seed"])
 
+    def test_an_arrangements_seconds_are_its_start_to_verdict(self):
+        with tempfile.TemporaryDirectory() as td:
+            for n, end, started, ended in (("01-a1-BSB-green", "green", "2026-11-14T10:00:00Z",
+                                            "2026-11-14T10:06:40Z"),
+                                           ("02-a1-SSB-refunded", "refunded", "2026-11-14T10:07:00Z",
+                                            "2026-11-14T10:08:00Z"),
+                                           ("03-a1-SBS-green", "green", None, None)):
+                d = Path(td) / "arrangements" / n
+                d.mkdir(parents=True)
+                (d / "verdict.json").write_text(json.dumps({"end_state": end, "started": started,
+                                                            "ended": ended}))
+            self.assertEqual(cal.arrangement_seconds(cell_at(Path(td))), {"BSB": 400.0})
+
     def test_the_environment_pins_the_verify_host(self):
         with tempfile.TemporaryDirectory() as td:
             (Path(td) / "fae.toml").write_text('[rig]\nVERIFY_DOCKER_HOST = "ssh://a, ssh://b"\n')

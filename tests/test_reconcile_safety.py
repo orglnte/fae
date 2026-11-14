@@ -802,6 +802,40 @@ class TestVerifyHeldAlert(SweepCase):
         self.assertIn("VERIFY-SLOW", body)
         self.assertIn("no progress for", body)
 
+    def _calibrated(self, arrangement_s, variant=None):
+        from fae.cell.verify_timings import HostTimings, Reference, VerifyTimings
+        variant = variant or runs.experiment.parse_cell_id(self.cid)[1]
+        (self.cell / ".verify-host").write_text("ssh://operator@verify1\n")
+        section = HostTimings(host="ssh://operator@verify1", date="d", fae_commit="a",
+                              experiment_commit="b", references=(
+                                  Reference(variant, "BSB", values={"arrangement_s": arrangement_s},
+                                            spreads={}),))
+        p = mock.patch.object(VerifyTimings, "read", return_value=VerifyTimings({section.host: section}))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_a_calibrated_hosts_long_arrangement_is_not_slow_within_its_own_time(self):
+        self._calibrated(500)                          # slow after 1.5 x 500 = 750 s
+        self._acquire(3 * runs.supervise.VERIFY_HELD_ALERT_S)
+        self._mark(runs.supervise.VERIFY_HELD_ALERT_S + 30)
+        self.sweep(self.st(state="RUNNING", why="verify"))
+        self.assertNotIn("VERIFY-SLOW", (self.cell / "iterations.log").read_text())
+
+    def test_a_calibrated_host_still_alerts_past_its_own_time(self):
+        self._calibrated(500)
+        self._acquire(3 * runs.supervise.VERIFY_HELD_ALERT_S)
+        self._mark(800)
+        self.sweep(self.st(state="RUNNING", why="verify"))
+        body = (self.cell / "iterations.log").read_text()
+        self.assertIn("VERIFY-SLOW no progress for 800s > 750s", body)
+
+    def test_another_variants_calibration_does_not_widen_it(self):
+        self._calibrated(500, variant="other_apidocs")
+        self._acquire(3 * runs.supervise.VERIFY_HELD_ALERT_S)
+        self._mark(runs.supervise.VERIFY_HELD_ALERT_S + 30)
+        self.sweep(self.st(state="RUNNING", why="verify"))
+        self.assertIn("VERIFY-SLOW", (self.cell / "iterations.log").read_text())
+
     def test_a_mark_from_the_previous_verify_does_not_count(self):
         self._mark(10 * runs.supervise.VERIFY_HELD_ALERT_S)      # an older gate's mark
         self._acquire(runs.supervise.VERIFY_HELD_ALERT_S + 30)
