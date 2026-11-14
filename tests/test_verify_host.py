@@ -125,6 +125,38 @@ class TestARemoteDaemon(unittest.TestCase):
             verify._pull(h, ctx, Path(tempfile.gettempdir()))
         d.assert_called_once_with("network", "rm", "fae-net-cell-x")
 
+    def _killed_before_the_verifier(self, fault):
+        from fae.cell import image as _image, verify_timings as _timings
+        from fae.cell.verify_timings import HostTimings
+        h = VerifyHost(REMOTE)
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d)
+            ctx = Ctx(root=d, experiment_dir=d, workspace=d, artifacts=d, out=d, cid="cell-x",
+                      task="T1", variant="only", arrangement="BSB")
+            section = HostTimings(host=REMOTE, date="d", fae_commit="a", experiment_commit="b")
+            with mock.patch.object(h, "ensure_up", return_value=True), \
+                    mock.patch.object(_timings, "calibration_of", return_value=(section, None)), \
+                    mock.patch.object(_image, "for_variant", return_value="img:1"), \
+                    mock.patch.object(_image, "remove_container"), \
+                    mock.patch.object(h, "network_up"), \
+                    mock.patch.object(h, "push", side_effect=fault), \
+                    mock.patch.object(h, "docker") as docker:
+                try:
+                    v = run_verifier(ctx, SimpleNamespace(conf=None, variant="only"), host=h)
+                except KeyboardInterrupt:
+                    v = "interrupted"
+            return v, docker
+
+    def test_a_signal_before_the_verifier_takes_its_network_off_the_host(self):
+        v, docker = self._killed_before_the_verifier(KeyboardInterrupt())
+        self.assertEqual(v, "interrupted")
+        docker.assert_any_call("network", "rm", "fae-net-cell-x")
+
+    def test_a_failed_copy_before_the_verifier_takes_its_network_off_the_host(self):
+        v, docker = self._killed_before_the_verifier(RuntimeError("rsync failed"))
+        self.assertEqual((v.stage, v.charge), ("verifier-host", False))
+        docker.assert_any_call("network", "rm", "fae-net-cell-x")
+
     def test_a_failed_copy_raises(self):
         with mock.patch.object(verify_host.subprocess, "run",
                                return_value=SimpleNamespace(returncode=12, stderr="broken pipe", stdout="")):

@@ -558,9 +558,13 @@ def _pull(host, ctx, out):
         host.pull(ctx.out, lambda m: _log_line(out, m))
     except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
         _log_line(out, f"verify host: could not copy {ctx.out} back: {e}")
+    _drop_network(host, ctx.cid)
+
+
+def _drop_network(host, cid):
     from . import image as _image
     try:
-        host.docker("network", "rm", _image.cell_network(ctx.cid))
+        host.docker("network", "rm", _image.cell_network(cid))
     except subprocess.TimeoutExpired:
         pass
 
@@ -626,7 +630,13 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
             steps.timed("network", lambda: host.network_up(_image.cell_network(ctx.cid), ctx.cid))
             steps.timed("push", lambda: host.push([p for p, _ in verify_mounts(ctx)], log))
         argv = verify_argv(ctx, image, conf, cpus=cls.CPUS, host=host)
-    except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+    except BaseException as e:
+        # nothing has started on the host: what was set up for it goes, a
+        # signal included, so no cell network outlives the verify there
+        if host.remote:
+            _drop_network(host, ctx.cid)
+        if not isinstance(e, (RuntimeError, OSError, subprocess.TimeoutExpired)):
+            raise
         return host_fault(str(e).splitlines()[0] if str(e) else type(e).__name__)
     _log_line(out, f"verifier start arrangement={ctx.arrangement or 'seed'} "
                    f"image={image} container={name}"
