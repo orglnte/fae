@@ -310,6 +310,7 @@ class Cell:
         """The cell's configuration, loaded on first use: reading a cell needs none."""
         if self._conf is None:
             self._conf = self._load_conf(self._agent_tag)
+            self._conf_from_root = True
         return self._conf
 
     def _load_conf(self, agent):
@@ -322,7 +323,7 @@ class Cell:
 
     @conf.setter
     def conf(self, value):
-        self._conf = value
+        self._conf, self._conf_from_root = value, False
 
     # --- identity ---------------------------------------------------------
 
@@ -937,8 +938,9 @@ class Cell:
                       workspace=str(self.ws), artifacts=str(self.artifacts), out=str(run_out),
                       cid=self.cid, task=self.task, variant=self.variant)
             from .verify_host import VerifyHost
-            pool, recorded = VerifyHost.pool(self.conf), self.recorded_verify_host()
-            hosts = [h for h in pool if h.docker_host == recorded] or pool
+            pool, recorded = self.verify_pool(), self.recorded_verify_host()
+            hosts = ([VerifyHost(recorded, pool[0].up_cmd, pool[0].down_cmd)]
+                     if recorded is not None else pool)
             for host in hosts:
                 run_teardown(ctx, self.infra, timeout_s=timeout_s, log_dir=self.ws, host=host)
         boxes = [i for k, i in self.variant_cls.INFRA.identities(self.cid) if k == "container"]
@@ -2042,26 +2044,31 @@ class Cell:
         from fae.conduct import Queues
         return Queues(_plane.queues(self.root), locks=self.locks)
 
-    @staticmethod
-    def verify_locks(base, n):
-        """The verify lock of each of `n` verify hosts, in VerifyHost.pool's
-        order: `base` for the first, `<base>-<i>` for the i-th after it."""
-        base = Path(base)
-        return [base] + [base.with_name(f"{base.name}-{i}") for i in range(2, n + 1)]
+    @classmethod
+    def verify_lock_files(cls, locks, base=None):
+        """Every verify lock on disk (VerifyHost.lock_path): `base`, else the
+        fleet-wide verify lock under `locks`, and one `<base>@<host>` per
+        host that ever had a verify. Read from the files, not from the
+        config, so a host taken out of the pool while held still shows."""
+        base = Path(base or cls.shared_lock(locks, "verify"))
+        named = sorted(p for p in base.parent.glob(f"{base.name}@*")
+                       if p.is_file() and not p.name.endswith(".holder"))
+        return [base] + named
 
     @classmethod
-    def verify_lock_paths(cls, conf, locks, base=None):
-        """Every verify lock the config's verify hosts have: from `base`, else
-        the fleet-wide verify lock under `locks`."""
-        from .verify_host import VerifyHost
-        return cls.verify_locks(base or cls.shared_lock(locks, "verify"),
-                                len(VerifyHost.pool(conf)))
-
-    @classmethod
-    def verify_holders(cls, conf, locks):
+    def verify_holders(cls, locks, base=None):
         """The cells holding a verify lock now, one per busy verify host."""
-        return [_mutex.holder_name(p) or "" for p in cls.verify_lock_paths(conf, locks)
+        return [_mutex.holder_name(p) or "" for p in cls.verify_lock_files(locks, base)
                 if p.exists() and _mutex.probe_held(p)]
+
+    def verify_pool(self):
+        """The verify hosts the configuration names now. A configuration read
+        from the root is read again at each call, so a host added to or
+        removed from fae.toml during a run counts from the next verify on
+        (the environment still pins one); one given to the cell is used as is."""
+        from .verify_host import VerifyHost
+        fresh = getattr(self, "_conf_from_root", False)
+        return VerifyHost.pool(self._load_conf(self._agent_tag) if fresh else self.conf)
 
     VERIFY_HOST_FILE = ".verify-host"
 
@@ -2078,22 +2085,34 @@ class Cell:
         pause — checked both while queued and right after winning, so the
         lock is never held by a cell that intends to exit.
         """
-        from .verify_host import VerifyHost
-        hosts = VerifyHost.pool(self.conf)
-        paths = self.verify_lock_paths(self.conf, self.locks, base=self.conf.get("VERIFY_LOCK_DIR"))
-        paths[0].parent.mkdir(parents=True, exist_ok=True)
-        fh = _mutex.queue_acquire(paths, self.cid, poll=poll,
+        base = Path(self.conf.get("VERIFY_LOCK_DIR") or self.shared_lock(self.locks, "verify"))
+        base.parent.mkdir(parents=True, exist_ok=True)
+        hosts = {}                       # lock path -> its host, as last read
+
+        def locks():
+            try:
+                found = {str(h.lock_path(base)): h for h in self.verify_pool()}
+            except (Exception, SystemExit) as e:
+                if not hosts:
+                    raise
+                print(f"{self.cid}: verify pool unreadable ({e}); keeping {len(hosts)} host(s)",
+                      file=sys.stderr, flush=True)
+                return list(hosts)
+            hosts.clear()
+            hosts.update(found)
+            return list(hosts)
+        fh = _mutex.queue_acquire(locks, self.cid, poll=poll, queue=_mutex.queue_dir(base),
                                   stop=lambda: (self.ws / ".paused").exists())
         if fh is None:
             return None
-        i = [str(p) for p in paths].index(fh.name)
-        _mutex.note_holder(paths[i], self.cid, os.getpid())
+        host = hosts[fh.name]
+        _mutex.note_holder(fh.name, self.cid, os.getpid())
         if (self.ws / ".paused").exists():
             fh.close()
             return None
         if not self.sealed:      # a sealed cell's reverify writes nothing into it
-            (self.ws / self.VERIFY_HOST_FILE).write_text(hosts[i].docker_host + "\n")
-        hold = _VerifyHold(fh, self, hosts[i])
+            (self.ws / self.VERIFY_HOST_FILE).write_text(host.docker_host + "\n")
+        hold = _VerifyHold(fh, self, host)
         self.place("verify")
         return hold
 
@@ -2178,8 +2197,7 @@ class Cell:
         containers the infra shares between both phases moved to this
         phase's set. Returns the placement, or None when Docker did not
         answer and nothing moved."""
-        from .verify_host import VerifyHost
-        p = _placement.apply(verify_remote=any(h.remote for h in VerifyHost.pool(self.conf)))
+        p = _placement.apply(verify_remote=any(h.remote for h in self.verify_pool()))
         if p is None:
             return None
         cpuset = (p.measured or p.agent) if phase == "verify" else p.agent

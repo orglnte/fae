@@ -114,11 +114,13 @@ def queue_dir(path):
     return Path(str(path) + ".queue")
 
 
-def queue_acquire(path, cid, poll=5.0, stop=None):
+def queue_acquire(path, cid, poll=5.0, stop=None, queue=None):
     """First come, first served on one lock file, or on the first free of
-    several (`path` a list: one queue, in front of all of them). Returns the
-    won lock's open file object (its `name` says which), or None when
-    `stop()` says to stand down.
+    several (`path` a list: one queue, in front of all of them; or a
+    callable returning that list, asked again at every poll, so a waiter
+    follows a set of locks that changes while it waits). Returns the won
+    lock's open file object (its `name` says which), or None when `stop()`
+    says to stand down. The queue is `queue`, else `<first path>.queue`.
 
     Each waiter holds a flock on a ticket of its own in `<first path>.queue/`,
     named by its arrival, and tries the locks only while no older ticket is
@@ -128,18 +130,24 @@ def queue_acquire(path, cid, poll=5.0, stop=None):
     life, so removing it is not the unlink-and-recreate the lock file itself
     must never undergo.
     """
-    paths = [path] if isinstance(path, (str, os.PathLike)) else list(path)
-    q = queue_dir(paths[0])
+    def current():
+        found = path() if callable(path) else path
+        return [found] if isinstance(found, (str, os.PathLike)) else list(found)
+    paths = current()
+    q = Path(queue) if queue is not None else queue_dir(paths[0])
     q.mkdir(parents=True, exist_ok=True)
     name = f"{time.time_ns():020d}-{os.getpid()}-{cid}"
     tmp = q / f".{name}"
     ticket = open(tmp, "a+")
     fcntl.flock(ticket, fcntl.LOCK_EX | fcntl.LOCK_NB)
     os.rename(tmp, q / name)
-    fhs = [open_lock(p) for p in paths]
+    fhs = {}                         # str(path) -> its open lock file, in `paths` order
     won = None
     try:
         while True:
+            for k in [k for k in fhs if k not in map(str, paths)]:
+                fhs.pop(k).close()
+            fhs = {str(p): fhs.get(str(p)) or open_lock(p) for p in paths}
             older = sorted(p for p in q.iterdir()
                            if not p.name.startswith(".") and p.name < name)
             ahead = False
@@ -149,14 +157,16 @@ def queue_acquire(path, cid, poll=5.0, stop=None):
                     break
                 p.unlink(missing_ok=True)
             if not ahead:
-                won = next((fh for fh in fhs if try_fd(fh)), None)
+                won = next((fh for fh in fhs.values() if try_fd(fh)), None)
                 if won is not None:
                     return won
             if stop is not None and stop():
                 return None
             time.sleep(poll)
+            if callable(path):
+                paths = current()
     finally:
-        for fh in fhs:
+        for fh in fhs.values():
             if fh is not won:
                 fh.close()
         (q / name).unlink(missing_ok=True)

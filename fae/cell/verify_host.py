@@ -44,7 +44,8 @@ class VerifyHost:
         """Every verify host the config names, in order: VERIFY_DOCKER_HOST
         lists one or more daemons, comma- or space-separated; the local
         daemon alone when it names none. Each serves one verify at a time
-        (Cell.verify_lock_acquire). VERIFY_HOST_UP/DOWN cover them all."""
+        (Cell.verify_lock_acquire), which reads the pool again for each
+        verify. VERIFY_HOST_UP/DOWN cover them all."""
         get = (lambda k: conf.get(k) or "") if conf is not None else (lambda k: os.environ.get(k, ""))
         names = [n for n in re.split(r"[,\s]+", get("VERIFY_DOCKER_HOST")) if n]
         return [cls(n, get("VERIFY_HOST_UP"), get("VERIFY_HOST_DOWN")) for n in names or [""]]
@@ -63,6 +64,16 @@ class VerifyHost:
     @property
     def remote(self):
         return bool(self.docker_host)
+
+    def lock_path(self, base):
+        """This host's verify lock: `base` for the local daemon,
+        `<base>@<host>` for a named one. Named after the host, never after
+        its place in the pool, so one lock file stands for one host however
+        the pool changes."""
+        base = Path(base)
+        if not self.docker_host:
+            return base
+        return base.with_name(f"{base.name}@{re.sub(r'[^A-Za-z0-9._-]+', '_', self.docker_host)}")
 
     @property
     def ssh_target(self):

@@ -894,7 +894,7 @@ class Experiment:
     def verify_holders(self):
         """The cells holding a verify lock now, one per busy verify host."""
         from fae.cell.cell import Cell
-        return Cell.verify_holders(self.config(), self.workspace.locks)
+        return Cell.verify_holders(self.workspace.locks)
 
     def reset_trace(self, dry_run=False):
         """Re-anchor transitions.log on a RECORDED state.

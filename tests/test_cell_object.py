@@ -907,33 +907,85 @@ class TestGatesAreSerializedWhole(CellTestCase):
         self.assertTrue(_mutex.try_fd(probe), "the lock leaked on the pause path")
         probe.close()
 
-    def test_each_verify_host_has_its_own_lock_and_a_hold_names_its_host(self):
-        hosts = "ssh://u@vm1, ssh://u@vm2"
-        a, b, c = self.locked_cell(), self.locked_cell(), self.locked_cell()
-        for x in (a, b, c):
-            x.conf.values["VERIFY_DOCKER_HOST"] = hosts
+    def hosts(self, names):
+        """The pool as the operator sets it: fae.toml's VERIFY_DOCKER_HOST."""
+        (self.root / "fae.toml").write_text(f'[rig]\nVERIFY_DOCKER_HOST = "{names}"\n')
+
+    def lock(self, host):
+        from fae.cell.verify_host import VerifyHost
+        return VerifyHost(host).lock_path(self.root / "verify-lock")
+
+    def held(self, path):
+        from fae.cell.cell import _mutex
+        probe = _mutex.open_lock(path)
+        free = _mutex.try_fd(probe)
+        probe.close()
+        return not free
+
+    def placed(self, *cells):
+        for x in cells:
             x.place = lambda phase: None
+        return cells
+
+    def test_each_verify_host_has_its_own_lock_and_a_hold_names_its_host(self):
+        self.hosts("ssh://u@vm1, ssh://u@vm2")
+        a, b, c = self.placed(self.locked_cell(), self.locked_cell(), self.locked_cell())
         fa, fb = a.verify_lock_acquire(), b.verify_lock_acquire()
         self.assertEqual((a.verify_host.docker_host, b.verify_host.docker_host),
                          ("ssh://u@vm1", "ssh://u@vm2"))
-        self.assertEqual(a.conf.values["VERIFY_DOCKER_HOST"], hosts, "the shared config is untouched")
         self.assertEqual(b.recorded_verify_host(), "ssh://u@vm2")   # one workspace here: the last hold
-        from fae.cell.cell import _mutex
-        for name in ("verify-lock", "verify-lock-2"):
-            probe = _mutex.open_lock(self.root / name)
-            self.assertFalse(_mutex.try_fd(probe), f"{name} is not held")
-            probe.close()
+        self.assertTrue(self.held(self.lock("ssh://u@vm1")) and self.held(self.lock("ssh://u@vm2")))
         (c.ws / ".paused").write_text("1\n")
         self.assertIsNone(c.verify_lock_acquire(poll=0.01), "a third verify found no free host")
         fa.close()
         self.assertIsNone(a.verify_host)
         fb.close()
 
+    def test_a_host_added_while_a_cell_waits_is_taken_by_it(self):
+        import threading
+        self.hosts("ssh://u@vm1")
+        a, b = self.placed(self.locked_cell(), self.locked_cell())
+        fa, won = a.verify_lock_acquire(), []
+        t = threading.Thread(target=lambda: won.append(b.verify_lock_acquire(poll=0.01)))
+        t.start()
+        self.hosts("ssh://u@vm1, ssh://u@vm2")
+        t.join(10)
+        self.assertEqual(won[0].fileno() >= 0 and b.verify_host.docker_host, "ssh://u@vm2")
+        won[0].close(), fa.close()
+
+    def test_a_host_removed_from_the_pool_is_not_taken(self):
+        self.hosts("ssh://u@vm1, ssh://u@vm2")
+        b, = self.placed(self.locked_cell())
+        self.hosts("ssh://u@vm2")
+        fb = b.verify_lock_acquire(poll=0.01)
+        self.assertEqual(b.verify_host.docker_host, "ssh://u@vm2")
+        fb.close()
+
+    def test_a_cell_holding_a_host_since_removed_still_shows_as_a_holder(self):
+        from fae.cell.cell import Cell
+        self.hosts("ssh://u@vm1, ssh://u@vm2")
+        a, = self.placed(self.locked_cell())
+        fa = a.verify_lock_acquire()
+        self.hosts("ssh://u@vm2")
+        self.assertEqual(Cell.verify_holders(None, base=self.root / "verify-lock"), [a.cid])
+        fa.close()
+
+    def test_a_lock_stands_for_its_host_whatever_the_pools_order(self):
+        self.hosts("ssh://u@vm1, ssh://u@vm2")
+        a, = self.placed(self.locked_cell())
+        fa = a.verify_lock_acquire()
+        self.hosts("ssh://u@vm2, ssh://u@vm1")
+        b, = self.placed(self.locked_cell())
+        fb = b.verify_lock_acquire(poll=0.01)
+        self.assertEqual((a.verify_host.docker_host, b.verify_host.docker_host),
+                         ("ssh://u@vm1", "ssh://u@vm2"))
+        fb.close(), fa.close()
+
     def test_a_kill_tears_down_on_the_host_of_the_last_verify(self):
         from unittest import mock
         from fae.cell import verify as _verify
         c = self.cell()
-        c.conf.values["VERIFY_DOCKER_HOST"] = "ssh://u@vm1 ssh://u@vm2"
+        self.hosts("ssh://u@vm1 ssh://u@vm2")
         c.artifacts.mkdir(parents=True, exist_ok=True)
         seen = []
         record = lambda ctx, infra, **kw: seen.append(kw["host"].docker_host)  # noqa: E731
@@ -948,6 +1000,10 @@ class TestGatesAreSerializedWhole(CellTestCase):
             (c.ws / c.VERIFY_HOST_FILE).write_text("ssh://u@vm2\n")
             c.clean_up()
             self.assertEqual(seen, ["ssh://u@vm2"])
+            seen.clear()
+            (c.ws / c.VERIFY_HOST_FILE).write_text("ssh://u@vm3\n")
+            c.clean_up()
+            self.assertEqual(seen, ["ssh://u@vm3"], "a host since taken out of the pool")
 
     def test_the_run_loop_acquires_before_the_model_transition(self):
         src = (Path(ROOT) / "fae" / "cell" / "cell.py").read_text()

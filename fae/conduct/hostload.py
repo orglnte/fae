@@ -198,11 +198,10 @@ class HostLoad:
         self._over_limit = {}       # resource -> the (cid, attempt) last reported over its limit
 
     def holder(self):
-        """The cell holding the verify lock now, or ""."""
-        locks = self.workspace.locks
-        if not Cell.shared_lock_held(locks, "verify"):
-            return ""
-        return Cell.shared_lock_holder(locks, "verify")
+        """The first cell holding a verify lock now, or "" (one at a time:
+        what is sampled is this machine, whichever host verifies)."""
+        held = Cell.verify_holders(self.workspace.locks)
+        return held[0] if held else ""
 
     def attempt(self, cid):
         text = self.workspace.cell(cid).ledger_text()

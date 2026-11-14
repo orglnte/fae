@@ -210,7 +210,7 @@ def _leaked_lock_holders():
     out = []
     locks = fae.experiment.exp().workspace.locks
     paths = [Cell.shared_lock(locks, "rig"),
-             *Cell.verify_lock_paths(fae.experiment.exp().config(), locks)]
+             *Cell.verify_lock_files(locks)]
     for p in paths:
         if not (p.exists() and mutex.probe_held(p)) \
                 or _host.loop_parents() or _verify_holders_alive():

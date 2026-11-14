@@ -147,3 +147,40 @@ class TestSeveralLocksOneQueue(Case):
             probe = mutex.open_lock(p)
             self.assertTrue(mutex.try_fd(probe))
             probe.close()
+
+
+class TestALockSetThatChangesWhileWaiting(Case):
+
+    def test_a_lock_added_while_waiting_is_won_from_the_named_queue(self):
+        second = self.d / "verify-lock@b"
+        holder = self.hold()
+        pool = [self.lock]
+        got = []
+        t = threading.Thread(target=lambda: got.append(mutex.queue_acquire(
+            lambda: list(pool), "a", poll=0.01, queue=mutex.queue_dir(self.lock))))
+        t.start()
+        self.until(lambda: len(tickets(self.lock)) == 1)
+        pool.append(second)
+        t.join(5)
+        self.assertEqual(got[0].name, str(second))
+        got[0].close(), holder.close()
+
+    def test_a_lock_dropped_while_waiting_is_not_taken(self):
+        other = self.d / "verify-lock@b"
+        busy = mutex.open_lock(other)
+        self.assertTrue(mutex.try_fd(busy))
+        pool = [self.lock, other]
+        holder = self.hold()
+        got = []
+        t = threading.Thread(target=lambda: got.append(mutex.queue_acquire(
+            lambda: list(pool), "a", poll=0.01, queue=mutex.queue_dir(self.lock))))
+        t.start()
+        self.until(lambda: len(tickets(self.lock)) == 1)
+        pool.remove(self.lock)
+        holder.close()
+        time.sleep(0.1)
+        self.assertEqual(got, [], "the dropped lock was taken")
+        busy.close()
+        t.join(5)
+        self.assertEqual(got[0].name, str(other))
+        got[0].close()
