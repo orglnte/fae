@@ -557,6 +557,7 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
     `host` is the verify host, default the config's one (VerifyHost.from_conf)."""
     from . import image as _image
     from .verify_host import VerifyHost
+    from .verify_timings import calibration_of
     work = Path(ctx.out) / WORKDIR
     out = Path(log_dir or ctx.out)
     (work / "home").mkdir(parents=True, exist_ok=True)
@@ -575,6 +576,13 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
 
     if host.remote and not host.ensure_up(log):
         return host_fault("the daemon does not answer")
+    timings, uncalibrated = calibration_of(fae.experiment.exp().root, host)
+    if uncalibrated:
+        _log_line(out, f"verify host: {uncalibrated}")
+        return Verdict(ok=False, stage="verifier-host", charge=False, why=uncalibrated,
+                       stand_down=("uncalibrated-verify-host",), arrangement=ctx.arrangement)
+    if conf is not None and timings.load:
+        conf = conf.with_values(timings.load)
     try:
         image = _image.for_variant(infra.variant, fae.experiment.exp().definition, conf,
                                    log=log, env=denv)

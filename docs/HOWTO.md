@@ -462,6 +462,21 @@ already exists, edit that key. `EXPERIMENT_DIR=shout` in the environment
 overrides the file on any single command; the rest of this howto passes
 it so the commands are self-contained whatever the file says.
 
+Every verify host is calibrated before a verify runs on it: the probe, every
+variant's reference on the whole gate, the verifier's guard, written as the
+host's section of `fae_verify_timings.toml` at the root. `local` is the
+daemon the authoring runs on; a remote one is its `VERIFY_DOCKER_HOST`
+entry. Run it with nothing else on the host, once per host, and again when
+the host or the experiment changes:
+
+```sh
+EXPERIMENT_DIR=shout python3 cli.py experiment calibrate --host local   # --repeats 3 measures the spread
+```
+
+A verify on a host without a section stands its cell down with this
+command; a verify on a calibrated one runs with the config values its
+section recorded.
+
 Pull the runtime image, then check that everything is in place:
 
 ```sh

@@ -266,6 +266,22 @@ def _definition(ctx):
     return out
 
 
+def _calibration(ctx):
+    from fae.cell.verify_host import VerifyHost
+    from fae.cell.verify_timings import calibration_of, host_key
+    from fae.experiment import config as _cfg
+    out = []
+    for h in VerifyHost.pool(_cfg.load(str(ctx.root))):
+        key = host_key(h)
+        found, why = calibration_of(ctx.root, h)
+        out.append(Finding(found is not None,
+                           f"verify host {key}: calibrated {found.date} (fae {found.fae_commit}, "
+                           f"experiment {found.experiment_commit})" if found else
+                           f"verify host {key}: {why}",
+                           f"python3 cli.py experiment calibrate --host {key} (on an idle host)"))
+    return out
+
+
 def _variants(ctx):
     from fae.cell.surface import authorable
     from fae.experiment.variants import liveness_declared
@@ -470,6 +486,9 @@ STEPS = (
     Step("definition", "definition",
          "variants/*.toml, verifier class and image, gate",
          "§3, §6", _definition, needs=("config",)),
+    Step("calibration", "calibration",
+         "every verify host has its section in fae_verify_timings.toml",
+         "§7", _calibration, needs=("definition",)),
     Step("variants", "variants",
          "authoring surface, infra liveness probe, inputs include TODO.md",
          "§5", _variants, needs=("definition",)),

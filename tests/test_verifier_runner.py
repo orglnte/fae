@@ -18,6 +18,8 @@ sys.path.insert(0, str(ROOT))
 import fae.experiment  # noqa: E402
 from fae.cell import image as _image  # noqa: E402
 from fae.cell import verify  # noqa: E402
+from fae.cell import verify_timings as _timings  # noqa: E402
+from fae.cell.verify_timings import HostTimings  # noqa: E402
 from fae.cell.verify import RUN_OUT, Ctx, Verdict, run_verifier, verify_argv  # noqa: E402
 from fae.cell.infra.base import NoopInfra  # noqa: E402
 from fae.experiment.variants.base import Variant  # noqa: E402
@@ -50,6 +52,11 @@ class RunnerCase(unittest.TestCase):
         self.out = self.root / "ws" / "cell-x"
         (self.out / "artifacts").mkdir(parents=True)
         self.calls = []
+        # the host is calibrated; the gate itself is test_verify_calibration_gate.py's
+        calibrated = HostTimings(host="local", date="d", fae_commit="a", experiment_commit="b")
+        p = mock.patch.object(_timings, "calibration_of", return_value=(calibrated, None))
+        p.start()
+        self.addCleanup(p.stop)
 
     def ctx(self, exp):
         return Ctx(root=str(ROOT), experiment_dir=str(exp), workspace=str(self.out),

@@ -52,6 +52,20 @@ def host_key(host):
     return host.docker_host or LOCAL
 
 
+def calibration_of(root, host):
+    """(the host's HostTimings, None), or (None, why it has none: the
+    command that calibrates it)."""
+    key = host_key(host)
+    try:
+        found = VerifyTimings.read(root).host(key)
+    except TimingsError as e:
+        return None, f"{FILE} is unreadable: {e}"
+    if found is None:
+        return None, (f"verify host {key} is not calibrated (no section in {FILE}): run "
+                      f"`python3 cli.py experiment calibrate --host {key}` on an idle host")
+    return found, None
+
+
 @dataclass(frozen=True)
 class Reference:
     variant: str

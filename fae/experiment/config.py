@@ -82,6 +82,11 @@ class Config:
             v = os.environ.get(key)
         return default if v in (None, "") else v
 
+    def with_values(self, values):
+        """A copy with `values` laid over, each exported where the key already was."""
+        return Config({**self.values, **values},
+                      {**self.exported, **{k: v for k, v in values.items() if k in self.exported}})
+
     def child_env(self, *extra):
         """The environment a child of this driver should see."""
         env = dict(os.environ)

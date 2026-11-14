@@ -13,6 +13,7 @@ from _ctx import ROOT, at_workspace  # noqa: F401  (sys.path, EXPERIMENT_DIR = t
 import fae.experiment
 from fae.experiment.variants.base import Variant
 from fae.experiment import check_exp as check
+from fae.cell.verify_timings import FILE as TIMINGS, HostTimings, VerifyTimings
 
 
 class CheckCase(unittest.TestCase):
@@ -21,6 +22,8 @@ class CheckCase(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         (self.root / "fae.toml").write_text("")
+        VerifyTimings().with_host(HostTimings(host="local", date="2026-11-14T10:00:00Z",
+                                              fae_commit="a", experiment_commit="b")).write(self.root)
         self.lines = []
 
     def ctx(self, **kw):
@@ -39,7 +42,7 @@ class CheckCase(unittest.TestCase):
 class TestTheFixtureIsReady(CheckCase):
     def test_every_static_step_passes_and_the_docker_ones_are_skipped(self):
         self.assertEqual(self.run_check(), 0)
-        for title in ("prerequisites", "config", "definition", "variants", "seeds"):
+        for title in ("prerequisites", "config", "definition", "calibration", "variants", "seeds"):
             self.assertIn(f"  ok      {title}", self.lines)
         self.assertIn("  skip    infra", self.lines)
         self.assertIn("No failure; the skipped steps are not checked.", self.text())
@@ -75,7 +78,7 @@ class TestTheFixtureIsReady(CheckCase):
 
     def test_the_seeds_leave_nothing_under_the_root(self):
         self.run_check()
-        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ["fae.toml"])
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ["fae.toml", TIMINGS])
 
 
 class TestEachFailureNamesItsFix(CheckCase):
@@ -89,6 +92,17 @@ class TestEachFailureNamesItsFix(CheckCase):
             self.assertEqual(self.run_check(), 1)
         self.assertIn("raised NameError: name 'GAET' is not defined", self.text())
         self.assertIn("  skip    definition", self.lines)
+
+    def test_an_uncalibrated_verify_host_fails_with_the_command(self):
+        (self.root / TIMINGS).unlink()
+        self.assertEqual(self.run_check(), 1)
+        self.assertIn("FAIL verify host local: verify host local is not calibrated", self.text())
+        self.assertIn("fix: python3 cli.py experiment calibrate --host local", self.text())
+
+    def test_a_calibrated_host_names_its_calibration(self):
+        f, = check._calibration(self.ctx())
+        self.assertTrue(f.ok)
+        self.assertEqual(f.text, "verify host local: calibrated 2026-11-14T10:00:00Z (fae a, experiment b)")
 
     def test_a_missing_host_probe_fails_the_definition_with_its_fix(self):
         d = fae.experiment.exp().definition
