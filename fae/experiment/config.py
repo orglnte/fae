@@ -46,6 +46,13 @@ ENGINE_DEFAULTS = {
     "VERIFY_DOCKER_HOST": "",
     "VERIFY_HOST_UP": "",
     "VERIFY_HOST_DOWN": "",
+    # Before each arrangement of a scored verify on a remote verify host:
+    # its CPU busy share must be under VERIFY_IDLE_MAX, read again every
+    # VERIFY_IDLE_WAIT_S up to VERIFY_IDLE_RETRIES times, else the
+    # arrangement is refunded (stage host-busy).
+    "VERIFY_IDLE_MAX": "0.10",
+    "VERIFY_IDLE_WAIT_S": "60",
+    "VERIFY_IDLE_RETRIES": "3",
 }
 
 # The agent container's name, `<prefix><cell id>`: the engine's own label

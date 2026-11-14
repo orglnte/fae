@@ -694,6 +694,15 @@ so its proof is its steps: a call to a tool outside the list is a breach.
   runs the cell's setup again (`WAKE` in the ledger); a setup that fails is
   an `infra` void. Halting instead would discard the agent's run and every
   arrangement it passed, for a fault of the host's.
+- **A scored arrangement starts on an idle verify host.** Before each one on
+  a remote verify host, `run_verifier` reads the host's CPU busy share over
+  5 s (`VerifyHost.busy_share`, /proc/stat over ssh, as calibration reads
+  it); at `VERIFY_IDLE_MAX` (0.10) or above it reads again after
+  `VERIFY_IDLE_WAIT_S` (60 s), up to `VERIFY_IDLE_RETRIES` (3) times, and a
+  host still busy refunds the arrangement (stage `host-busy`, every reading
+  in `why`, `ALERT HOST-BUSY`): a neighbour on the host would be measured
+  as the build's latency. A smoke verify (host tuning, calibration's own
+  runs) and the local daemon, whose machine is the run's, are not gated.
 - **`TRACE_MIN_VERIFY_S` (45 s).** A fail returned faster than this without
   reaching `VERIFY_READY` is an infra HALT, no attempt burned — except
   `stage_failed=deploy` (the infra came up and the agent's artifacts

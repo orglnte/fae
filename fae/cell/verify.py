@@ -287,7 +287,8 @@ class Verifier(ABC):
     REQUIRED_OUTPUTS = ()
     # The stages at which the verifier never ran to its end (no image, a
     # crash, a timeout): its outputs are not expected there.
-    NOT_RUN_STAGES = frozenset({"verifier", "verifier-timeout", "verifier-image", "verifier-host"})
+    NOT_RUN_STAGES = frozenset({"verifier", "verifier-timeout", "verifier-image", "verifier-host",
+                                "host-busy"})
     PREFIXES = {}   # {kind: name prefix} of what a verify provisions, for the reaper
     RUN_LOG = "run.log"   # under the verify's out: what the variant's program printed
     # A charged fail at one of these stages is voided when the variant's
@@ -606,8 +607,10 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
         return host_fault("the daemon does not answer")
     # A smoke cell (a reference pipeline check: host tuning, calibration's own
     # runs) is judged with the config's load, on any host; a scored verify
-    # only on a calibrated host, with the load its section recorded.
-    if not (conf is not None and conf.get("SMOKE")):
+    # only on a calibrated host, with the load its section recorded, and
+    # only once a remote host is idle.
+    scored = not (conf is not None and conf.get("SMOKE"))
+    if scored:
         timings, uncalibrated = calibration_of(fae.experiment.exp().root, host)
         if uncalibrated:
             _log_line(out, f"verify host: {uncalibrated}")
@@ -615,6 +618,19 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
                            stand_down=("uncalibrated-verify-host",), arrangement=ctx.arrangement)
         if conf is not None and timings.load:
             conf = conf.with_values(timings.load)
+    if scored and host.remote:
+        try:
+            idle, seen = steps.timed("idle", lambda: _wait_idle(host, conf, log))
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+            return host_fault(f"its CPU busy share is unreadable: {str(e).splitlines()[0]}")
+        if not idle:
+            readings = " ".join(f"{b:.2f}" for b in seen)
+            record_event(ctx.out, "ALERT", f"HOST-BUSY {ctx.arrangement or 'seed'} "
+                                           f"busy={readings} on {host.docker_host}")
+            return Verdict(ok=False, stage="host-busy", charge=False,
+                           why=f"verify host {host.docker_host} stayed busy: CPU busy share "
+                               f"{readings} over {len(seen)} readings",
+                           arrangement=ctx.arrangement)
     try:
         image = steps.timed("image", lambda: _image.for_variant(
             infra.variant, fae.experiment.exp().definition, conf, log=log, env=denv))
@@ -674,6 +690,14 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
     run_teardown(ctx, infra, log_dir=out, host=host)
     return Verdict(ok=False, stage="verifier", charge=False, why=why,
                    arrangement=ctx.arrangement)
+
+
+def _wait_idle(host, conf, log):
+    """(idle, readings) of `host` against the config's VERIFY_IDLE_* keys."""
+    get = (lambda k, d: (conf.get(k) if conf is not None else None) or d)
+    return host.wait_idle(float(get("VERIFY_IDLE_MAX", 0.10)),
+                          float(get("VERIFY_IDLE_WAIT_S", 60)),
+                          int(get("VERIFY_IDLE_RETRIES", 3)), log=log)
 
 
 def _end(p, name, env=None):

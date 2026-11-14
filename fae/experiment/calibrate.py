@@ -27,11 +27,10 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fae.cell.verify_host import VerifyHost, cpu_busy
+from fae.cell.verify_host import IDLE_SAMPLE_S, VerifyHost, cpu_busy  # noqa: F401
 from fae.cell.verify_timings import HostTimings, Reference, VerifyTimings, host_key
 
 IDLE_MAX = 0.10
-IDLE_SAMPLE_S = 5
 # The value the engine adds to every reference arrangement: its seconds
 # from start to verdict (the supervisor's measure of a stalled verify).
 ARRANGEMENT_S = "arrangement_s"
@@ -46,17 +45,10 @@ def busy_fraction(host, sample_s=IDLE_SAMPLE_S):
     twice over ssh for a remote host, the load average per CPU for this one."""
     if not host.remote:
         return os.getloadavg()[0] / (os.cpu_count() or 1)
-    target = host.ssh_target
-    if not target:
-        raise CalibrationError(f"{host.docker_host}: only an ssh:// host can be measured")
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", target,
-                        f"head -1 /proc/stat; sleep {sample_s}; head -1 /proc/stat"],
-                       capture_output=True, text=True, timeout=sample_s + 60)
-    lines = [l.split() for l in r.stdout.splitlines() if l.startswith("cpu ")]
-    if r.returncode or len(lines) != 2:
-        raise CalibrationError(f"{target}: /proc/stat unreadable: "
-                               f"{(r.stderr or r.stdout).strip()[-300:]}")
-    return cpu_busy(lines[0], lines[1])
+    try:
+        return host.busy_share(sample_s)
+    except RuntimeError as e:
+        raise CalibrationError(str(e)) from e
 
 
 def arrangement_dirs(cell):

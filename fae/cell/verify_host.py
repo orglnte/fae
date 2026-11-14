@@ -27,6 +27,8 @@ from urllib.parse import urlparse
 
 RSYNC_EXCLUDES = (".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".venv",
                   "*.pyc")
+# The seconds one reading of a host's CPU busy share spans.
+IDLE_SAMPLE_S = 5
 
 
 class VerifyHost:
@@ -152,6 +154,37 @@ class VerifyHost:
             return
         p = str(Path(path))
         _rsync([f"{self.ssh_target}:{p}/", p + "/"], log, delete=True, keep=keep)
+
+    def busy_share(self, sample_s=IDLE_SAMPLE_S):
+        """This host's CPU busy share, 0..1, over `sample_s`: /proc/stat read
+        twice over one ssh. Raises RuntimeError when it cannot be read."""
+        target = self.ssh_target
+        if not target:
+            raise RuntimeError(f"{self.docker_host or 'the local daemon'}: only an ssh:// "
+                               f"host can be measured")
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", target,
+                            f"head -1 /proc/stat; sleep {sample_s}; head -1 /proc/stat"],
+                           capture_output=True, text=True, timeout=sample_s + 60)
+        lines = [l.split() for l in r.stdout.splitlines() if l.startswith("cpu ")]
+        if r.returncode or len(lines) != 2:
+            raise RuntimeError(f"{target}: /proc/stat unreadable: "
+                               f"{(r.stderr or r.stdout).strip()[-300:]}")
+        return cpu_busy(lines[0], lines[1])
+
+    def wait_idle(self, max_busy, wait_s, retries, log=print):
+        """The busy share read until it is under `max_busy`, waiting `wait_s`
+        between readings, at most `retries` times after the first. (idle,
+        [each reading])."""
+        seen = []
+        for n in range(retries + 1):
+            if n:
+                time.sleep(wait_s)
+            seen.append(self.busy_share())
+            if seen[-1] < max_busy:
+                return True, seen
+            log(f"verify host: {self.docker_host} busy {seen[-1]:.0%} (max {max_busy:.0%})"
+                + (f"; reading again in {wait_s:.0f}s" if n < retries else ""))
+        return False, seen
 
     def sample_load(self, path, every_s=1):
         """Record this host's CPU busy share to `path` (`epoch,busy` lines)
