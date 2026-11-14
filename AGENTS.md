@@ -49,7 +49,8 @@ one's rules live:
 This repo is the engine: the `fae/` package (`cli/`, `conduct/`,
 `experiment/`, `cell/`, `scoring/`, `host`, `queues`, `mutex`) behind a root
 `cli.py` shim, its suite
-`tests/` (run on `tests/fixture_experiment/`) and the TLA+ model `.tla/`.
+`tests/` (run on `tests/fixture_experiment/`), the TLA+ model `.tla/` and
+the operator's offline tools `tools/`.
 An experiment is its own repo beside it. Its
 `cli.py` imports this checkout — `$FAE_DIR`, else the sibling `../fae` —
 puts it on `PYTHONPATH` for every process the engine starts, and sets the
@@ -667,6 +668,20 @@ so its proof is its steps: a call to a tool outside the list is a breach.
   (`law.second`). The trace's window is counted from that request too. A
   run without it is a void. Every value — baseline, top, ramp, hold, thresholds, the
   excess, the deadline — is the experiment's `CONFIG`, tuned per host.
+- **The law's calibrated tolerance is a switch, off by default.**
+  `LAW_CALIBRATED_TOLERANCE` (engine config, exported to the verify
+  container) widens each spike's mount limits by `LAW_TOLERANCE_K` (2) times
+  the spread the verify host's calibration recorded for that spike's
+  `mount_s`, and its release limits by k times that of its `release_s`
+  (`calibration.tolerances`): a miss inside the host's measured noise is not
+  the policy's. A scored verify hands the container its host's reference for
+  the variant and arrangement as JSON in `FAE_CALIBRATION`; `law.main` reads
+  both and passes the widths to `law.judge` as arguments, so `judge` stays a
+  function of its inputs. Off, the law judges as it did before the switch
+  existed, pinned call by call over the law's own fixtures
+  (`tests/test_elastic_law_tolerance.py`). A switch that changes verdicts
+  is turned on only after `tools/law_replay.py` has re-judged the archived
+  arrangements with it and the operator has read what changes.
 - **Tuning the load shape to a host.** Before scored cells, in order: the
   store's bench is above the verifier's floor; the spike saturates well
   inside the ramp and the resource mounts well inside the deadline

@@ -446,11 +446,13 @@ def _host_args(host, extra):
     return None, host.identity()
 
 
-def verify_argv(ctx, image, conf=None, environ=None, cpus=None, host=None):
+def verify_argv(ctx, image, conf=None, environ=None, cpus=None, host=None, reference=None):
     """The `docker run` that is one arrangement's child: the variant's
     image, the roots mounted at their own paths, the cell's network, the
     daemon's socket, the driver's environment minus the host's own, the
-    verifier's CPU cap."""
+    verifier's CPU cap, and the verify host's calibration `reference` for
+    this variant and arrangement (verify_timings.Reference) as JSON in
+    FAE_CALIBRATION."""
     from . import image as _image
     home = Path(ctx.out) / WORKDIR / "home"
     # the ctx's roots override the config's exported copies of the same names
@@ -461,6 +463,8 @@ def verify_argv(ctx, image, conf=None, environ=None, cpus=None, host=None):
                  FAE_VERIFY_CONTAINER=_image.verify_container(ctx.cid),
                  FAE_VERIFY_IMAGE=image, FAE_VERIFY_OUT=ctx.out,
                  FAE_CELL_NET=_image.cell_network(ctx.cid))
+    if reference is not None:
+        extra["FAE_CALIBRATION"] = json.dumps(asdict(reference), sort_keys=True)
     cpuset, identity = _host_args(host, extra)
     if cpuset is False:
         cpuset = conf.get("CPUSET_MEASURED") if conf else None
@@ -610,6 +614,7 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
     # only on a calibrated host, with the load its section recorded, and
     # only once a remote host is idle.
     scored = not (conf is not None and conf.get("SMOKE"))
+    reference = None
     if scored:
         timings, uncalibrated = calibration_of(fae.experiment.exp().root, host)
         if uncalibrated:
@@ -618,6 +623,7 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
                            stand_down=("uncalibrated-verify-host",), arrangement=ctx.arrangement)
         if conf is not None and timings.load:
             conf = conf.with_values(timings.load)
+        reference = timings.reference(ctx.variant, ctx.arrangement or "seed")
     if scored and host.remote:
         try:
             idle, seen = steps.timed("idle", lambda: _wait_idle(host, conf, log))
@@ -645,7 +651,7 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
         if host.remote:
             steps.timed("network", lambda: host.network_up(_image.cell_network(ctx.cid), ctx.cid))
             steps.timed("push", lambda: host.push([p for p, _ in verify_mounts(ctx)], log))
-        argv = verify_argv(ctx, image, conf, cpus=cls.CPUS, host=host)
+        argv = verify_argv(ctx, image, conf, cpus=cls.CPUS, host=host, reference=reference)
     except BaseException as e:
         # nothing has started on the host: what was set up for it goes, a
         # signal included, so no cell network outlives the verify there

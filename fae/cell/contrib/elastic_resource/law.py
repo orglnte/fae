@@ -56,8 +56,21 @@ Two modes:
   before saturation, mount within VERIFY_MAX_MOUNT_S of it, exactly one
   episode, released by trace end, errors within threshold.
 
+Calibrated tolerance (off unless asked): `mount_tol` and `release_tol`
+give, per spike in the schedule's order, seconds every mount and release
+limit of that spike is widened by — a miss smaller than the host's own
+measured noise is not judged as the policy's. Mount limits: the window of
+check 2 (both ends; its start is also where an episode counts as an
+earlier spike's, check 1) and, in canonical mode, the before-saturation
+and deadline bounds. Release limits: the mid-spike and too-late bounds of
+check 4. `main` takes them from the engine's calibration reference
+(FAE_CALIBRATION) when LAW_CALIBRATED_TOLERANCE is set: k
+(LAW_TOLERANCE_K, default 2) times the spread calibration recorded for
+the spike's mount_s and release_s (calibration.tolerances).
+
 Usage: law.py <trace.csv> <trace_events.json> <load_total> <load_errors> [schedule.json]
-Env:   VERIFY_SAT_P99_MS, VERIFY_MAX_MOUNT_S, VERIFY_MAX_LOAD_ERR_PCT, VERIFY_MAX_LAG_S
+Env:   VERIFY_SAT_P99_MS, VERIFY_MAX_MOUNT_S, VERIFY_MAX_LOAD_ERR_PCT, VERIFY_MAX_LAG_S,
+       LAW_CALIBRATED_TOLERANCE, LAW_TOLERANCE_K, FAE_CALIBRATION
 Output: one line, "true|", "false|<reason>; <reason>..." or "void|<reason>"
 """
 from __future__ import annotations
@@ -66,6 +79,7 @@ import csv
 import json
 import os
 import sys
+from collections.abc import Sequence
 
 GRACE_S = 3.0   # slack on every bound: the trace has one line per second
 VOID = "void"
@@ -147,9 +161,15 @@ def traffic_lag(rows: list[dict], t1: float, max_lag: float) -> float:
     return max_lag
 
 
+def _nth(seconds: Sequence[float], i: int) -> float:
+    """Spike `i`'s (1-based) entry of a per-spike tolerance; 0 past its end."""
+    return float(seconds[i - 1]) if 0 < i <= len(seconds) else 0.0
+
+
 def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict | None,
           *, sat_p99: float, max_mount: float, max_pct: float,
-          max_lag: float = 20.0) -> tuple[str, list[str]]:
+          max_lag: float = 20.0, mount_tol: Sequence[float] = (),
+          release_tol: Sequence[float] = ()) -> tuple[str, list[str]]:
     eps, last_ts = episodes(rows)
     released_last = (not eps) or eps[-1][1] is not None or (events.get("release_epoch") is not None)
     err_pct = (100.0 * errors / total) if total else 100.0
@@ -172,7 +192,7 @@ def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict |
         sats = []
         for i, spk in enumerate(spikes, 1):
             held = next((n for n, (m0, m1) in enumerate(eps, 1)
-                         if m0 < spk["t0"] - GRACE_S
+                         if m0 < spk["t0"] - GRACE_S - _nth(mount_tol, i)
                          and (m1 is None or m1 > spk["t0"] + GRACE_S)), None)
             lag = lags[i - 2] if i > 1 else 0.0
             if held is not None and lag and err_pct <= max_pct and eps[held - 1][1] is not None \
@@ -200,18 +220,19 @@ def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict |
                        % (len(spikes), len(eps)))
         for i, (epi, spk, sat_ts) in enumerate(zip(eps, spikes, sats), 1):
             m0, m1 = epi
-            lo, hi = spk["t0"] - GRACE_S, sat_ts + max_mount
+            mt, rt = _nth(mount_tol, i), _nth(release_tol, i)
+            lo, hi = spk["t0"] - GRACE_S - mt, sat_ts + max_mount + mt
             if not (lo <= m0 <= hi):
                 why.append("mount %d at ts=%.0f outside spike %d's window [%.0f..%.0f] "
                            "(saturated at ts=%.0f, deadline %gs after it)"
                            % (i, m0, i, lo, hi, sat_ts, max_mount))
-            if m1 is not None and m1 < spk["t1"] - GRACE_S:
+            if m1 is not None and m1 < spk["t1"] - GRACE_S - rt:
                 why.append("episode %d released MID-spike (ts=%.0f < spike end %.0f)"
                            % (i, m1, spk["t1"]))
             nxt = spikes[i]["t0"] if i < len(spikes) else last_ts + GRACE_S
             if m1 is None and i < len(spikes):
                 why.append("episode %d never released before spike %d" % (i, i + 1))
-            elif m1 is not None and m1 > nxt + lags[i - 1] + GRACE_S:
+            elif m1 is not None and m1 > nxt + lags[i - 1] + GRACE_S + rt:
                 why.append("episode %d released too late (ts=%.0f, next spike at %.0f%s)"
                            % (i, m1, nxt, ", traffic %.0fs past schedule" % lags[i - 1]
                               if lags[i - 1] else ""))
@@ -227,10 +248,11 @@ def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict |
             why.append("cache never mounted under load")
         if len(eps) > 1:
             why.append("cache flapped (%d mount episodes; the policy must hold through the sustained spike)" % len(eps))
+        mt = _nth(mount_tol, 1)
         if eps:
-            if eps[0][0] < sat_ts - GRACE_S:
+            if eps[0][0] < sat_ts - GRACE_S - mt:
                 why.append("cache mounted BEFORE saturation (ts=%.0f — a blip must be rejected)" % eps[0][0])
-            elif eps[0][0] - sat_ts > max_mount:
+            elif eps[0][0] - sat_ts > max_mount + mt:
                 why.append("mount too late: saturation->mount %.0fs > %gs" % (eps[0][0] - sat_ts, max_mount))
         if eps and not released_last:
             why.append("cache never released after the tail (traffic below the knee must release it)")
@@ -255,8 +277,25 @@ def main() -> None:
         sat_p99=float(os.environ.get("VERIFY_SAT_P99_MS", "150")),
         max_mount=float(os.environ.get("VERIFY_MAX_MOUNT_S", "30")),
         max_pct=float(os.environ.get("VERIFY_MAX_LOAD_ERR_PCT", "0")),
-        max_lag=float(os.environ.get("VERIFY_MAX_LAG_S", "20")))
+        max_lag=float(os.environ.get("VERIFY_MAX_LAG_S", "20")),
+        **switches(os.environ))
     print(verdict + "|" + "; ".join(why))
+
+
+def on(env: dict, key: str) -> bool:
+    return str(env.get(key, "")).strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def switches(env: dict) -> dict:
+    """judge's keyword arguments for the law's switches, as `env` sets
+    them; {} when every switch is off."""
+    out: dict = {}
+    if on(env, "LAW_CALIBRATED_TOLERANCE") and env.get("FAE_CALIBRATION"):
+        from fae.cell.contrib.elastic_resource import calibration
+        ref = json.loads(env["FAE_CALIBRATION"])
+        out["mount_tol"], out["release_tol"] = calibration.tolerances(
+            ref.get("spreads") or {}, float(env.get("LAW_TOLERANCE_K") or 2))
+    return out
 
 
 if __name__ == "__main__":

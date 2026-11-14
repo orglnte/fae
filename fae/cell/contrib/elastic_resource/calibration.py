@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from pathlib import Path
 
 from . import law
@@ -25,6 +26,7 @@ from . import law
 # One run cannot measure a spread; its resolution is the trace's grain, one
 # line per second.
 ESTIMATED_SPREAD_S = 1.0
+_SPIKE = re.compile(r"^spike(\d+)_")
 
 
 def values(rows, offered, sched, *, sat_p99, max_lag=20.0):
@@ -65,3 +67,14 @@ def values_from(arrangement_dir, *, sat_p99, max_lag=20.0):
 
 def estimated_spread(name, value):
     return ESTIMATED_SPREAD_S
+
+
+def tolerances(spreads, k):
+    """(mount_tol, release_tol) for law.judge from one reference's
+    {name: spread}: per spike, k times the spread of its mount_s and of its
+    release_s; 0 for a spike whose value calibration did not record."""
+    n = max((int(m.group(1)) for m in map(_SPIKE.match, spreads) if m), default=0)
+
+    def per(what):
+        return tuple(k * float(spreads.get(f"spike{i}_{what}_s", 0.0)) for i in range(1, n + 1))
+    return per("mount"), per("release")

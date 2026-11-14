@@ -53,6 +53,12 @@ ENGINE_DEFAULTS = {
     "VERIFY_IDLE_MAX": "0.10",
     "VERIFY_IDLE_WAIT_S": "60",
     "VERIFY_IDLE_RETRIES": "3",
+    # The contrib elastic-resource law's switch (read in the verify
+    # container): widen each spike's mount and release limits by
+    # LAW_TOLERANCE_K times the spread the verify host's calibration
+    # measured for them. Empty: off.
+    "LAW_CALIBRATED_TOLERANCE": "",
+    "LAW_TOLERANCE_K": "2",
 }
 
 # The agent container's name, `<prefix><cell id>`: the engine's own label
@@ -67,7 +73,7 @@ DEFAULT_EXPERIMENT_DIR = "experiment"
 _EXPORT_KEYS = (
     "AGENT_CLI", "EXPERIMENT_DIR", "FP_EXTRA_FILES",
     "REPO_ROOT", "WORKSPACES_DIR", "WORK_SLOTS", "AGENT_IMAGE",
-    "AGENT_HOME", "CPUSET_MEASURED",
+    "AGENT_HOME", "CPUSET_MEASURED", "LAW_CALIBRATED_TOLERANCE", "LAW_TOLERANCE_K",
 )
 
 _cache: dict[str, "Config"] = {}
