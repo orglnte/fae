@@ -111,8 +111,10 @@ def resolve_host(conf, name):
                            f"VERIFY_DOCKER_HOST names: {', '.join(host_key(h) for h in pool)}")
 
 
-def calibrate(exp, name, repeats=1, log=print, idle_max=IDLE_MAX):
-    """Measure host `name` and write its section; the written HostTimings."""
+def calibrate(exp, name, repeats=1, log=None, idle_max=IDLE_MAX):
+    """Measure host `name` and write its section; the written HostTimings.
+    `log` defaults to a print that flushes, so a redirected log is current."""
+    log = log or (lambda m: print(m, flush=True))
     if repeats < 1:
         raise CalibrationError("--repeats is at least 1")
     conf = exp.config()

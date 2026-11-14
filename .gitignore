@@ -50,4 +50,5 @@ mutants/
 
 # commit-message draft (git commit -F COMMIT_MSG), never committed
 COMMIT_MSG
-
+# machine-local, like fae.toml: one calibrated section per verify host
+fae_verify_timings.toml
