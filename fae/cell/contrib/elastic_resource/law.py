@@ -87,14 +87,15 @@ def second(row: dict, events: dict | None) -> float:
 
 def read_trace(trace: str, events: dict | None = None) -> list[dict]:
     rows = []
-    for r in csv.DictReader(open(trace)):
-        rows.append({
-            "ts": second(r, events),
-            "p99": float(r.get("p99_ms") or 0),
-            "up": str(r.get("infra_cache_up", "")).strip() == "True",
-            "sent": _count(r.get("k6_sent")),
-            "done": _count(r.get("k6_done")),
-        })
+    with open(trace) as f:
+        for r in csv.DictReader(f):
+            rows.append({
+                "ts": second(r, events),
+                "p99": float(r.get("p99_ms") or 0),
+                "up": str(r.get("infra_cache_up", "")).strip() == "True",
+                "sent": _count(r.get("k6_sent")),
+                "done": _count(r.get("k6_done")),
+            })
     return rows
 
 
