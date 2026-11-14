@@ -215,6 +215,19 @@ class TheLayer(unittest.TestCase):
         self.assertEqual(built, [v])
         self.assertEqual(held, ["image-lock"])
 
+    def test_ready_names_a_layer_once_until_it_is_rebuilt(self):
+        im, v = images(), self._variant(True)
+        ids, lines = iter(["sha256:a", "sha256:a", "sha256:b"]), []
+        with mock.patch.dict(ai._ANNOUNCED, clear=True), \
+                mock.patch.object(cimage, "present", return_value=True), \
+                mock.patch.object(AgentImage, "ensure_current", return_value=True), \
+                mock.patch.object(AgentImage, "tag", return_value="fae-x-agent-alpha:latest"), \
+                mock.patch.object(ai, "for_agent"), \
+                mock.patch.object(ai, "image_id", side_effect=lambda t: next(ids)):
+            for _ in range(3):
+                im.ready(v, log=lines.append)
+        self.assertEqual(lines, ["agent image: fae-x-agent-alpha:latest"] * 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -123,6 +123,11 @@ def for_agent(definition, conf, variant_cls, root, log=print):
     return tag_
 
 
+# tag -> the image id last logged for it: `ready()` runs before every
+# admission, and names a layer only when it is new or was rebuilt.
+_ANNOUNCED = {}
+
+
 class AgentImage:
     """The agents' images of one experiment root."""
 
@@ -264,7 +269,10 @@ class AgentImage:
                 except RuntimeError as e:
                     log(f"agent layer {tag}: {e}")   # a build failure carries the build's tail
                     return False
-                log(f"agent image: {tag}")
+                iid = image_id(tag)
+                if _ANNOUNCED.get(tag) != iid:
+                    _ANNOUNCED[tag] = iid
+                    log(f"agent image: {tag}")
             return True
 
     def client_versions(self, image):
