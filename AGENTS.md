@@ -422,7 +422,7 @@ share one class. It answers:
 | `verify_teardown(ctx, env)` | the same, after the verifier stopped the artifacts, whether `verify_setup` finished or not; `run_teardown` after a kill | the world reset after the arrangement, derivable from the ctx alone |
 | `tool(argv, env, network)` | the infra's own `cell_*` pair | a tool the host does not carry, run in a throwaway container of the variant's verify image over the daemon's socket |
 | `image_context(conf)`, `agent_image_context(conf)` | `fae/cell/image.py` | sources staged beside the variant's `[verify] image_dir` (its layer over the verifier's image, `FROM $BASE`, versions pinned; none = the verifier's image as is) and `[authoring] tools` Dockerfiles |
-| `identities(cid)` | `fae/conduct/zombies.py` | the names of what a cell provisions, from the one formula the provisioner uses |
+| `identities(cid)` | `fae/conduct/zombies.py`, `fae/conduct/hostload.py` | the names of what a cell and its verifies provision (a per-verify cluster included), from the one formula the provisioner uses |
 | `shared_containers()` | `Cell.place` | the cell's containers both phases use, by name, moved to each phase's CPUs (§6); none by default |
 | `PREFIXES`, `stray(live, workspaces)` | `fae/conduct/zombies.py` | what a reaper may DISCOVER: name prefixes to scan by, and any infra no name carries |
 

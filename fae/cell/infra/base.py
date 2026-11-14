@@ -238,9 +238,12 @@ class Infra:
 
     @classmethod
     def identities(cls, cid):
-        """[(kind, name)] of the cell-lifetime infra a cell provisions, named
-        as this class names it — what a reaper may look for after the cell
-        is gone. Unnamed infra (found by scanning) is not listed."""
+        """[(kind, name)] of the infra a cell provisions, for its life or for
+        one of its verifies (a per-verify cluster), named as this class names
+        it — what a reaper may look for after the cell is gone, and the
+        clusters the host-load recorder attributes a kind node to (an
+        unlisted cluster's nodes are recorded with no owner). Unnamed infra
+        (found by scanning) is not listed."""
         return []
 
     @classmethod
