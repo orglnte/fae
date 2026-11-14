@@ -79,6 +79,15 @@ class TestTheReplay(unittest.TestCase):
         out = self.run_it("--tolerance", "2", "--tolerance", "v2=1")
         self.assertIn("v2\t1\t1\t0", out)
 
+    def test_a_premounted_spike_is_charged_with_the_switch(self):
+        self.dirs = [arrangement(self.base / "p" / "01-a1-S-refunded",
+                                 T.rows(100, saturated_from=None, mounted=[(7, 70)]), T.SCHED,
+                                 stage="load-shape")]
+        self.assertIn("total\t1\t1\t", self.run_it("--law-stages", "scaling,load-shape"))
+        out = self.run_it("--law-stages", "scaling,load-shape", "--charge-premount")
+        self.assertIn("variant\tcounted\toff_agrees\tvoid->false", out)
+        self.assertIn("v1\t1\t1\t1", out)
+
     def test_a_tolerance_too_small_changes_nothing(self):
         out = self.run_it("--law-stages", "scaling", "--tolerance", "1")
         self.assertIn("total\t3\t3\t", out)

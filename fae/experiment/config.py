@@ -59,6 +59,9 @@ ENGINE_DEFAULTS = {
     # measured for them. Empty: off.
     "LAW_CALIBRATED_TOLERANCE": "",
     "LAW_TOLERANCE_K": "2",
+    # The same law's switch: a spike absorbed by a cache mounted for no
+    # earlier spike is charged, not a void. Empty: off.
+    "LAW_CHARGE_PREMOUNT": "",
 }
 
 # The agent container's name, `<prefix><cell id>`: the engine's own label
@@ -74,6 +77,7 @@ _EXPORT_KEYS = (
     "AGENT_CLI", "EXPERIMENT_DIR", "FP_EXTRA_FILES",
     "REPO_ROOT", "WORKSPACES_DIR", "WORK_SLOTS", "AGENT_IMAGE",
     "AGENT_HOME", "CPUSET_MEASURED", "LAW_CALIBRATED_TOLERANCE", "LAW_TOLERANCE_K",
+    "LAW_CHARGE_PREMOUNT",
 )
 
 _cache: dict[str, "Config"] = {}

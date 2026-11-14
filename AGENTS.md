@@ -682,6 +682,13 @@ so its proof is its steps: a call to a tool outside the list is a breach.
   (`tests/test_elastic_law_tolerance.py`). A switch that changes verdicts
   is turned on only after `tools/law_replay.py` has re-judged the archived
   arrangements with it and the operator has read what changes.
+- **A spike absorbed by a cache no earlier spike holds is a switch, off by
+  default.** A cache mounted just before a spike (up at its start, t0 +
+  `GRACE_S`, for no earlier spike) keeps the store from saturating, and the
+  law reads the spike's void. `LAW_CHARGE_PREMOUNT` (engine config,
+  exported; `law.judge`'s `charge_premount`) charges it instead, as a mount
+  with no spike to answer. Same rules as the tolerance: off judges as
+  before, and `tools/law_replay.py --charge-premount` shows what it changes.
 - **Tuning the load shape to a host.** Before scored cells, in order: the
   store's bench is above the verifier's floor; the spike saturates well
   inside the ramp and the resource mounts well inside the deadline

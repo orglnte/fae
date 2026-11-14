@@ -21,6 +21,8 @@ Options:
                              widen by, for every variant (law.judge's
                              mount_tol and release_tol)
     --tolerance VARIANT=S    the same for one variant; overrides the above
+    --charge-premount        charge a spike absorbed by a cache mounted for
+                             no earlier spike (law.judge's charge_premount)
     --law-stages A,B         the verdict.json stages the law decided (its
                              charged failure and its void, as the
                              experiment names them); with it, only green
@@ -86,7 +88,7 @@ def judge(d, args, switches):
 
 
 def switches_for(variant, sched, args, tol):
-    s = {}
+    s = {"charge_premount": True} if args.charge_premount else {}
     t = tol.get(variant, tol.get(None))
     if t:
         n = sum(1 for w in sched["events"] if w["kind"] == "spike")
@@ -98,6 +100,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("dirs", nargs="+")
     ap.add_argument("--tolerance", action="append", default=[])
+    ap.add_argument("--charge-premount", action="store_true")
     ap.add_argument("--law-stages", default="")
     ap.add_argument("--sat-p99", type=float, default=None)
     ap.add_argument("--max-mount", type=float, default=30.0)

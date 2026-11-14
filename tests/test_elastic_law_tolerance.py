@@ -98,11 +98,13 @@ class TestOffIsTheLawAsItWas(unittest.TestCase):
         self.assertEqual(self.calls(mount_tol=(), release_tol=()), GOLDEN)
         self.assertEqual(self.calls(mount_tol=(0.0, 0.0, 0.0), release_tol=(0.0, 0.0, 0.0)),
                          GOLDEN)
+        self.assertEqual(self.calls(charge_premount=False), GOLDEN)
 
     def test_main_passes_no_switch_when_none_is_set(self):
         self.assertEqual(law.switches({}), {})
         self.assertEqual(law.switches({"LAW_CALIBRATED_TOLERANCE": "0",
-                                       "FAE_CALIBRATION": "{}"}), {})
+                                       "FAE_CALIBRATION": "{}",
+                                       "LAW_CHARGE_PREMOUNT": "off"}), {})
 
 
 class TestATolerance(unittest.TestCase):

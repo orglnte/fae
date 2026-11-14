@@ -68,9 +68,15 @@ check 4. `main` takes them from the engine's calibration reference
 (LAW_TOLERANCE_K, default 2) times the spread calibration recorded for
 the spike's mount_s and release_s (calibration.tolerances).
 
+Pre-mounted spike (off unless asked): an episode mounted for no earlier
+spike that is up at a spike's start (t0 + GRACE_S) absorbs it, so the
+spike never saturates and check 1 reads a void. With `charge_premount`
+that is the policy's failure, charged: it mounted with no spike to answer
+(LAW_CHARGE_PREMOUNT for `main`).
+
 Usage: law.py <trace.csv> <trace_events.json> <load_total> <load_errors> [schedule.json]
 Env:   VERIFY_SAT_P99_MS, VERIFY_MAX_MOUNT_S, VERIFY_MAX_LOAD_ERR_PCT, VERIFY_MAX_LAG_S,
-       LAW_CALIBRATED_TOLERANCE, LAW_TOLERANCE_K, FAE_CALIBRATION
+       LAW_CALIBRATED_TOLERANCE, LAW_TOLERANCE_K, FAE_CALIBRATION, LAW_CHARGE_PREMOUNT
 Output: one line, "true|", "false|<reason>; <reason>..." or "void|<reason>"
 """
 from __future__ import annotations
@@ -169,7 +175,8 @@ def _nth(seconds: Sequence[float], i: int) -> float:
 def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict | None,
           *, sat_p99: float, max_mount: float, max_pct: float,
           max_lag: float = 20.0, mount_tol: Sequence[float] = (),
-          release_tol: Sequence[float] = ()) -> tuple[str, list[str]]:
+          release_tol: Sequence[float] = (),
+          charge_premount: bool = False) -> tuple[str, list[str]]:
     eps, last_ts = episodes(rows)
     released_last = (not eps) or eps[-1][1] is not None or (events.get("release_epoch") is not None)
     err_pct = (100.0 * errors / total) if total else 100.0
@@ -207,6 +214,18 @@ def judge(rows: list[dict], events: dict, total: int, errors: int, sched: dict |
                     why.append("episode %d never released before spike %d (its cache "
                                "absorbed the spike: p99 max %.0fms < %gms over [%.0f..%.0f])"
                                % (held, i, peak, sat_p99, spk["t0"], spk["t1"]))
+                    if err_pct > max_pct:
+                        why.append(errors_why)
+                    return "false", why
+                up = next((n for n, (m0, m1) in enumerate(eps, 1)
+                           if m0 <= spk["t0"] + GRACE_S
+                           and (m1 is None or m1 > spk["t0"] + GRACE_S)), None)
+                if charge_premount and up is not None:
+                    why.append("episode %d mounted before spike %d (ts=%.0f, spike at %.0f) "
+                               "with no earlier spike to hold it, and absorbed it: p99 max "
+                               "%.0fms < %gms over [%.0f..%.0f]"
+                               % (up, i, eps[up - 1][0], spk["t0"], peak, sat_p99,
+                                  spk["t0"], spk["t1"]))
                     if err_pct > max_pct:
                         why.append(errors_why)
                     return "false", why
@@ -295,6 +314,8 @@ def switches(env: dict) -> dict:
         ref = json.loads(env["FAE_CALIBRATION"])
         out["mount_tol"], out["release_tol"] = calibration.tolerances(
             ref.get("spreads") or {}, float(env.get("LAW_TOLERANCE_K") or 2))
+    if on(env, "LAW_CHARGE_PREMOUNT"):
+        out["charge_premount"] = True
     return out
 
 
