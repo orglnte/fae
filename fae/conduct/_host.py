@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import fae.experiment
 from fae.cell import host_sleep
@@ -78,9 +79,11 @@ def loop_parents():
     The ps scan matches `-m fae.cell` followed by its 3 positionals (task
     variant rep) — not merely anywhere in the line: children carry the
     driver's path in their env and would shadow the real loop pid. AGENT and
-    EFFORT come from the exec-time env; the cid is rebuilt from them. The env
-    text is scanned for those keys only and never printed — it also carries
-    agent credentials."""
+    EFFORT come from the exec-time env; the cid is rebuilt from them. A loop
+    whose WORKSPACES_DIR is neither this experiment's scored root nor its
+    smoke root is another experiment's, and left out. The env text is
+    scanned for those keys only and never printed — it also carries agent
+    credentials."""
     out = {}
     if fae.experiment.exp().workspace.path.exists():
         for ws in fae.experiment.exp().workspace.path.iterdir():
@@ -89,12 +92,18 @@ def loop_parents():
             hb = heartbeat(ws)
             if hb:
                 out[ws.name] = hb["pid"]
+    exp = fae.experiment.exp()
+    roots = {exp.workspace.path.resolve(), exp.smoke_workspaces.resolve()}
     for line in sh(["ps", "-axww", "-E", "-o", "pid=,command="]).splitlines():
         m = re.match(r"\s*(\d+)\s+.*?-m fae\.cell"
                      r"\s+(\S+)\s+(\S+)\s+(\d+)", line)
         if not m:
             continue
         pid, task, variant, rep = m.groups()
+        # another experiment's loop on this machine is not this one's
+        ws_dir = re.search(r"\bWORKSPACES_DIR=(\S+)", line)
+        if ws_dir and Path(ws_dir.group(1)).resolve() not in roots:
+            continue
         agent = re.search(r"\bAGENT=(\S+)", line)
         if not agent:
             continue

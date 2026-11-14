@@ -158,12 +158,21 @@ class FindZombiesCase(unittest.TestCase):
 
 class TestFindZombiesContainers(FindZombiesCase):
     def test_an_old_unowned_container_is_a_zombie(self):
+        (Path(self.tmp.name) / "cid1").mkdir()
         with mock.patch.object(state, "containers", return_value=["fae-agent-cid1"]), \
                 mock.patch.object(zombies, "_iter_age_s", return_value=None), \
                 mock.patch.object(zombies, "_docker_age_s",
                                   return_value=zombies.ZOMBIE_UNKNOWN_GRACE_S + 1):
             zs = zombies.find_zombies()
         self.assertIn(("container", "fae-agent-cid1", "cid1", "no live loop"), zs)
+
+    def test_another_experiments_container_is_never_a_zombie(self):
+        # same engine prefix, no workspace here: another root's cell
+        with mock.patch.object(state, "containers", return_value=["fae-dind-elsewhere1"]), \
+                mock.patch.object(zombies, "_iter_age_s", return_value=None), \
+                mock.patch.object(zombies, "_docker_age_s",
+                                  return_value=zombies.ZOMBIE_UNKNOWN_GRACE_S * 10):
+            self.assertEqual(zombies.find_zombies(), [])
 
     def test_a_live_owned_container_is_not_a_zombie(self):
         with mock.patch.object(state, "loop_parents", return_value={"cid1"}), \

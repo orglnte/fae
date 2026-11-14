@@ -63,6 +63,15 @@ def _cluster_map():
                     m[ident] = c
         _CLMAP["map"] = m
     return _CLMAP["map"]
+def _ours(cid):
+    """Whether `cid` is a cell of this experiment: it has a workspace under
+    the scored root or the smoke root. Another experiment on the same daemon
+    names its cells' containers with the same engine prefixes, and what this
+    experiment has no workspace for is never its to reap."""
+    exp = fae.experiment.exp()
+    return any((root / cid).is_dir() for root in (exp.workspace.path, exp.smoke_workspaces))
+
+
 def _infra_of(variant, cid):
     """[(kind, ident)] a cell of this variant provisions, named by its
     variant. Unnamed infra is found by scanning instead (`_strays`)."""
@@ -237,7 +246,7 @@ def find_zombies():
             if not name.startswith(pfx):
                 continue
             cid = name[len(pfx):]
-            if cid in live:
+            if cid in live or not _ours(cid):
                 continue
             age = _iter_age_s(cid)
             # UNKNOWN age gets the LONG grace, never none: _iter_age_s is None
@@ -276,7 +285,7 @@ def find_zombies():
             continue
         pfx = next(p for p in net_prefixes if net.startswith(p))
         cid = net[len(pfx):]
-        if cid in live:
+        if cid in live or not _ours(cid):
             continue
         age = _docker_net_age_s(net)
         if age is None or age < ZOMBIE_UNKNOWN_GRACE_S:
