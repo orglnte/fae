@@ -572,24 +572,43 @@ class Experiment:
         `full_gate` runs the whole gate. Exits 0 iff every variant is green;
         the per-variant verdict names the log to read.
         """
-        import tempfile
-        import time
         from fae.experiment import check_exp
-        from fae.conduct import Conduct
         chosen = [v for v in (variants.split(",") if variants else self.smoke_variants())
                   if not only or only in v]
         if not chosen:
             sys.exit(f"smoke: no variant matches --only {only!r}")
-        smoke_ws = self.smoke_workspaces
         print("=== SMOKE MODE: agent=ref — pipeline check, NOT a scored run "
-              f"(cells tagged ref_high_smoke_*, in {smoke_ws.name}) ===")
+              f"(cells tagged ref_high_smoke_*, in {self.smoke_workspaces.name}) ===")
         # each variant's own preflight, so a missing daemon, tool or image is
         # named before any infra is spent
         if check_exp.probe_variants(chosen):
             sys.exit("SMOKE ABORTED: a variant refused this host — see hooks.log lines above")
+        results = [(vid, green, verdict) for vid, green, verdict, _ in
+                   self.smoke_cells(chosen, rep=rep, full_gate=full_gate)]
+        print("\n=== SMOKE SUMMARY ===")
+        for vid, green, verdict in results:
+            print(f"  {'ok  ' if green else 'FAIL'} {vid:24s} {verdict}")
+        if all(g for _, g, _ in results):
+            print("  PIPELINE OK on every variant.")
+            sys.exit(0)
+        print("  PIPELINE BROKE — see the per-variant VERDICT above; each names the "
+              "log to read.", file=sys.stderr)
+        sys.exit(1)
+
+    def smoke_cells(self, chosen, rep=1, full_gate=False, env=None):
+        """Each variant's REFERENCE cell through the driver, one after the
+        other: [(variant, green, verdict, cell)], the cell None when it was
+        never prepared. `env` is laid over the smoke's own environment (a
+        calibration pins the verify host there)."""
+        import tempfile
+        import time
+        from fae.conduct import Conduct
+        from fae.cell.cell import Cell
+        smoke_ws = self.smoke_workspaces
         env = dict(os.environ, WORKSPACES_DIR=str(smoke_ws), AGENT="ref",
                    SMOKE="1", REFERENCE="1",
-                   PYTHONPATH=str(self.root) + os.pathsep + os.environ.get("PYTHONPATH", ""))
+                   PYTHONPATH=str(self.root) + os.pathsep + os.environ.get("PYTHONPATH", ""),
+                   **(env or {}))
         env.setdefault("EFFORT", "high")
         if not full_gate:
             # gate_shapes reads SHAPE_GATE off the loaded config's raw values
@@ -610,14 +629,13 @@ class Experiment:
                 c.prepare(fresh=True)
             except (OSError, RuntimeError, FileNotFoundError) as e:
                 print(f"    VERDICT: PREPARE FAILED — {e}")
-                results.append((vid, False, f"PREPARE FAILED — {e}"))
+                results.append((vid, False, f"PREPARE FAILED — {e}", None))
                 continue
             print(f"  prepared: {c.ws}", flush=True)
-            from fae.cell.cell import Cell
             slots, why = Conduct().slots_for(c, wait=True)
             if slots is None:
                 print(f"    VERDICT: NOT ADMITTED — {why}")
-                results.append((vid, False, f"NOT ADMITTED — {why}"))
+                results.append((vid, False, f"NOT ADMITTED — {why}", c))
                 continue
             try:
                 p = subprocess.run(c.process_argv() + ["--stub", str(empty)], cwd=str(self.root),
@@ -625,21 +643,14 @@ class Experiment:
                                    pass_fds=tuple(slots.fds()))
             finally:
                 slots.close()
-            green, verdict = self.smoke_verdict(self.beside(c.ws.parent).cell(c.ws.name))
+            done = self.beside(c.ws.parent).cell(c.ws.name)
+            green, verdict = self.smoke_verdict(done)
             green = green and p.returncode == 0
             if p.returncode != 0:
                 verdict += f" [driver rc={p.returncode}]"
             print(f"    VERDICT: {verdict}  ({time.time() - t0:.0f}s)", flush=True)
-            results.append((vid, green, verdict))
-        print("\n=== SMOKE SUMMARY ===")
-        for vid, green, verdict in results:
-            print(f"  {'ok  ' if green else 'FAIL'} {vid:24s} {verdict}")
-        if all(g for _, g, _ in results):
-            print("  PIPELINE OK on every variant.")
-            sys.exit(0)
-        print("  PIPELINE BROKE — see the per-variant VERDICT above; each names the "
-              "log to read.", file=sys.stderr)
-        sys.exit(1)
+            results.append((vid, green, verdict, done))
+        return results
 
     # --- results: actions on one workspace ----------------------------------
 

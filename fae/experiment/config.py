@@ -231,7 +231,7 @@ _KEY_ENV = (
     "AGENT", "EFFORT", "SMOKE", "SHAPE_GATE", "STREAM_AGENT",
     "WORK_SLOTS", "AGENT_HOME", "AGENT_IMAGE", "RESULTS_DIR",
     "RIG_LOCK_DIR", "VERIFY_LOCK_DIR", "WORKSPACES_DIR", "SMOKE_WORKSPACES_DIR",
-    "EXPERIMENT_DIR",
+    "EXPERIMENT_DIR", "VERIFY_DOCKER_HOST", "VERIFY_HOST_UP", "VERIFY_HOST_DOWN",
 )
 
 
@@ -272,6 +272,11 @@ def _build(root, env, toml, definition=None):
 
     v = dict(ENGINE_DEFAULTS)
     v.update({k: str(val) for k, val in rig.items() if k.isupper()})
+    # which verify host: the environment first, so one run (a calibration)
+    # can be pinned to one host of the pool
+    for k in ("VERIFY_DOCKER_HOST", "VERIFY_HOST_UP", "VERIFY_HOST_DOWN"):
+        if env.get(k):
+            v[k] = env[k]
     from fae.cell.cell import ATTEMPT_BUDGET
     v["ATTEMPT_BUDGET"] = str(ATTEMPT_BUDGET)
     # The gate is the experiment's (its GATE); only a smoke cell, a pipeline

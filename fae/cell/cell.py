@@ -2478,6 +2478,23 @@ class Cell:
         p.write_text("".join(parts))
         return p
 
+    def archived_runs(self):
+        """[(arrangement, attempt, end state, dir, verdict)] of every archived
+        verify run, in the order they ran (an unlabelled gate's arrangement
+        is `seed`; the verdict {} when its file is unreadable)."""
+        base = self.ws / "arrangements"
+        out = []
+        if base.is_dir():
+            for d in sorted(base.iterdir()):
+                m = re.match(r"^\d+-a(\d+)-(.+)-([a-z]+)$", d.name)
+                if d.is_dir() and m:
+                    try:
+                        verdict = json.loads((d / "verdict.json").read_text())
+                    except (OSError, ValueError):
+                        verdict = {}
+                    out.append((m.group(2), int(m.group(1)), m.group(3), d, verdict))
+        return out
+
     def _charged_run(self):
         """The archived run whose charge the next attempt answers: the last
         `-charged` one. A refunded or interrupted verify may

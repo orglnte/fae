@@ -292,6 +292,24 @@ class Verifier(ABC):
     # A charged fail at one of these stages is voided when the variant's
     # infra is found dead afterwards; None: any charged fail.
     MEASURED_STAGES = None
+    # Calibration (`experiment calibrate`): the config keys a host is
+    # calibrated with, recorded in its section of fae_verify_timings.toml.
+    CALIBRATION_KEYS = ()
+    # A negative control the calibration runs once per host: {"variant": id
+    # or None for the first, "env": {key: value}, "stage": the stage its one
+    # arrangement must be refunded at}. None: no control.
+    CALIBRATION_GUARD = None
+
+    @classmethod
+    def calibration_values(cls, arrangement_dir):
+        """{name: number} one reference arrangement measured, read from its
+        archived files (`arrangements/NN-...`). Nothing by default."""
+        return {}
+
+    @classmethod
+    def estimated_spread(cls, name, value):
+        """The spread of `name` when only one run measured it (`value`)."""
+        return 0.0
 
     @classmethod
     def identities(cls, cid):

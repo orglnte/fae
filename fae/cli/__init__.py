@@ -964,6 +964,22 @@ def experiment_smoke(variants: str = typer.Option("", "--variants",
     fae.experiment.exp().smoke(variants=variants, only=only, rep=rep, full_gate=full_gate)
 
 
+@experiment_app.command("calibrate")
+def experiment_calibrate(host: str = typer.Option(..., "--host",
+                                                  help="a VERIFY_DOCKER_HOST entry, or `local`"),
+                         repeats: int = typer.Option(1, "--repeats",
+                                                     help="runs per reference; 2 or more measure "
+                                                          "the spread instead of estimating it")):
+    """Measure one idle verify host: its probe, every variant's reference on
+    the whole gate, the verifier's guard. Writes the host's section of
+    fae_verify_timings.toml; writes nothing when any of them fails."""
+    from fae.experiment.calibrate import CalibrationError, calibrate
+    try:
+        calibrate(fae.experiment.exp(), host, repeats=repeats)
+    except CalibrationError as e:
+        sys.exit(f"calibrate: {e}")
+
+
 @experiment_app.command("prepare")
 def experiment_prepare(agent: str = typer.Option("", "--agent", help="lane name (default: $AGENT)"),
                 reps: int = typer.Option(1, "--reps", help="reps per combination"),
