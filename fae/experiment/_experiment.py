@@ -184,7 +184,7 @@ class Definition:
             raise RuntimeError(f"FATAL: {self.path} declares no verifier_class()")
         cls = fn()
         if not (isinstance(cls, type) and issubclass(cls, Verifier)):
-            raise TypeError(f"{self.path}: verifier() must return a Verifier subclass, got {cls!r}")
+            raise TypeError(f"{self.path}: verifier_class() must return a Verifier subclass, got {cls!r}")
         return cls
 
     def verify_host_probe(self):
