@@ -17,6 +17,7 @@ daemon does not answer before a verify, down when the run stops.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 import subprocess
@@ -236,6 +237,53 @@ def cpu_busy(before, after):
     total = sum(d)
     idle = d[3] + (d[4] if len(d) > 4 else 0)
     return (total - idle) / total if total > 0 else 0.0
+
+
+def busy_readings(path):
+    """[(epoch, busy)] of a host-load file `sample_load` wrote; [] when
+    there is none."""
+    try:
+        lines = Path(path).read_text().splitlines()
+    except OSError:
+        return []
+    out = []
+    for line in lines:
+        try:
+            t, b = line.split(",")
+            out.append((float(t), float(b)))
+        except ValueError:
+            continue
+    return out
+
+
+def busy_p95(path):
+    """The 95th percentile (nearest rank) of the busy shares in a host-load
+    file, None when it holds none."""
+    shares = sorted(b for _, b in busy_readings(path))
+    if not shares:
+        return None
+    return round(shares[max(0, math.ceil(0.95 * len(shares)) - 1)], 3)
+
+
+def busy_spike(readings, threshold, run=5):
+    """{seconds, peak, threshold} of the stretches of at least `run`
+    consecutive readings over `threshold` (one reading a second, as
+    `sample_load` takes them), None when there is none."""
+    stretches, cur = [], []
+    for _, b in readings:
+        if b > threshold:
+            cur.append(b)
+            continue
+        if len(cur) >= run:
+            stretches.append(cur)
+        cur = []
+    if len(cur) >= run:
+        stretches.append(cur)
+    if not stretches:
+        return None
+    return {"seconds": sum(len(s) for s in stretches),
+            "peak": round(max(max(s) for s in stretches), 3),
+            "threshold": round(threshold, 3)}
 
 
 class VerifyHostProbe:

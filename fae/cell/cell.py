@@ -1591,8 +1591,40 @@ class Cell:
                             f"(was: {'green' if v.ok else v.stage})",
                         metrics=v.metrics, arrangement=v.arrangement,
                         seconds=v.seconds, files=v.files)
-        self._persist_verdict(out, v)
+        spike = self._host_spike(out, shape, started)
+        if spike and out_dir is None:
+            self._append("ALERT", f"attempt={self._attempt}",
+                         f"HOST-SPIKE {shape or 'seed'} verify host busy over "
+                         f"{spike['threshold']:.2f} for {spike['seconds']}s, "
+                         f"peak {spike['peak']:.2f}")
+        self._persist_verdict(out, v, marks={"host_spike": spike} if spike else None)
         return VerifyResult.from_verdict(v, shape, out_dir)
+
+    # How far over its calibrated 95th percentile a verify host's busy share
+    # must stay, for how many consecutive readings, to mark an arrangement.
+    HOST_SPIKE_EXCESS = 0.15
+    HOST_SPIKE_RUN = 5
+
+    def _host_spike(self, out, shape, started):
+        """A scored arrangement's host-load readings against the busy share
+        its host's calibration recorded for this variant and arrangement:
+        the spike (`verify_host.busy_spike`), or None — also when the
+        readings are not this run's or nothing was calibrated."""
+        from .verify_host import VerifyHost, busy_readings, busy_spike
+        from .verify_timings import HOST_BUSY_P95, calibration_of
+        f = out / self.HOST_LOAD
+        try:
+            if self.conf.get("SMOKE") or f.stat().st_mtime < started - 1:
+                return None
+            host = self.verify_host or VerifyHost.from_conf(self.conf)
+        except (OSError, ValueError):
+            return None
+        timings, _ = calibration_of(self.root, host)
+        ref = timings.reference(self.variant, shape or "seed") if timings else None
+        p95 = ref.values.get(HOST_BUSY_P95) if ref else None
+        if p95 is None:
+            return None
+        return busy_spike(busy_readings(f), p95 + self.HOST_SPIKE_EXCESS, self.HOST_SPIKE_RUN)
 
     INFLIGHT = ".verify-inflight.json"
     # The cell's record, which no verify may change: hashed whole, or (for
@@ -1721,10 +1753,12 @@ class Cell:
             "ok": False, "charge": False, "stage": "interrupted",
             "why": "the verify never returned: the cell was stopped or its process died"})
 
-    def _persist_verdict(self, out, v):
+    def _persist_verdict(self, out, v, marks=None):
         """metrics.json (the identity, then the verifier's numbers) and every
         run's evidence under arrangements/NN-a<attempt>-<label>-<end state>/,
-        before the next arrangement reuses the names."""
+        before the next arrangement reuses the names. `marks` are recorded
+        in the archived verdict.json beside the verdict, which they leave as
+        it is."""
         doc = {"cell_id": self.cid, "task": self.task or None,
                "variant": self.variant or None, **v.metrics}
         (out / "metrics.json").write_text(json.dumps(doc, indent=2) + "\n")
@@ -1736,7 +1770,7 @@ class Cell:
         end = "green" if v.ok else ("charged" if v.charge else "refunded")
         self._archive(out, {**m, "arrangement": v.arrangement}, end,
                       {"ok": v.ok, "charge": v.charge, "stage": v.stage, "why": v.why,
-                       "seconds": v.seconds, "stand_down": list(v.stand_down)},
+                       "seconds": v.seconds, "stand_down": list(v.stand_down), **(marks or {})},
                       files=v.files)
 
     def _archive(self, out, m, end, verdict, files=()):

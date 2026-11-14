@@ -11,8 +11,9 @@ write its section of fae_verify_timings.toml.
    stage, is refunded there.
 5. The section is written: the config values the verifier names in
    CALIBRATION_KEYS, the probe's numbers, and per (variant, arrangement) the
-   mean of each value (the verifier's, and `arrangement_s`, its seconds from
-   start to verdict) with its spread, measured from `repeats` >= 2 runs,
+   mean of each value (the verifier's; `arrangement_s`, its seconds from
+   start to verdict; and on a remote host `host_busy_p95`, the 95th
+   percentile of the host's CPU busy share while it ran) with its spread, measured from `repeats` >= 2 runs,
    else the verifier's `estimated_spread()`.
 
 Nothing is written unless the host was idle, every reference was green and
@@ -27,13 +28,12 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fae.cell.verify_host import IDLE_SAMPLE_S, VerifyHost, cpu_busy  # noqa: F401
-from fae.cell.verify_timings import HostTimings, Reference, VerifyTimings, host_key
+from fae.cell.cell import Cell
+from fae.cell.verify_host import IDLE_SAMPLE_S, VerifyHost, busy_p95, cpu_busy  # noqa: F401
+from fae.cell.verify_timings import (ARRANGEMENT_S, HOST_BUSY_P95, HostTimings, Reference,
+                                     VerifyTimings, host_key)
 
 IDLE_MAX = 0.10
-# The value the engine adds to every reference arrangement: its seconds
-# from start to verdict (the supervisor's measure of a stalled verify).
-ARRANGEMENT_S = "arrangement_s"
 
 
 class CalibrationError(RuntimeError):
@@ -139,6 +139,9 @@ def calibrate(exp, name, repeats=1, log=None, idle_max=IDLE_MAX):
                 values = dict(verifier.calibration_values(dirs[label]))
                 if label in took:
                     values[ARRANGEMENT_S] = took[label]
+                p95 = busy_p95(Path(dirs[label]) / Cell.HOST_LOAD)
+                if p95 is not None:
+                    values[HOST_BUSY_P95] = p95
                 runs.setdefault((vid, label), []).append(values)
     _guard(exp, verifier, d, pin, repeats + 1, log)
 

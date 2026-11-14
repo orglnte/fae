@@ -703,6 +703,16 @@ so its proof is its steps: a call to a tool outside the list is a breach.
   in `why`, `ALERT HOST-BUSY`): a neighbour on the host would be measured
   as the build's latency. A smoke verify (host tuning, calibration's own
   runs) and the local daemon, whose machine is the run's, are not gated.
+- **A busy spike during an arrangement is a mark, not a verdict.** While a
+  verifier runs on a remote host the engine samples the host's busy share
+  every second into `host-load.csv` (`Cell.HOST_LOAD`); calibration records
+  each reference arrangement's 95th percentile of it as `host_busy_p95`
+  beside `arrangement_s`. After a scored arrangement whose host stayed over
+  that value + 0.15 for 5 consecutive readings, `Cell.verify` writes
+  `ALERT HOST-SPIKE` and a `host_spike` field (`seconds`, `peak`,
+  `threshold`) into the arrangement's archived `verdict.json`, and leaves
+  ok, charge and stage as the verifier answered: whether a spike explains
+  a verdict is the operator's reading. No calibrated value, no mark.
 - **`TRACE_MIN_VERIFY_S` (45 s).** A fail returned faster than this without
   reaching `VERIFY_READY` is an infra HALT, no attempt burned — except
   `stage_failed=deploy` (the infra came up and the agent's artifacts

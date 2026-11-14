@@ -37,6 +37,11 @@ from pathlib import Path
 FILE = "fae_verify_timings.toml"
 LOCAL = "local"
 SPREADS = ("estimated", "measured")
+# The values the engine adds to every reference arrangement, beside the
+# verifier's: its seconds from start to verdict, and the 95th percentile of
+# a remote verify host's CPU busy share while it ran (Cell.HOST_LOAD).
+ARRANGEMENT_S = "arrangement_s"
+HOST_BUSY_P95 = "host_busy_p95"
 
 _HOST_KEYS = {"date", "fae_commit", "experiment_commit", "load", "probe", "references"}
 _REF_KEYS = {"variant", "arrangement", "spread", "n", "values", "spreads"}
