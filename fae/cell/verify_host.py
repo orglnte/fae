@@ -134,14 +134,14 @@ class VerifyHost:
 
     def push(self, paths, log=print):
         """Copy each path to the same absolute path on the verify host,
-        replacing what is there (a stale file must not survive)."""
+        replacing what is there (a stale file must not survive), in one
+        rsync: one connection, however many paths."""
         if not self.remote:
             return
-        target = self.ssh_target
-        for p in sorted({str(Path(p)) for p in paths if p and Path(p).exists()}):
-            src = p + "/" if Path(p).is_dir() else p
-            dest = p + "/" if Path(p).is_dir() else p
-            _rsync([src, f"{target}:{dest}"], log, delete=Path(p).is_dir())
+        srcs = [p + "/" if Path(p).is_dir() else p
+                for p in sorted({str(Path(p)) for p in paths if p and Path(p).exists()})]
+        if srcs:
+            _rsync(["--relative", *srcs, f"{self.ssh_target}:/"], log, delete=True)
 
     def pull(self, path, log=print, keep=("verifier.log",)):
         """Copy the verify host's copy of `path` back over the local one;

@@ -58,16 +58,27 @@ class TestARemoteDaemon(unittest.TestCase):
         self.assertEqual(h.env({})["DOCKER_HOST"], REMOTE)
         self.assertIsNone(VerifyHost("tcp://vm:2375").ssh_target)
 
-    def test_a_directory_is_mirrored_at_its_own_path(self):
+    def test_every_path_is_mirrored_at_its_own_path_in_one_copy(self):
         with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "fae.toml"
+            f.write_text("")
+            sub = Path(d) / "experiment"
+            sub.mkdir()
             calls = []
             with mock.patch.object(verify_host.subprocess, "run",
                                    side_effect=lambda argv, **kw: calls.append(argv) or SimpleNamespace(returncode=0)):
-                VerifyHost(REMOTE).push([d])
+                VerifyHost(REMOTE).push([str(sub), str(f), str(Path(d) / "gone")])
+        self.assertEqual(len(calls), 1)
         argv = calls[0]
         self.assertEqual(argv[0], "rsync")
         self.assertIn("--delete", argv)
-        self.assertEqual(argv[-2:], [d + "/", f"op@vm.example:{d}/"])
+        self.assertIn("--relative", argv)
+        self.assertEqual(argv[-3:], [str(sub) + "/", str(f), "op@vm.example:/"])
+
+    def test_nothing_to_copy_runs_no_copy(self):
+        with mock.patch.object(verify_host.subprocess, "run") as run:
+            VerifyHost(REMOTE).push(["/no/such/path"])
+        run.assert_not_called()
 
     def test_the_output_comes_back_without_overwriting_the_local_client_log(self):
         calls = []
