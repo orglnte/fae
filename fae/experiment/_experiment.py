@@ -187,6 +187,20 @@ class Definition:
             raise TypeError(f"{self.path}: verifier() must return a Verifier subclass, got {cls!r}")
         return cls
 
+    def verify_host_probe(self):
+        """The experiment's VerifyHostProbe subclass, from `verify_host_probe()`."""
+        from fae.cell.verify_host import VerifyHostProbe
+        fn = getattr(self.module, "verify_host_probe", None)
+        if fn is None:
+            raise RuntimeError(f"FATAL: {self.path} declares no verify_host_probe()")
+        cls = fn()
+        if not (isinstance(cls, type) and issubclass(cls, VerifyHostProbe)):
+            raise TypeError(f"{self.path}: verify_host_probe() must return a "
+                            f"VerifyHostProbe subclass, got {cls!r}")
+        if cls.measure is VerifyHostProbe.measure:
+            raise TypeError(f"{self.path}: {cls.__name__} does not define measure()")
+        return cls
+
     @property
     def exclusive(self):
         """The verifier's EXCLUSIVE; None when no verifier is declared."""

@@ -90,6 +90,13 @@ class TestEachFailureNamesItsFix(CheckCase):
         self.assertIn("raised NameError: name 'GAET' is not defined", self.text())
         self.assertIn("  skip    definition", self.lines)
 
+    def test_a_missing_host_probe_fails_the_definition_with_its_fix(self):
+        d = fae.experiment.exp().definition
+        with mock.patch.object(d.module, "verify_host_probe", None):
+            self.assertEqual(self.run_check(), 1)
+        self.assertIn("declares no verify_host_probe()", self.text())
+        self.assertIn("VerifyHostProbe subclass that defines measure()", self.text())
+
     def test_an_unreadable_variant_file(self):
         from fae.experiment.variants import files
         with mock.patch.object(files, "load", side_effect=files.VariantFileError(

@@ -21,3 +21,8 @@ GATE = Gate(("G1", "G2", "G3", "G4", "G5", "G6"), feedback_note=(
 def verifier_class():
     from .verifier import FixtureVerifier
     return FixtureVerifier
+
+
+def verify_host_probe():
+    from .verifier import FixtureProbe
+    return FixtureProbe

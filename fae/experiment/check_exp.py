@@ -255,6 +255,12 @@ def _definition(ctx):
     except Exception as e:
         out.append(Finding(False, f"verifier_class(): {_last_line(e)}",
                            f"verifier_class() returns a {Verifier.__name__} subclass (HOWTO §6)"))
+    try:
+        out.append(Finding(True, f"verify host probe {d.verify_host_probe().__name__}"))
+    except Exception as e:
+        out.append(Finding(False, f"verify_host_probe(): {_last_line(e)}",
+                           "verify_host_probe() returns a VerifyHostProbe subclass "
+                           "that defines measure() (HOWTO §6)"))
     out.append(Finding(d.gate.arrangements_nr >= 1, f"gate: {d.gate.arrangements_nr} arrangement(s)",
                        "GATE needs at least one arrangement"))
     return out

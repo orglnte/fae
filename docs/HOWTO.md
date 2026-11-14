@@ -134,10 +134,16 @@ GATE = Gate()
 def verifier_class():
     from .verifier import ShoutVerifier
     return ShoutVerifier
+
+
+def verify_host_probe():
+    from .verifier import ShoutProbe
+    return ShoutProbe
 ```
 
 Everything here is optional and has an engine default except
-`verifier_class` (a cell cannot verify without one). The full list is the
+`verifier_class` (a cell cannot verify without one) and
+`verify_host_probe` (what a verify host can do, §6). The full list is the
 docstring of `fae/experiment/`; the ones you will meet later are
 `CONFIG` (machine-local keys your experiment needs from `fae.toml`),
 `taint_rules` and `verbs`. The variants are not declared here: they are
@@ -415,6 +421,31 @@ Every run is archived, whatever its end state: `green`, `charged`,
 next one). The next attempt's feedback is the last `charged` run's, and the
 logs mounted at `/feedback/` are the class's `FEEDBACK_LOGS` from it
 (default `verify.log`, `deploy.log`).
+
+### The verify host probe
+
+The same build can pass on one host and fail on another when a verdict
+depends on time: a timeout, a latency, a throughput. `verify_host_probe()`
+returns a `VerifyHostProbe` subclass whose `measure(host, conf, log)`
+answers what a verify host can do, in the numbers the verdicts depend on,
+as `{name: number}`. It raises when the host cannot be measured. shout's
+verdicts depend on a container starting well inside `TIMEOUT_S`, so its
+probe times one start, in `shout/verifier/__init__.py`:
+
+```python
+from fae.cell.verify_host import VerifyHostProbe
+
+
+class ShoutProbe(VerifyHostProbe):
+    def measure(self, host, conf, log=print):
+        t0 = time.time()
+        r = host.docker("run", "--rm", "python:3.12.3-slim", "true", timeout=120)
+        if r.returncode:
+            raise RuntimeError(f"no container started: {r.stderr.strip()[-200:]}")
+        return {"container_start_s": round(time.time() - t0, 2)}
+```
+
+`experiment check` refuses a definition without one.
 
 ## 7. Point the engine at it
 
@@ -697,6 +728,7 @@ variant files against all of the below, without docker.
 | Name | Required | Default |
 |---|---|---|
 | `verifier_class()` | yes (a cell cannot verify without one) | |
+| `verify_host_probe()` | yes (what a verify host can do, §6) | |
 | `NAME` | no | the directory name |
 | `GATE` | no | `Gate()`: one arrangement |
 | `CONFIG` | no | `{}` |

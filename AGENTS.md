@@ -72,7 +72,7 @@ loads `<EXPERIMENT_DIR>/__init__.py` BY PATH as the package `experiment`
 variants (read on first use from `<EXPERIMENT_DIR>/variants/*.toml` by
 `fae/experiment/variants/files.py`, each file's `[infra] class` imported from the
 package then), `GATE`, `CONFIG`, `fingerprint_trees`, `verifier_class()`,
-`verbs()`, `taint_rules`, `POOLED_MODELS`,
+`verify_host_probe()`, `verbs()`, `taint_rules`, `POOLED_MODELS`,
 `report_summary`. A variant file's unknown key is refused, and so is an
 input the template also provides. `tests/test_experiment_definition.py`
 pins that no module under `cli.py` or `fae/` names the package. The engine

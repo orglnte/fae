@@ -28,7 +28,8 @@ The experiment's variants are files, one per variant:
 is one complete set of what the agent is given and how its work is judged;
 the set of files is the set of variants.
 
-The definition's `__init__.py` declares, all optional:
+The definition's `__init__.py` declares, all optional except
+`verifier_class()` and `verify_host_probe()`:
 
     NAME                 a short name
     GATE                 a Gate (default: one arrangement)
@@ -37,6 +38,10 @@ The definition's `__init__.py` declares, all optional:
                             engine holds around every run — and FILES; what it
                             owes is on the base class; a function: `verifier`
                             is the package)
+    verify_host_probe()  -> the VerifyHostProbe subclass (fae/cell/
+                            verify_host.py): measure(host, conf, log) ->
+                            {name: number}, what a verify host can do in the
+                            numbers the verdicts depend on
     verbs()              -> {name: callable} hooks the engine's own verbs call
                             ("reference_cell" for smoke, "selftest")
     commands()           -> {name: callable(argv) -> exit code} the

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from fae.cell.verify import Verdict, Verifier
+from fae.cell.verify_host import VerifyHostProbe
 
 
 class FixtureVerifier(Verifier):
@@ -23,3 +24,11 @@ class FixtureVerifier(Verifier):
         ok = got == "42"
         return Verdict(ok=ok, stage="" if ok else "answer", why="" if ok else f"got {got!r}",
                        metrics={"answer": got}, arrangement=ctx.arrangement)
+
+
+class FixtureProbe(VerifyHostProbe):
+    """The fixture's verdicts depend on no host number: its probe says
+    whether the daemon answers."""
+
+    def measure(self, host, conf, log=print):
+        return {"daemon_answers": float(host.answers())}

@@ -160,6 +160,19 @@ class VerifyHost:
                                    f"{r.stderr.strip()}")
 
 
+class VerifyHostProbe:
+    """What one verify host can do, in the numbers the experiment's verdicts
+    depend on (a store's throughput, a baseline latency). The experiment
+    declares its subclass with `verify_host_probe()`; a host whose numbers
+    differ judges the same build differently."""
+
+    def measure(self, host, conf, log=print):
+        """{name: number} measured on `host` (a VerifyHost) now, with the
+        experiment's config `conf`. Raises when the host cannot be measured:
+        a number that was never taken is not a slow host."""
+        raise NotImplementedError
+
+
 def _rsync(args, log, delete=False, keep=()):
     argv = ["rsync", "-a", "--mkpath", "-e", "ssh -o BatchMode=yes"]
     if delete:

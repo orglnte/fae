@@ -134,6 +134,41 @@ class TestMinimalDefinition(unittest.TestCase):
             ''', "d.verifier_class()\n")
         self.assertIn("declares no verifier_class()", str(ctx.exception))
 
+    def test_a_definition_without_a_host_probe_is_refused_when_one_is_asked_for(self):
+        with self.assertRaises(AssertionError) as ctx:
+            self._run("", "d.verify_host_probe()\n")
+        self.assertIn("declares no verify_host_probe()", str(ctx.exception))
+
+    def test_a_host_probe_that_is_not_a_VerifyHostProbe_is_refused(self):
+        with self.assertRaises(AssertionError) as ctx:
+            self._run('''
+                def verify_host_probe():
+                    return object
+            ''', "d.verify_host_probe()\n")
+        self.assertIn("must return a VerifyHostProbe subclass", str(ctx.exception))
+
+    def test_a_host_probe_that_measures_nothing_is_refused(self):
+        with self.assertRaises(AssertionError) as ctx:
+            self._run('''
+                from fae.cell.verify_host import VerifyHostProbe
+                class Idle(VerifyHostProbe):
+                    pass
+                def verify_host_probe():
+                    return Idle
+            ''', "d.verify_host_probe()\n")
+        self.assertIn("Idle does not define measure()", str(ctx.exception))
+
+    def test_a_host_probe_is_returned_as_declared(self):
+        out = self._run('''
+            from fae.cell.verify_host import VerifyHostProbe
+            class Bench(VerifyHostProbe):
+                def measure(self, host, conf, log=print):
+                    return {"qps": 1.0}
+            def verify_host_probe():
+                return Bench
+        ''', "print(d.verify_host_probe().__name__)\n")
+        self.assertEqual(out.strip(), "Bench")
+
     def test_declared_config_keys_reach_the_config_and_its_exports(self):
         out = self._run('''
             CONFIG = {"CALC_BIN": ("paths", "calc_bin", "bin/calc", "path"),
