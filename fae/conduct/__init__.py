@@ -535,7 +535,7 @@ class Conduct:
                     for line in (zombies.reap_zombies(ripe) if ripe else []):
                         print(f"  [{hhmm()}] zombie: {line}", flush=True)
                     zombie_seen = {z[1] for z in zs}
-                self._converge_running(frozen)
+                self._converge_running(frozen, n)
                 agents = [qs.lane_agent(d) for d in qs.lane_dirs()]
                 pending = {m: len(qs.lane_specs(m)) for m in agents}
                 active = [m for m in agents if pending[m]]
@@ -1278,15 +1278,20 @@ class Conduct:
                 print(f"  [{hhmm()}] lifted {cid}: {reason} stand-down "
                       f"(repair {n + 1} of {MAX_RESPAWNS})", flush=True)
 
-    def _converge_running(self, frozen):
+    def _converge_running(self, frozen, cap):
         """Make the world match the claimed specs: every file under running/ is a
         lane's cell and must be alive, finished, or handed back.
 
         This is the whole repair path — a claimed spec sits in running/ until it
         reaches a verdict, so a conduct that dies mid-attempt (or a cell killed by
-        a hang sweep) is recovered by the next pass with no journal to replay."""
+        a hang sweep) is recovered by the next pass with no journal to replay.
+
+        A restart puts a loop up only while fewer than `cap` are: more claims
+        than the cap (left by an earlier run, or a run restarted with a lower
+        cap) wait, claimed, for a place to free."""
         qs = queues()
         live = _host.loop_parents()
+        up = set(live)
         boxes = _host.containers()
         for p in qs.running_specs():
             agent, cid = p.parent.name, qs.spec_cid(p)
@@ -1317,11 +1322,14 @@ class Conduct:
             except (OSError, ValueError):
                 qs.shelve(p, "unreadable")
                 continue
+            if len(up) >= cap:
+                continue                   # the run is at its cap: next pass
             cell = self._cell(cid, spec, agent)
             rc = self.admit(cell, agent, what="repair")
             if isinstance(rc, str):
                 continue                   # no slot or no image yet: next pass
             if rc is None:
+                up.add(cid)
                 self.respawn_count(cid, bump=True)
                 print(f"  [{hhmm()}] repaired {cid} (attempt {n + 1} of "
                       f"{MAX_RESPAWNS})", flush=True)

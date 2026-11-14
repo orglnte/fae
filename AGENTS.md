@@ -282,7 +282,8 @@ writes an `ALERT SETUP-FAILED` ledger line.
   `cli.py experiment run` (`fae/conduct/`) is the ONE scheduler and
   the ONE controller: it admits queued specs up to a global cap (`-n`) and
   `--per-agent`, round-robin with starved lanes first (a claimed cell whose
-  loop died counts toward the cap until the repair respawns it), and every
+  loop died counts toward the cap until the repair respawns it, and the
+  repair respawns one only while fewer loops than the cap are up), and every
   `--supervise-interval` it repairs crashed or hung cells by requeuing them at
   the lane front (its own admission respawns them — one spawner), validates
   DONE cells, and reaps zombies on a second consecutive sighting. A cell whose

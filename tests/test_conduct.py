@@ -591,6 +591,29 @@ class TestGates(ConductCase):
         self.assertTrue(refused, "the repair pass ran")
         self.assertEqual(self.spawned, [runs.cell_id("aaa", "beta_apidocs", 1, "T1")])
 
+    def test_the_repair_restarts_claimed_cells_only_up_to_the_cap(self):
+        """More claims than the cap (left by an earlier run, or a run
+        restarted with a lower -n): the repair restarted every one."""
+        self.q("aaa", [self.spec(rep=r) for r in (1, 2, 3)])
+        for _ in range(3):
+            runs.queues.claim("aaa", runs.queues.lane_specs("aaa")[0])
+        self.run_conduct(n=2)
+        self.assertEqual(len(self.spawned), 2, self.spawned)
+        self.assertEqual(len(self.claimed("aaa")), 3, "the held-back claim stands")
+
+    def test_a_claim_held_back_by_the_cap_is_repaired_once_a_place_frees(self):
+        self.q("aaa", [self.spec(rep=r) for r in (1, 2, 3)])
+        for _ in range(3):
+            runs.queues.claim("aaa", runs.queues.lane_specs("aaa")[0])
+        self.run_conduct(n=2)
+        gone = self.spawned[0]
+        del self.live[gone]
+        runs.queues.finish("aaa", runs.queues.rundir("aaa") / f"{gone}.json")
+        self.rounds = 0
+        self.run_conduct(n=2)
+        self.assertEqual(len(self.spawned), 3, self.spawned)
+        self.assertEqual(sorted(self.live), sorted(self.claimed("aaa")))
+
     def test_flagged_cell_is_not_admitted(self):
         """The flag quarantines from ADMISSION too: repair stops requeueing a
         flagged cell, but a spec already in the lane would respawn it right
@@ -874,7 +897,8 @@ class TestConvergeBranches(ConductCase):
     def _converge(self, frozen=None):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            runs.conduct.Conduct()._converge_running(frozen if frozen is not None else set())
+            runs.conduct.Conduct()._converge_running(
+                frozen if frozen is not None else set(), cap=8)
         return out.getvalue()
 
     def test_a_paused_claim_is_handed_back_to_the_lane(self):
