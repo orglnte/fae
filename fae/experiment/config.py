@@ -12,6 +12,7 @@ config would hand them down.
 """
 from __future__ import annotations
 
+import json
 import os
 import threading
 from pathlib import Path
@@ -252,6 +253,9 @@ def load(root, env=None):
     key = root + "\0" + "\0".join(f"{k}={env.get(k, '')}" for k in _KEY_ENV)
     key += "\0" + "\0".join(f"{k}={env.get(k, '')}" for k in sorted(definition.config_keys))
     key += "\0" + "\0".join(f"{k}={v}" for k, v in sorted(env.items()) if k.startswith("ARM_SLOTS_"))
+    # the file's content too: a process that outlives an edit (the conduct)
+    # reads the edited values on its next load
+    key += "\0" + json.dumps(toml, sort_keys=True, default=str)
     with _lock:
         if key in _cache:
             return _cache[key]
