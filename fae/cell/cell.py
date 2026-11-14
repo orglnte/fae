@@ -1604,6 +1604,9 @@ class Cell:
     # Workspace entries a verify never reads, left out of its mounts and so
     # never copied to a verify host: the cell's archive and attempt history,
     # and the agent's own state and transcripts.
+    # A remote verify host's CPU busy share while the verifier ran
+    # (VerifyHost.sample_load), archived with the arrangement.
+    HOST_LOAD = "host-load.csv"
     VERIFY_UNREAD = ("arrangements", ".attempts.git", ".attempts.index", ".agent-*",
                      ".tool-home", "agent.attempt-*.log")
     SUPERVISOR_EVENTS = frozenset({"ALERT"})
@@ -1735,7 +1738,7 @@ class Cell:
     def _archive(self, out, m, end, verdict, files=()):
         cls = fae.experiment.exp().definition.verifier_class()
         names = list(dict.fromkeys((*(files or cls.FILES), *cls.FEEDBACK_LOGS,
-                                    *cls.REQUIRED_OUTPUTS, "metrics.json")))
+                                    *cls.REQUIRED_OUTPUTS, "metrics.json", self.HOST_LOAD)))
         base = out / "arrangements"
         base.mkdir(exist_ok=True)
         n = len([d for d in base.iterdir() if d.is_dir()]) + 1

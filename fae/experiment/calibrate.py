@@ -27,7 +27,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fae.cell.verify_host import VerifyHost
+from fae.cell.verify_host import VerifyHost, cpu_busy
 from fae.cell.verify_timings import HostTimings, Reference, VerifyTimings, host_key
 
 IDLE_MAX = 0.10
@@ -57,17 +57,6 @@ def busy_fraction(host, sample_s=IDLE_SAMPLE_S):
         raise CalibrationError(f"{target}: /proc/stat unreadable: "
                                f"{(r.stderr or r.stdout).strip()[-300:]}")
     return cpu_busy(lines[0], lines[1])
-
-
-def cpu_busy(before, after):
-    """The busy share between two `cpu ...` lines of /proc/stat (idle and
-    iowait count as not busy)."""
-    a = [int(x) for x in before[1:]]
-    b = [int(x) for x in after[1:]]
-    d = [y - x for x, y in zip(a, b)]
-    total = sum(d)
-    idle = d[3] + (d[4] if len(d) > 4 else 0)
-    return (total - idle) / total if total > 0 else 0.0
 
 
 def arrangement_dirs(cell):

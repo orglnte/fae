@@ -630,6 +630,8 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
                    + (f" host={host.docker_host}" if host.remote else "")
                    + f" before: {steps}")
     ended = False
+    from .cell import Cell
+    stop_sampling = host.sample_load(out / Cell.HOST_LOAD)
     with (out / "verifier.log").open("a") as lf:
         p = subprocess.Popen(argv, cwd=ctx.root, env=denv, stdout=lf, stderr=subprocess.STDOUT,
                              start_new_session=True)
@@ -641,6 +643,7 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
                            why=f"the verifier ran past {timeout_s}s; its container was removed",
                            arrangement=ctx.arrangement)
         finally:
+            stop_sampling()
             _end(p, name, env=denv)
             _pull(host, ctx, out)
             if not ended:

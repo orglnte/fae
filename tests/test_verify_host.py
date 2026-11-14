@@ -75,6 +75,34 @@ class TestARemoteDaemon(unittest.TestCase):
         self.assertIn("--relative", argv)
         self.assertEqual(argv[-3:], [str(sub) + "/", str(f), "op@vm.example:/"])
 
+    def test_the_load_sampler_writes_the_busy_share_between_samples(self):
+        lines = ["cpu 100 0 100 700 100 0 0 0\n", "intr 1\n", "cpu 150 0 150 1500 100 0 0 0\n",
+                 "cpu 250 0 250 1600 100 0 0 0\n"]
+
+        class FakeSsh:
+            def __init__(self, argv, **kw):
+                self.argv, self.stdout = argv, iter(lines)
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                return 0
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(verify_host.subprocess, "Popen", FakeSsh):
+            path = Path(d) / "host-load.csv"
+            stop = VerifyHost(REMOTE).sample_load(path)
+            stop()
+            rows = [l.split(",") for l in path.read_text().splitlines()]
+        self.assertEqual([float(b) for _, b in rows], [0.111, 0.667])
+
+    def test_the_local_daemon_is_not_sampled(self):
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(verify_host.subprocess, "Popen") as popen:
+            VerifyHost("").sample_load(Path(d) / "host-load.csv")()
+            self.assertFalse((Path(d) / "host-load.csv").exists())
+        popen.assert_not_called()
+
     def test_nothing_to_copy_runs_no_copy(self):
         with mock.patch.object(verify_host.subprocess, "run") as run:
             VerifyHost(REMOTE).push(["/no/such/path"])

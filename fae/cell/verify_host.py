@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import threading
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -152,12 +153,56 @@ class VerifyHost:
         p = str(Path(path))
         _rsync([f"{self.ssh_target}:{p}/", p + "/"], log, delete=True, keep=keep)
 
+    def sample_load(self, path, every_s=1):
+        """Record this host's CPU busy share to `path` (`epoch,busy` lines)
+        every `every_s` seconds until the returned stop() is called: one ssh
+        stream of /proc/stat. Nothing for the local daemon, whose machine
+        is this one."""
+        target = self.ssh_target if self.remote else None
+        if not target:
+            return lambda: None
+        proc = subprocess.Popen(["ssh", "-o", "BatchMode=yes", target,
+                                 f"while :; do head -1 /proc/stat; sleep {every_s}; done"],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+
+        def read():
+            prev = None
+            with open(path, "w") as f:
+                for line in proc.stdout:
+                    fields = line.split()
+                    if not fields or fields[0] != "cpu":
+                        continue
+                    if prev is not None:
+                        f.write(f"{time.time():.3f},{cpu_busy(prev, fields):.3f}\n")
+                        f.flush()
+                    prev = fields
+        t = threading.Thread(target=read, daemon=True)
+        t.start()
+
+        def stop():
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            t.join(timeout=10)
+        return stop
+
     def network_up(self, name, cid):
         if self.docker("network", "inspect", name).returncode:
             r = self.docker("network", "create", "--label", f"fae-cell={cid}", name)
             if r.returncode and "already exists" not in r.stderr:
                 raise RuntimeError(f"could not create {name} on {self.docker_host or 'the local daemon'}: "
                                    f"{r.stderr.strip()}")
+
+
+def cpu_busy(before, after):
+    """The busy share, 0..1, between two `cpu ...` lines of /proc/stat (as
+    lists of fields); idle and iowait count as not busy."""
+    d = [int(y) - int(x) for x, y in zip(before[1:], after[1:])]
+    total = sum(d)
+    idle = d[3] + (d[4] if len(d) > 4 else 0)
+    return (total - idle) / total if total > 0 else 0.0
 
 
 class VerifyHostProbe:
