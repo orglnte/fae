@@ -68,6 +68,25 @@ class TestACalibratedHost(GateCase):
         self.assertEqual(self.conf.get("LOAD_TOP_RPS"), "360")
 
 
+class TestASmokeCell(GateCase):
+    """A reference pipeline check, calibration's own runs included: never
+    gated, judged with the config's load (a calibration guard's override
+    stands)."""
+
+    def test_runs_on_an_uncalibrated_host(self):
+        self.conf.values["SMOKE"] = "1"
+        v, seen = self.run_on((None, "verify host local is not calibrated"))
+        self.assertEqual(v.stage, "verifier-image")
+        self.assertEqual(v.stand_down, ())
+
+    def test_keeps_the_configs_load_on_a_calibrated_host(self):
+        self.conf.values.update(SMOKE="1", LOAD_TOP_RPS="60")
+        section = HostTimings(host="local", date="d", fae_commit="a", experiment_commit="b",
+                              load={"LOAD_TOP_RPS": "266"})
+        _, seen = self.run_on((section, None))
+        self.assertEqual(seen["conf"].get("LOAD_TOP_RPS"), "60")
+
+
 class TestCalibrationOf(unittest.TestCase):
     def test_no_section_names_the_command(self):
         with tempfile.TemporaryDirectory() as td:

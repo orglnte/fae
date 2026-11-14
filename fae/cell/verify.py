@@ -600,13 +600,17 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
     steps = _Steps(out)
     if host.remote and not steps.timed("host up", lambda: host.ensure_up(log)):
         return host_fault("the daemon does not answer")
-    timings, uncalibrated = calibration_of(fae.experiment.exp().root, host)
-    if uncalibrated:
-        _log_line(out, f"verify host: {uncalibrated}")
-        return Verdict(ok=False, stage="verifier-host", charge=False, why=uncalibrated,
-                       stand_down=("uncalibrated-verify-host",), arrangement=ctx.arrangement)
-    if conf is not None and timings.load:
-        conf = conf.with_values(timings.load)
+    # A smoke cell (a reference pipeline check: host tuning, calibration's own
+    # runs) is judged with the config's load, on any host; a scored verify
+    # only on a calibrated host, with the load its section recorded.
+    if not (conf is not None and conf.get("SMOKE")):
+        timings, uncalibrated = calibration_of(fae.experiment.exp().root, host)
+        if uncalibrated:
+            _log_line(out, f"verify host: {uncalibrated}")
+            return Verdict(ok=False, stage="verifier-host", charge=False, why=uncalibrated,
+                           stand_down=("uncalibrated-verify-host",), arrangement=ctx.arrangement)
+        if conf is not None and timings.load:
+            conf = conf.with_values(timings.load)
     try:
         image = steps.timed("image", lambda: _image.for_variant(
             infra.variant, fae.experiment.exp().definition, conf, log=log, env=denv))
