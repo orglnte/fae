@@ -21,16 +21,17 @@ values on one line:
                  scaler that exposes no decision (an external autoscaler) is
                  measured from the store's saturation, the signal it reacts
                  to, instead: with a schedule, the first SPIKE's saturation
-                 (the law's, a tick inside the spike's window) to the mount
-                 that starts in that spike; without one, the run's first
-                 saturated tick. "" when the cache never mounted or nothing
+                 (the law's, a tick inside the spike's window) to the start
+                 of the law's mount episode in that spike (law.episodes: the
+                 infra confirms the cache), the value the law judges against
+                 its deadline; without one, the run's first saturated tick
+                 to mount_epoch. "" when the cache never mounted or nothing
                  marks where to measure from.
 
 Usage: k6.py <k6_summary.json> <trace.csv> <trace_events.json> [schedule.json]
 """
 from __future__ import annotations
 
-import csv
 import importlib.util
 import json
 import os
@@ -59,24 +60,18 @@ def k6_metrics(path: str) -> tuple[int, int, int, int]:
 
 
 def read_mounts(csv_path: str, events: dict | None = None) -> list[dict]:
-    """Per tick: ts, p99, and mounted as mount_epoch defines it (the app
-    reports the resource mounted AND the infra confirms it)."""
-    out, second = [], _law().second
-    for r in csv.DictReader(open(csv_path)):
-        out.append({"ts": second(r, events), "p99": float(r.get("p99_ms") or 0),
-                    "mounted": (str(r.get("cache_mounted", "")).strip() == "True"
-                                and str(r.get("infra_cache_up", "")).strip() == "True")})
-    return out
+    """The trace's ticks as the law reads them (law.read_trace)."""
+    return _law().read_trace(csv_path, events)
 
 
 def spike_mount_delays(rows: list[dict], spikes: list[dict], sat_p99: float) -> list:
     """Per spike: seconds from its saturation (the law's: the first tick
-    inside its window at sat_p99) to the mount that starts in it (from its
-    start, less the law's grace, to the next spike's); None when either is
-    missing. A mount that began before the spike is not this spike's."""
+    inside its window at sat_p99) to the law's mount episode that starts in
+    it (from its start, less the law's grace, to the next spike's); None
+    when either is missing. A mount that began before the spike is not this
+    spike's."""
     law = _law()
-    onsets = [r["ts"] for prev, r in zip([{"mounted": False}] + rows, rows)
-              if r["mounted"] and not prev["mounted"]]
+    onsets = [m0 for m0, _ in law.episodes(rows)[0]]
     out = []
     for i, spk in enumerate(spikes):
         sat, _ = law.saturation(rows, sat_p99, spk["t0"], spk["t1"])

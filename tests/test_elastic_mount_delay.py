@@ -31,16 +31,18 @@ SSB = {"shape": "SSB", "events": [{"kind": "spike", "t0": 8.0, "t1": 50.0},
                                   {"kind": "blip", "t0": 110.0, "t1": 130.0}]}
 
 
-def trace(total, hot=(), mounted=(), app_only=()):
+def trace(total, hot=(), mounted=(), app_only=(), infra_only=()):
     """Per second: p99 800 ms over each [a, b) in `hot`, the cache mounted
     (app and infra) over each [a, b) in `mounted`, the app alone claiming
-    it over each [a, b) in `app_only`."""
+    it over each [a, b) in `app_only`, the infra alone confirming it over
+    each [a, b) in `infra_only`."""
     out = []
     for ts in range(total):
         inside = lambda spans: any(a <= ts < b for a, b in spans)  # noqa: E731
         up = inside(mounted)
         out.append({"ts_s": float(ts), "p99_ms": 800.0 if inside(hot) else 12.0,
-                    "cache_mounted": up or inside(app_only), "infra_cache_up": up})
+                    "cache_mounted": up or inside(app_only),
+                    "infra_cache_up": up or inside(infra_only)})
     return out
 
 
@@ -98,11 +100,24 @@ class TestTheSpikeSaturationAnchorsTheDelay(MountDelayCase):
         self.assertEqual(k6.mount_delay_s(c, e, s), "12.0")
 
 
+class TestTheDelayIsTheLaws(MountDelayCase):
+    """The mount is the start of the law's episode (law.episodes: the infra
+    confirms the cache), the value calibration records for the spike."""
+
+    def test_the_infra_confirming_the_cache_starts_the_mount(self):
+        rows = trace(130, hot=[(74, 92)], mounted=[(83, 120)], infra_only=[(82, 83)])
+        c, e, s = self.files(rows, {"saturation_epoch": 1074.0, "mount_epoch": 1083.0,
+                                    "decision_epoch": None}, BBS)
+        self.assertEqual(k6.mount_delay_s(c, e, s), "8.0")
+        from fae.cell.contrib.elastic_resource import calibration
+        cal = calibration.values_from(self.dir, sat_p99=150.0)
+        self.assertEqual(float(k6.mount_delay_s(c, e, s)), cal["spike1_mount_s"])
+
+
 class TestEachSpikePairsWithItsOwnMount(unittest.TestCase):
 
     def rows(self, **kw):
-        return [{"ts": r["ts_s"], "p99": r["p99_ms"],
-                 "mounted": r["cache_mounted"] and r["infra_cache_up"]}
+        return [{"ts": r["ts_s"], "p99": r["p99_ms"], "up": r["infra_cache_up"]}
                 for r in trace(140, **kw)]
 
     def test_two_spikes_two_delays(self):
