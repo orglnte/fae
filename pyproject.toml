@@ -18,8 +18,7 @@ include = ["fae*"]
 [tool.mutmut]
 source_paths = ["fae", "cli.py"]
 # Tests read these at run time; they are copied beside the mutated tree, never mutated.
-also_copy = [".tla", "tests/fixture_experiment", "AGENTS.md", "README.md",
-             "requirements-dev.txt"]
+also_copy = [".tla", "tests/fixture_experiment", "AGENTS.md", "README.md"]
 pytest_add_cli_args = ["-p", "no:cacheprovider", "-q"]
 pytest_add_cli_args_test_selection = ["tests/"]
 do_not_mutate = ["fae/testagent.py", "fae/agent-container/*"]
