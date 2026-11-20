@@ -186,6 +186,10 @@ class TestPieces(unittest.TestCase):
             conf = config_mod.load(td, env={"VERIFY_DOCKER_HOST": "ssh://b"})
             self.assertEqual(conf.get("VERIFY_DOCKER_HOST"), "ssh://b")
             self.assertEqual(config_mod.load(td, env={}).get("VERIFY_DOCKER_HOST"), "ssh://a, ssh://b")
+            local_conf = config_mod.load(td, env={"VERIFY_DOCKER_HOST": ""})
+            self.assertIsNone(local_conf.get("VERIFY_DOCKER_HOST"))
+            pool = VerifyHost.pool(local_conf)
+            self.assertEqual([(h.docker_host, h.remote) for h in pool], [("", False)])
 
 
 if __name__ == "__main__":

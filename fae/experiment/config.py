@@ -267,7 +267,8 @@ def load(root, env=None):
     env = os.environ if env is None else env
     toml = _toml(root)
     definition = _definition(root, env, toml)
-    key = root + "\0" + "\0".join(f"{k}={env.get(k, '')}" for k in _KEY_ENV)
+    key = root + "\0" + "\0".join(
+        f"{k}={env[k]}" if k in env else f"{k}=\x01" for k in _KEY_ENV)
     key += "\0" + "\0".join(f"{k}={env.get(k, '')}" for k in sorted(definition.config_keys))
     key += "\0" + "\0".join(f"{k}={v}" for k, v in sorted(env.items()) if k.startswith("ARM_SLOTS_"))
     # the file's content too: a process that outlives an edit (the conduct)
@@ -301,7 +302,7 @@ def _build(root, env, toml, definition=None):
     # which verify host: the environment first, so one run (a calibration)
     # can be pinned to one host of the pool
     for k in ("VERIFY_DOCKER_HOST", "VERIFY_HOST_UP", "VERIFY_HOST_DOWN"):
-        if env.get(k):
+        if k in env:
             v[k] = env[k]
     from fae.cell.cell import ATTEMPT_BUDGET
     v["ATTEMPT_BUDGET"] = str(ATTEMPT_BUDGET)
