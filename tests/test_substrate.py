@@ -258,6 +258,22 @@ class TestDockerSubstrateAndContext(unittest.TestCase):
         self.assertEqual(seen["substrate"].scope, "verify")
         self.assertEqual(downs, ["down"])
 
+    def test_substrate_infra_delegates_not_ready_to_overlay(self):
+        calls = []
+
+        class _NotReadyOverlay(DomainOverlay):
+            def not_ready(self, substrate, ctx, env):
+                calls.append((substrate, ctx.cid, env.get("K")))
+
+        vcls = self._variant(lifecycle="verify", overlay=_NotReadyOverlay)
+        infra = vcls.INFRA(vcls, cid="c1", ws=self.ws, root=self.ws, conf=None)
+        ctx = verify.Ctx(root=str(self.ws), experiment_dir=str(self.ws),
+                         workspace=str(self.ws), artifacts=str(self.ws),
+                         out=str(self.ws), cid="c1", task="T1", variant="v1")
+        ctx.substrate = DockerContext("c1", scope="verify", in_verify=True)
+        infra.not_ready(ctx, {"K": "V"})
+        self.assertEqual(calls, [(ctx.substrate, "c1", "V")])
+
 
 class TestK8sSubstrateAndLabelReaper(unittest.TestCase):
     def setUp(self):

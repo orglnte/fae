@@ -47,19 +47,6 @@ def for_cell(cell):
     return infra_for(cell.variant, cell.cid, cell.ws, cell.root, cell.conf)
 
 
-class _ShimCell:
-    """Deprecated compatibility handle for callers not yet migrated to
-    `infra_for()`; carries only the four fields Infra unpacks."""
-
-    def __init__(self, cid, ws, root, variant="", conf=None):
-        from fae.experiment import config as _config
-        self.cid = cid
-        self.ws = Path(ws)
-        self.root = Path(root)
-        self.conf = conf if conf is not None else _config.load(self.root)
-        self.variant = variant
-
-
 def main(argv=None):
     """python3 -m fae.experiment.variants <variant> setup|teardown|infra <cid> <ws>"""
     a = list(argv if argv is not None else sys.argv[1:])

@@ -213,6 +213,11 @@ class SubstrateInfra(Infra):
     def shared_containers(self):
         return list(self.overlay.shared_containers(self)) if self.overlay else []
 
+    def not_ready(self, ctx, env):
+        fn = getattr(self.overlay, "not_ready", None) if self.overlay else None
+        if callable(fn):
+            fn(getattr(ctx, "substrate", None), ctx, env)
+
     def verify_down(self, ctx):
         sub = getattr(ctx, "substrate", None)
         if sub is not None:

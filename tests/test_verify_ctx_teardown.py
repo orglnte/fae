@@ -117,6 +117,24 @@ class TestCtxWireAndRuntimeBindings(unittest.TestCase):
         # Fourth call removes tracked fixture on stop_fixtures()
         self.assertEqual(calls[3], ["docker", "rm", "-f", "-v", "fae-store-c1"])
 
+    def test_run_fixture_forwards_stdin_and_adds_i_flag(self):
+        ctx = self._ctx()
+        seen = {}
+
+        def fake_run(argv, **kw):
+            seen["argv"] = list(argv)
+            seen["input"] = kw.get("input")
+            return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+        with mock.patch.object(verify.subprocess, "run", side_effect=fake_run):
+            r = ctx.run_fixture("alpine:3", argv=("cat",), input="hello\n")
+
+        self.assertEqual(r.stdout, "ok")
+        self.assertEqual(seen["input"], "hello\n")
+        self.assertIn("-i", seen["argv"])
+        self.assertIn("fae-cell=c1", seen["argv"])
+        self.assertIn("fae-role=fixture", seen["argv"])
+
     def test_verify_main_binds_ctx_and_stops_fixtures_even_on_error(self):
         seen = {}
         stopped = []

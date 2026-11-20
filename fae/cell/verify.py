@@ -389,13 +389,14 @@ class Ctx:
 
     def run_fixture(self, image, *, argv=(), name=None, env=None, network=None,
                     mounts=(), cpus=None, cpuset=None, memory=None,
-                    labels=(), extra=(), timeout=300):
+                    labels=(), extra=(), input=None, timeout=300):
         """Run a one-shot auxiliary container (`--rm`) tagged `fae-cell=<cid>`
         and `fae-role=fixture`; returns CompletedProcess."""
+        ex = (("-i", *extra) if input is not None and "-i" not in extra else extra)
         cmd = self._fixture_argv(image, name=name, argv=argv, detach=False, env=env,
                                  network=network, mounts=mounts, cpus=cpus,
-                                 cpuset=cpuset, memory=memory, labels=labels, extra=extra)
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+                                 cpuset=cpuset, memory=memory, labels=labels, extra=ex)
+        return subprocess.run(cmd, input=input, capture_output=True, text=True, timeout=timeout)
 
     def stop_fixtures(self):
         """Stop every fixture started via `start_fixture` (LIFO, idempotent)."""
