@@ -193,8 +193,11 @@ def run_in_thread(name, args=(), capture=False, instruments=None):
 
 
 
-def _now():
+def now():
     return f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}"
+
+
+_now = now
 
 
 def _mutex_module():
@@ -205,10 +208,115 @@ def _mutex_module():
 
 # --- the boundary --------------------------------------------------------------
 
+class Fixture:
+    """Handle to a detached auxiliary container started via `ctx.start_fixture`.
+    Tagged `fae-cell=<cid>` and `fae-role=fixture` so crash teardown and the
+    reaper can clean it up without touching cell-lifetime infra."""
+
+    def __init__(self, name, cid):
+        self.name = name
+        self.cid = cid
+
+    def alive(self):
+        try:
+            p = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", self.name],
+                               capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return p.returncode == 0 and p.stdout.strip() == "true"
+
+    def exec(self, *argv, timeout=60, env=None, user=None, input=None):
+        cmd = ["docker", "exec"]
+        if user:
+            cmd += ["-u", str(user)]
+        for k, v in sorted((env or {}).items()):
+            cmd += ["-e", f"{k}={v}"]
+        if input is not None:
+            cmd.append("-i")
+        cmd += [self.name, *argv]
+        return subprocess.run(cmd, input=input, capture_output=True, text=True, timeout=timeout)
+
+    def logs(self, tail=None, timeout=30):
+        cmd = ["docker", "logs"]
+        if tail is not None:
+            cmd += ["--tail", str(tail)]
+        cmd.append(self.name)
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           text=True, timeout=timeout)
+        return p.stdout if p.returncode == 0 else ""
+
+    def stop(self):
+        try:
+            subprocess.run(["docker", "rm", "-f", "-v", self.name],
+                           capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+def stop_fixtures_for(cid):
+    """Best-effort removal of every `fae-role=fixture` container owned by `cid`."""
+    try:
+        p = subprocess.run(
+            ["docker", "ps", "-aq",
+             "--filter", f"label=fae-cell={cid}",
+             "--filter", "label=fae-role=fixture"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    ids = p.stdout.split()
+    if ids:
+        try:
+            subprocess.run(["docker", "rm", "-f", "-v", *ids],
+                           capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+class RunnerHelper:
+    """Bound `secrunner` facade on `ctx.runner` so verifiers run judged code
+    without importing `fae.cell.infra.secrunner` or resolving the variant."""
+
+    def __init__(self, ctx):
+        self._ctx = ctx
+
+    @property
+    def name(self):
+        from .infra import secrunner
+        return secrunner.name_for(self._ctx.cid)
+
+    def fresh_copy(self, name="run"):
+        from .infra import secrunner
+        return secrunner.fresh_copy(Path(self._ctx.artifacts), Path(self._ctx.out), name=name)
+
+    def for_variant(self, workdir, *, argv=None, env=None, networks=(),
+                    scratch=None, log=None, cpus=None, cpuset=None, variant=None):
+        from .infra import secrunner
+        vcls = variant if variant is not None else self._ctx.variant_def
+        if vcls is None:
+            raise RuntimeError(f"ctx.runner: no variant definition bound for {self._ctx.variant!r}")
+        return secrunner.for_variant(vcls, self._ctx.cid, workdir, argv=argv, env=env,
+                                     networks=networks, scratch=scratch, log=log,
+                                     cpus=cpus, cpuset=cpuset)
+
+    def run(self, workdir, timeout_s, *, argv=None, stdin=None, split=False, **kw):
+        return self.for_variant(workdir, argv=argv, **kw).run(timeout_s, stdin=stdin, split=split)
+
+    def stop(self, log=None):
+        from .infra import secrunner
+        secrunner.stop_by_name(self._ctx.cid, self._ctx.out, log=log)
+
+
+_CTX_WIRE_FIELDS = ("root", "experiment_dir", "workspace", "artifacts", "out",
+                    "cid", "task", "variant", "arrangement", "expected_fp", "mode")
+
+
 @dataclass
 class Ctx:
     """What the verifier is handed: everything about the run, nothing about
-    the rig's locks."""
+    the rig's locks. Runtime helpers (`variant_def`, `conf`, `infra`,
+    `substrate`, `runner`, `verify_container`, `cell_network`) are bound
+    inside the verify child and excluded from JSON serialization."""
 
     root: str
     experiment_dir: str
@@ -221,13 +329,86 @@ class Ctx:
     arrangement: str | None = None
     expected_fp: str | None = None
     mode: str = "cell"
+    # Runtime-only bindings attached by verify.main() inside the child container
+    variant_def: object = field(default=None, repr=False, compare=False)
+    conf: object = field(default=None, repr=False, compare=False)
+    infra: object = field(default=None, repr=False, compare=False)
+    substrate: object = field(default=None, repr=False, compare=False)
+    runner: object = field(default=None, repr=False, compare=False)
+    verify_container: str = field(default="", repr=False, compare=False)
+    cell_network: str = field(default="", repr=False, compare=False)
+    _fixtures: list = field(default_factory=list, init=False, repr=False, compare=False)
+
+    def _fixture_argv(self, image, *, name=None, argv=(), detach=False, env=None,
+                      network=None, mounts=(), ports=(), cpus=None, cpuset=None,
+                      memory=None, labels=(), extra=()):
+        cmd = ["docker", "run", "-d" if detach else "--rm"]
+        if name:
+            cmd += ["--name", name]
+        cmd += ["--label", f"fae-cell={self.cid}", "--label", "fae-role=fixture"]
+        for k, v in labels:
+            cmd += ["--label", f"{k}={v}"]
+        net = self.cell_network or os.environ.get("FAE_CELL_NET") if network is None else network
+        if net:
+            cmd += ["--network", net]
+        if cpus is not None:
+            cmd += [f"--cpus={cpus}"]
+        if cpuset:
+            cmd += [f"--cpuset-cpus={cpuset}"]
+        if memory:
+            cmd += ["--memory", str(memory)]
+        for spec in ports:
+            cmd += ["-p", str(spec)]
+        for m in mounts:
+            if isinstance(m, tuple):
+                mode = m[2] if len(m) == 3 else "ro"
+                cmd += ["-v", f"{m[0]}:{m[1]}:{mode}"]
+            else:
+                cmd += ["-v", str(m)]
+        for k, v in sorted((env or {}).items()):
+            cmd += ["-e", f"{k}={v}"]
+        cmd += list(extra)
+        return cmd + [image, *[str(a) for a in argv]]
+
+    def start_fixture(self, name, image, *, argv=(), env=None, network=None,
+                      mounts=(), ports=(), cpus=None, cpuset=None, memory=None,
+                      labels=(), extra=(), timeout=120):
+        """Start a detached auxiliary container tagged `fae-cell=<cid>` and
+        `fae-role=fixture`, tracked for automatic cleanup on verifier exit."""
+        subprocess.run(["docker", "rm", "-f", "-v", name], capture_output=True, text=True, timeout=60)
+        cmd = self._fixture_argv(image, name=name, argv=argv, detach=True, env=env,
+                                 network=network, mounts=mounts, ports=ports, cpus=cpus,
+                                 cpuset=cpuset, memory=memory, labels=labels, extra=extra)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if p.returncode != 0:
+            raise RuntimeError(f"fixture {name} ({image}) failed to start: "
+                               f"{(p.stderr or p.stdout).strip()[-300:]}")
+        fx = Fixture(name, self.cid)
+        self._fixtures.append(fx)
+        return fx
+
+    def run_fixture(self, image, *, argv=(), name=None, env=None, network=None,
+                    mounts=(), cpus=None, cpuset=None, memory=None,
+                    labels=(), extra=(), timeout=300):
+        """Run a one-shot auxiliary container (`--rm`) tagged `fae-cell=<cid>`
+        and `fae-role=fixture`; returns CompletedProcess."""
+        cmd = self._fixture_argv(image, name=name, argv=argv, detach=False, env=env,
+                                 network=network, mounts=mounts, cpus=cpus,
+                                 cpuset=cpuset, memory=memory, labels=labels, extra=extra)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+    def stop_fixtures(self):
+        """Stop every fixture started via `start_fixture` (LIFO, idempotent)."""
+        while self._fixtures:
+            self._fixtures.pop().stop()
 
     def to_json(self):
-        return json.dumps(asdict(self), indent=2) + "\n"
+        return json.dumps({k: getattr(self, k) for k in _CTX_WIRE_FIELDS}, indent=2) + "\n"
 
     @classmethod
     def from_json(cls, text):
-        return cls(**json.loads(text))
+        raw = json.loads(text)
+        return cls(**{k: raw[k] for k in _CTX_WIRE_FIELDS if k in raw})
 
 
 @dataclass
@@ -491,7 +672,10 @@ def teardown_argv(ctx, image, conf=None, environ=None, host=None):
     extra = dict(getattr(conf, "exported", None) or {})
     extra.update(REPO_ROOT=ctx.root, EXPERIMENT_DIR=ctx.experiment_dir,
                  PYTHONPATH=os.pathsep.join([ctx.root, str(HARNESS.parent)]),
-                 HOME=str(home), USER=CONTAINER_USER, FAE_VERIFY_OUT=ctx.out)
+                 HOME=str(home), USER=CONTAINER_USER,
+                 FAE_VERIFY_CONTAINER=_image.verify_container(ctx.cid),
+                 FAE_VERIFY_IMAGE=image, FAE_VERIFY_OUT=ctx.out,
+                 FAE_CELL_NET=_image.cell_network(ctx.cid))
     cpuset, identity = _host_args(host, extra)
     env = _image.child_env(environ if environ is not None else os.environ, **extra)
     if cpuset is False:
@@ -533,6 +717,8 @@ def run_teardown(ctx, infra, timeout_s=900, log_dir=None, host=None):
         argv = teardown_argv(ctx, image, conf, host=host)
     except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
         _log_line(out, f"teardown image: {e}")
+        if host.remote:
+            _drop_network(host, ctx.cid)
         return None
     name = f"{_image.verify_container(ctx.cid)}-teardown"
     _image.remove_container(name, env=denv)
@@ -553,17 +739,18 @@ def run_teardown(ctx, infra, timeout_s=900, log_dir=None, host=None):
         _pull(host, ctx, out)
 
 
-def _pull(host, ctx, out):
-    """The verify host's output directory back over the local one, and the
-    cell network there removed: nothing of the cell stays on a verify host
-    between verifies (the next one creates the network again)."""
+def _pull(host, ctx, out, drop_network=True):
+    """The verify host's output directory back over the local one, and (when
+    `drop_network`) the cell network there removed: nothing of the cell stays
+    on a verify host between verifies."""
     if not host.remote:
         return
     try:
         host.pull(ctx.out, lambda m: _log_line(out, m))
     except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
         _log_line(out, f"verify host: could not copy {ctx.out} back: {e}")
-    _drop_network(host, ctx.cid)
+    if drop_network:
+        _drop_network(host, ctx.cid)
 
 
 def _drop_network(host, cid):
@@ -681,15 +868,19 @@ def run_verifier(ctx, infra, timeout_s=7200, log_dir=None, host=None):
         finally:
             stop_sampling()
             _end(p, name, env=denv)
-            _pull(host, ctx, out)
+            _pull(host, ctx, out, drop_network=False)
             if not ended:
                 _log_line(out, "verify did not end on its own: running its teardown")
                 run_teardown(ctx, infra, log_dir=out, host=host)
     if verdict_path.is_file():
         try:
-            return Verdict.from_json(verdict_path.read_text())
+            verdict = Verdict.from_json(verdict_path.read_text())
         except (ValueError, TypeError) as e:
             why = f"unreadable verdict: {e}"
+        else:
+            if host.remote:
+                _drop_network(host, ctx.cid)
+            return verdict
     else:
         why = f"the verifier exited {rc} without a verdict (see verifier.log)"
     _log_line(out, "verify left no verdict: running its teardown")
@@ -721,6 +912,25 @@ def _end(p, name, env=None):
         pass
 
 
+def _bind_runtime(ctx, definition):
+    """Attach runtime helpers onto `ctx` inside the verify child container."""
+    from fae.experiment import variants as _variants
+    vcls = definition.variant(ctx.variant)
+    ctx.variant_def = vcls
+    ctx.verify_container = os.environ.get("FAE_VERIFY_CONTAINER", "")
+    ctx.cell_network = os.environ.get("FAE_CELL_NET", "")
+    if vcls is not None:
+        infra = _variants.infra_for(ctx.variant, ctx.cid, ctx.workspace, ctx.root,
+                                    definition=definition)
+        ctx.infra = infra
+        ctx.conf = infra.conf
+    else:
+        ctx.infra = None
+        ctx.conf = _config.load(ctx.root)
+    ctx.runner = RunnerHelper(ctx)
+    return vcls
+
+
 def main(argv=None):
     """The child: load the definition the ctx names, call its verifier,
     write the Verdict."""
@@ -738,23 +948,29 @@ def main(argv=None):
     if ctx.root not in sys.path:
         sys.path.insert(0, ctx.root)
     definition = fae.experiment._experiment.load(ctx.experiment_dir)
+    vcls = _bind_runtime(ctx, definition)
     if a.teardown:
-        from fae.experiment import variants as _variants
-        vcls = definition.variant(ctx.variant)
         if vcls is None:
             return 2
-        infra = _variants.infra_for(ctx.variant, ctx.cid, ctx.workspace, ctx.root,
-                                    definition=definition)
         from .infra import secrunner
         secrunner.stop_by_name(ctx.cid, ctx.out,
                                log=Path(ctx.out) / definition.verifier_class().RUN_LOG)
+        stop_fixtures_for(ctx.cid)
         try:
-            infra.verify_teardown(ctx, dict(os.environ))
+            ctx.infra.verify_teardown(ctx, dict(os.environ))
         finally:
-            definition.verifier_class()().teardown(ctx)
+            try:
+                down = getattr(ctx.infra, "verify_down", None)
+                if callable(down):
+                    down(ctx)
+            finally:
+                definition.verifier_class()().teardown(ctx)
         return 0
     cls = definition.verifier_class()
-    verdict = cls().verify(ctx)
+    try:
+        verdict = cls().verify(ctx)
+    finally:
+        ctx.stop_fixtures()
     if not verdict.files and cls.FILES:
         verdict = replace(verdict, files=tuple(cls.FILES))
     Path(a.out).write_text(verdict.to_json())
