@@ -264,6 +264,8 @@ class Cell:
     on the 470 sealed cells the bash implementation produced — their state is
     fully readable, and the only thing that may be added is a re-verify."""
 
+    SLEEP_GAP_S = host_sleep.GAP_S
+
     def __init__(self, cid, workspaces=None, root=None, *, queues=None, locks=None,
                  transitions=None):
         """`queues`, `locks` and `transitions` place the scheduling plane when it

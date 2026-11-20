@@ -896,6 +896,28 @@ class Experiment:
         from fae.cell.cell import Cell
         return Cell.verify_holders(self.workspace.locks)
 
+    def conduct_pid(self):
+        """PID of the running conduct supervisor for this experiment, or None."""
+        from fae.conduct import Conduct
+        return Conduct().pid()
+
+    def run_active(self):
+        """True while a conduct supervisor is running for this experiment."""
+        return self.conduct_pid() is not None
+
+    @contextlib.contextmanager
+    def with_verify_lock(self, cell, poll=5.0):
+        """Hold the fleet's verify lock for `cell` (a Cell or cid) across a
+        verify call, releasing it on exit; raises RuntimeError if stood down."""
+        c = self.cell(cell) if isinstance(cell, str) else cell
+        lock = c.verify_lock_acquire(poll=poll)
+        if lock is None:
+            raise RuntimeError(f"{c.cid} stood down: .paused")
+        try:
+            yield lock
+        finally:
+            lock.close()
+
     def reset_trace(self, dry_run=False):
         """Re-anchor transitions.log on a RECORDED state.
 
