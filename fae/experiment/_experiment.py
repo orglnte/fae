@@ -532,8 +532,8 @@ class Experiment:
         for vid in d.active:
             cls = d.variant(vid)
             key = (str(cls.REFERENCE), repr(sorted(cls.RUN.items())), cls.INFRA,
-                   cls.ACCESS_INFRA, repr(sorted(cls.PARAMS.items())), str(cls.IMAGE_DIR),
-                   cls.LOCK)
+                   cls.SUBSTRATE, cls.ACCESS_INFRA, repr(sorted(cls.PARAMS.items())),
+                   str(cls.IMAGE_DIR), cls.LOCK)
             if key not in seen:
                 seen.add(key)
                 out.append(vid)

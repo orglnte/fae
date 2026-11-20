@@ -241,6 +241,7 @@ def find_zombies():
         zs.append(("lockholder", f"{pid}:{lock}", who or "?",
                    f"holds {lock} with no process entitled to it"))
     prefixes = _prefixes()
+    seen_containers = set()
     for name in _host.containers():
         for pfx in [p for k, p in prefixes if k == "container"]:
             if not name.startswith(pfx):
@@ -261,7 +262,27 @@ def find_zombies():
                 continue          # just finished/mid-teardown, or not ours
             if eff is None:
                 continue          # nothing establishes its age: leave it alone
+            seen_containers.add(name)
             zs.append(("container", name, cid, "no live loop"))
+    # Label-based discovery catches fixtures and overlay containers tagged
+    # `fae-cell=<cid>` even when they do not declare a container name prefix.
+    labeled = _host.sh(["docker", "ps", "-a", "--filter", "label=fae-cell",
+                        "--format", '{{.Names}}\t{{.Label "fae-cell"}}'])
+    for line in labeled.splitlines():
+        if "\t" not in line:
+            continue
+        name, cid = line.split("\t", 1)
+        name, cid = name.strip(), cid.strip()
+        if not name or not cid or name in seen_containers or cid in live or not _ours(cid):
+            continue
+        age = _iter_age_s(cid)
+        grace = ZOMBIE_GRACE_S if age is not None else ZOMBIE_UNKNOWN_GRACE_S
+        box_age = _docker_age_s(name)
+        eff = age if age is not None else box_age
+        if eff is None or eff < grace:
+            continue
+        seen_containers.add(name)
+        zs.append(("container", name, cid, "no live loop"))
     by_cluster = _cluster_map()
     cluster_prefixes = tuple(p for k, p in prefixes if k == "cluster")
     for cl in _host.sh(["kind", "get", "clusters"]).split():

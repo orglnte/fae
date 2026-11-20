@@ -69,6 +69,17 @@ class AgentAccess:
             out["KUBE_MOUNT"] = shlex.join(rest)
         return out
 
+    def merge(self, other):
+        """Combine two AgentAccess specs; `other` overrides network and env keys."""
+        if other is None:
+            return self
+        return AgentAccess(
+            env={**self.env, **other.env},
+            mounts=tuple(dict.fromkeys((*self.mounts, *other.mounts))),
+            network=other.network or self.network,
+            extra_hosts=tuple(dict.fromkeys((*self.extra_hosts, *other.extra_hosts))),
+        )
+
 
 def run(argv, **kw):
     kw.setdefault("capture_output", True)
@@ -432,6 +443,7 @@ def liveness_declared(variant):
     one every arrangement would be void, refunded, forever; a definition
     error, caught before the first attempt."""
     infra = variant.INFRA
-    if infra is DefaultInfra:
+    spec = getattr(infra, "SPEC", None)
+    if infra is DefaultInfra or (spec is not None and spec.kind == "none"):
         return variant.runs_own_image()
     return infra.alive is not Infra.alive

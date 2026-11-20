@@ -924,8 +924,11 @@ def _bind_runtime(ctx, definition):
                                     definition=definition)
         ctx.infra = infra
         ctx.conf = infra.conf
+        maker = getattr(infra, "make_context", None)
+        ctx.substrate = maker(ctx) if callable(maker) else None
     else:
         ctx.infra = None
+        ctx.substrate = None
         ctx.conf = _config.load(ctx.root)
     ctx.runner = RunnerHelper(ctx)
     return vcls
@@ -970,7 +973,11 @@ def main(argv=None):
     try:
         verdict = cls().verify(ctx)
     finally:
-        ctx.stop_fixtures()
+        try:
+            ctx.stop_fixtures()
+        finally:
+            if ctx.substrate is not None:
+                ctx.substrate.down()
     if not verdict.files and cls.FILES:
         verdict = replace(verdict, files=tuple(cls.FILES))
     Path(a.out).write_text(verdict.to_json())

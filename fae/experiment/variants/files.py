@@ -26,12 +26,15 @@ DIR = "variants"
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
 
 KEYS = {
-    "": {"label", "retired", "factors", "authoring", "verify", "infra"},
+    "": {"label", "retired", "factors", "authoring", "verify", "infra", "substrate"},
     "authoring": {"template", "surface", "tools", "access_infra", "inputs"},
     "authoring.surface": {"files", "prefixes"},
     "verify": {"image_dir", "reference", "run"},
     "verify.run": {"command", "serves", "image", "image_dir", "build"},
     "infra": {"class", "lock", "lock_slots", "params"},
+    "substrate": {"kind", "lifecycle", "access", "images", "expose_ports",
+                  "cpus", "memory", "dind_image", "cluster_prefix",
+                  "overlay", "class", "lock", "lock_slots", "params"},
 }
 
 
@@ -47,6 +50,22 @@ def _refuse_unknown(path, section, table):
                                f"(known: {', '.join(sorted(KEYS[section]))})")
 
 
+def _import_class(path, label, spec, expected_base):
+    """`module:Class` under the experiment package, subclass of `expected_base`."""
+    module, _, name = str(spec).partition(":")
+    if not module or not name:
+        raise VariantFileError(f"{path}: {label} must be 'module:Class', got {spec!r}")
+    try:
+        cls = getattr(importlib.import_module(f"experiment.{module}"), name)
+    except (ImportError, AttributeError) as e:
+        raise VariantFileError(f"{path}: {label} {spec!r} cannot be imported: {e}") from e
+    if not (isinstance(cls, type) and issubclass(cls, expected_base)):
+        raise VariantFileError(
+            f"{path}: {label} {spec!r} is not a {expected_base.__name__} subclass"
+        )
+    return cls
+
+
 def _infra_class(path, spec):
     """`module:Class` under the experiment package, an Infra subclass."""
     from fae.cell.infra.base import Infra
@@ -60,6 +79,80 @@ def _infra_class(path, spec):
     if not (isinstance(cls, type) and issubclass(cls, Infra)):
         raise VariantFileError(f"{path}: [infra] class {spec!r} is not an Infra subclass")
     return cls
+
+
+def _parse_images(path, raw, exp_dir):
+    from fae.cell.substrate.base import ImageSpec
+    out = []
+    for entry in (raw or ()):
+        if isinstance(entry, str):
+            out.append(ImageSpec(source=entry))
+        elif isinstance(entry, dict):
+            unknown = sorted(set(entry) - {"dir", "as_tag", "name"})
+            if unknown:
+                raise VariantFileError(
+                    f"{path}: [substrate] image entry has unknown key(s): {', '.join(unknown)}"
+                )
+            if not entry.get("dir"):
+                raise VariantFileError(f"{path}: [substrate] image table requires 'dir'")
+            out.append(ImageSpec(
+                dir=exp_dir / entry["dir"],
+                as_tag=str(entry.get("as_tag") or ""),
+                name=str(entry.get("name") or ""),
+            ))
+        else:
+            raise VariantFileError(f"{path}: [substrate] image must be string or table, got {entry!r}")
+    return tuple(out)
+
+
+def _parse_substrate(path, sub, authoring, exp_dir, vid):
+    from fae.cell.infra.base import Infra
+    from fae.cell.substrate import KINDS, LIFECYCLES, DomainOverlay, SubstrateSpec, build_infra_class
+    kind = str(sub.get("kind", "none"))
+    if kind not in KINDS:
+        raise VariantFileError(
+            f"{path}: [substrate] kind {kind!r} not in {sorted(KINDS)}"
+        )
+    lifecycle = str(sub.get("lifecycle", "cell"))
+    if lifecycle not in LIFECYCLES:
+        raise VariantFileError(
+            f"{path}: [substrate] lifecycle {lifecycle!r} not in {sorted(LIFECYCLES)}"
+        )
+    access = bool(sub["access"]) if "access" in sub else bool(authoring.get("access_infra", False))
+    images = _parse_images(path, sub.get("images"), exp_dir)
+    raw_ports = sub.get("expose_ports") or ()
+    expose_ports = tuple(int(p) for p in (raw_ports.values() if isinstance(raw_ports, dict) else raw_ports))
+    params = dict(sub.get("params") or {})
+    if kind == "custom":
+        if not sub.get("class"):
+            raise VariantFileError(f"{path}: [substrate] kind='custom' requires 'class'")
+        infra_cls = _import_class(path, "[substrate] class", sub["class"], Infra)
+        spec = SubstrateSpec(
+            kind="custom", lifecycle=lifecycle, access=access, images=images,
+            expose_ports=expose_ports, params=tuple(sorted(params.items())),
+            lock=sub.get("lock") or None, lock_slots=int(sub.get("lock_slots", 1)),
+        )
+        return spec, infra_cls
+    if sub.get("class"):
+        raise VariantFileError(f"{path}: [substrate] 'class' is only valid when kind='custom'")
+    overlay = _import_class(path, "[substrate] overlay", sub["overlay"], DomainOverlay) if sub.get("overlay") else None
+    default_mem = "4g" if kind == "k8s" else "1g"
+    spec = SubstrateSpec(
+        kind=kind,
+        lifecycle=lifecycle,
+        access=access,
+        images=images,
+        expose_ports=expose_ports,
+        cpus=float(sub.get("cpus", 1.0)),
+        memory=str(sub.get("memory", default_mem)),
+        dind_image=str(sub.get("dind_image", "docker:27-dind")),
+        cluster_prefix=str(sub.get("cluster_prefix", "fae-k8s-")),
+        overlay=overlay,
+        params=tuple(sorted(params.items())),
+        lock=sub.get("lock") or None,
+        lock_slots=int(sub.get("lock_slots", 1)),
+    )
+    return spec, build_infra_class(spec, name=_camel(vid))
 
 
 def _camel(vid):
@@ -81,7 +174,11 @@ def read(path, exp_dir):
     authoring = doc.get("authoring") or {}
     verify = doc.get("verify") or {}
     infra = doc.get("infra") or {}
-    for section, table in (("authoring", authoring), ("verify", verify), ("infra", infra)):
+    substrate = doc.get("substrate") or {}
+    if infra and substrate:
+        raise VariantFileError(f"{path}: declare either [substrate] or [infra], not both")
+    for section, table in (("authoring", authoring), ("verify", verify),
+                           ("infra", infra), ("substrate", substrate)):
         if not isinstance(table, dict):
             raise VariantFileError(f"{path}: [{section}] must be a table")
         _refuse_unknown(path, section, table)
@@ -114,7 +211,15 @@ def read(path, exp_dir):
     }
     if not surface:
         attrs["AUTHORING_SURFACE"] = None
-    if infra.get("class"):
+    if substrate:
+        spec, infra_cls = _parse_substrate(path, substrate, authoring, exp_dir, vid)
+        attrs["SUBSTRATE"] = spec
+        attrs["INFRA"] = infra_cls
+        attrs["ACCESS_INFRA"] = spec.access
+        attrs["LOCK"] = spec.lock
+        attrs["LOCK_SLOTS"] = spec.lock_slots
+        attrs["PARAMS"] = spec.params_dict()
+    elif infra.get("class"):
         attrs["INFRA"] = _infra_class(path, infra["class"])
     return type(_camel(vid), (Variant,), attrs)
 

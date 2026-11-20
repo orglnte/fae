@@ -31,8 +31,9 @@ class Variant:
     IMAGE_DIR = None        # the verify container's layer, FROM the verifier's image
     REFERENCE = None        # the known answer, laid over the template for smoke
     RUN = {}                # how the verifier runs the artifacts (secrunner.for_variant)
-    # [infra]
+    # [infra] / [substrate]
     INFRA = DefaultInfra    # the infra class, instantiated per cell with the variant
+    SUBSTRATE = None        # SubstrateSpec when declared via [substrate]
     LOCK = None             # the lock a cell holds setup to teardown; None: none
     LOCK_SLOTS = 1          # its default cap when the config names none
     PARAMS = {}             # the infra class's own settings
