@@ -284,7 +284,3 @@ class NoneSubstrate(SubstrateInfra):
     def verify_teardown(self, ctx, env):
         if self.overlay:
             self.overlay.on_verify_teardown(ctx.substrate or NoneContext(), ctx, env)
-
-
-def _has_default_liveness(variant):
-    return DefaultInfra.alive is not Infra.alive and variant.runs_own_image()

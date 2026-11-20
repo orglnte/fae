@@ -369,23 +369,27 @@ class TestTheVerifySurfaceIsFingerprinted(unittest.TestCase):
         return Cell.fingerprint(ROOT, cfgmod.load(ROOT).values)
 
     def test_every_module_of_the_package_is_covered(self):
+        from fae import paths
         from fae.experiment import config as cfgmod
         cfgmod._cache.clear()
+        engine_pkg = paths.ENGINE / "cell"
         extras = cfgmod.load(ROOT).values.get("FP_EXTRA_FILES", "").split()
-        listed = {Path(f).relative_to(PKG).as_posix() for f in extras if "/fae/cell/" in f}
-        self.assertEqual(listed, {f.relative_to(PKG).as_posix() for f in PKG.rglob("*.py")})
+        listed = {Path(f).relative_to(engine_pkg).as_posix() for f in extras if "/fae/cell/" in f}
+        self.assertEqual(listed, {f.relative_to(engine_pkg).as_posix() for f in engine_pkg.rglob("*.py")})
 
     def test_an_experiment_root_without_the_engine_still_guards_the_engine(self):
         # the experiment repo imports the engine and does not contain it: the
         # cell modules are found where the engine is, never under the root
+        from fae import paths
         from fae.experiment import config as cfgmod
         root = Path(tempfile.mkdtemp())
         self.addCleanup(__import__("shutil").rmtree, root, True)
         cfgmod._cache.clear()
         self.addCleanup(cfgmod._cache.clear)
+        engine_pkg = paths.ENGINE / "cell"
         extras = cfgmod.load(root).values.get("FP_EXTRA_FILES", "").split()
-        listed = {Path(f).relative_to(PKG).as_posix() for f in extras if "/fae/cell/" in f}
-        self.assertEqual(listed, {f.relative_to(PKG).as_posix() for f in PKG.rglob("*.py")})
+        listed = {Path(f).relative_to(engine_pkg).as_posix() for f in extras if "/fae/cell/" in f}
+        self.assertEqual(listed, {f.relative_to(engine_pkg).as_posix() for f in engine_pkg.rglob("*.py")})
 
     def test_editing_the_driver_moves_the_fingerprint(self):
         # On a COPY of the guarded tree: the checkout is what live cells are

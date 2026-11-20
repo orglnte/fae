@@ -59,10 +59,11 @@ class TestTheCheckerIsTheEnvsElseFaes(unittest.TestCase):
     def test_else_the_one_fae_ships(self):
         import os
         from unittest import mock
+        from fae import paths
         env = {k: v for k, v in os.environ.items() if k != "FAE_TLA_VERIFY"}
         with mock.patch.dict(os.environ, dict(env, PATH="/nonexistent"), clear=True):
             self.assertEqual(Path(runs.check.tla_verify_path()),
-                             Path(ROOT) / "fae" / "utils" / "tla_verify.py")
+                             paths.ENGINE / "utils" / "tla_verify.py")
 
     def test_a_named_file_that_does_not_exist_is_none(self):
         import os

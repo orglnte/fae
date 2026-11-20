@@ -145,10 +145,12 @@ class TestTheChildIsAContainer(RunnerCase):
         self.assertEqual(argv[-2], "--out")
 
     def test_every_root_is_mounted_at_its_own_path(self):
+        from fae import paths
         exp = _definition(self.root, "")
         argv = verify_argv(self.ctx(exp), "img:1")
         mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
-        self.assertIn(f"{ROOT}:{ROOT}:ro", mounts)
+        engine_root = paths.ENGINE.parent
+        self.assertIn(f"{engine_root}:{engine_root}:ro", mounts)
         self.assertIn(f"{self.out}:{self.out}", mounts)
         self.assertEqual(len(mounts), len(set(mounts)))
 

@@ -135,6 +135,81 @@ class TestCtxWireAndRuntimeBindings(unittest.TestCase):
         self.assertIn("fae-cell=c1", seen["argv"])
         self.assertIn("fae-role=fixture", seen["argv"])
 
+    def test_start_fixture_options_failure_and_stop_fixtures_for(self):
+        ctx = self._ctx()
+        ctx.cell_network = "fae-net-c1"
+        calls = []
+
+        def fake_run(argv, **kw):
+            calls.append(list(argv))
+            if argv[:2] == ["docker", "ps"]:
+                return subprocess.CompletedProcess(argv, 0, stdout="id1\nid2\n", stderr="")
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+        with mock.patch.object(verify.subprocess, "run", side_effect=fake_run):
+            ctx.start_fixture(
+                "fx1", "img:1", argv=("serve",),
+                mounts=(("/a", "/b"), ("/c", "/d", "rw"), "/e:/f:ro"),
+                ports=("127.0.0.1:8080:80",), cpus=1.5, cpuset="0-1",
+                memory="512m", labels=(("k", "v"),),
+            )
+            verify.stop_fixtures_for("c1")
+
+        start_argv = calls[1]
+        self.assertIn("/a:/b:ro", start_argv)
+        self.assertIn("/c:/d:rw", start_argv)
+        self.assertIn("/e:/f:ro", start_argv)
+        self.assertIn("127.0.0.1:8080:80", start_argv)
+        self.assertIn("--cpus=1.5", start_argv)
+        self.assertIn("--cpuset-cpus=0-1", start_argv)
+        self.assertIn("--memory", start_argv)
+        self.assertIn("512m", start_argv)
+        self.assertIn("k=v", start_argv)
+
+        self.assertEqual(calls[2], [
+            "docker", "ps", "-aq",
+            "--filter", "label=fae-cell=c1",
+            "--filter", "label=fae-role=fixture",
+        ])
+        self.assertEqual(calls[3], ["docker", "rm", "-f", "-v", "id1", "id2"])
+
+        # Empty ps output does not invoke docker rm
+        empty_calls = []
+        with mock.patch.object(verify.subprocess, "run",
+                               side_effect=lambda a, **k: (empty_calls.append(list(a)),
+                                                           subprocess.CompletedProcess(a, 0, stdout="", stderr=""))[1]):
+            verify.stop_fixtures_for("c1")
+        self.assertEqual(len(empty_calls), 1)
+
+        # start_fixture non-zero exit raises RuntimeError
+        with mock.patch.object(verify.subprocess, "run", side_effect=[
+            subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+            subprocess.CompletedProcess([], 1, stdout="", stderr="start boom"),
+        ]):
+            with self.assertRaisesRegex(RuntimeError, "start boom"):
+                ctx.start_fixture("fx-bad", "img:1")
+
+    def test_runner_helper_run_stop_and_missing_variant_error(self):
+        ctx = self._ctx()
+        helper = RunnerHelper(ctx)
+        with self.assertRaises(RuntimeError):
+            helper.for_variant(self.root)
+
+        ctx.variant_def = _DummyVariant
+        fake_sr = mock.Mock(run=mock.Mock(return_value=(0, "out", "")))
+        with mock.patch("fae.cell.infra.secrunner.for_variant", return_value=fake_sr) as fv:
+            res = helper.run(self.root, 30, argv=["cmd"], stdin="in\n", split=True,
+                             env={"A": "1"}, networks=("net1",), scratch=self.root / "sc")
+        self.assertEqual(res, (0, "out", ""))
+        fv.assert_called_once()
+        self.assertEqual(fv.call_args.kwargs["env"], {"A": "1"})
+        self.assertEqual(fv.call_args.kwargs["networks"], ("net1",))
+        fake_sr.run.assert_called_once_with(30, stdin="in\n", split=True)
+
+        with mock.patch("fae.cell.infra.secrunner.stop_by_name") as sbn:
+            helper.stop(log="run.log")
+        sbn.assert_called_once_with("c1", str(self.root / "out"), log="run.log")
+
     def test_verify_main_binds_ctx_and_stops_fixtures_even_on_error(self):
         seen = {}
         stopped = []
