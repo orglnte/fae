@@ -1,4 +1,4 @@
-# FAE — a Framework for Agentic-authoring Evaluations
+# FAE — a Framework for Agentic-authoring Evaluations for Software/Systems Design
 
 FAE is a framework for comparing design approaches by how well coding
 agents build with them.
