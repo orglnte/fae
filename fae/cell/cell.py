@@ -2621,6 +2621,8 @@ class Cell:
             client = None       # an override runs whatever the configured client
         home = self.ws / (client.HOME if client else clients.of("claude").HOME)
         ee = extra_env or {}
+        access = ee if isinstance(ee, _variants.AgentAccess) else None
+        ee_map = access.to_legacy_env() if access is not None else ee
         # An AGENT_CMD in the environment (or passed in) is an override — a
         # custom agent, or a rig-test stub. The normal path builds the
         # container argv from the config; no slot fd in pass_fds, so an agent
@@ -2641,11 +2643,11 @@ class Cell:
                      "art": self.artifacts, "ATTEMPT": attempt,
                      "AGENT_CLAUDE": home, "AGENT_GEMINI": home,
                      "AGENT_OPENCODE": home, "AGENT_TESTAGENT": home,
-                     "AGENT_CMD": override}, extra_env)
+                     "AGENT_CMD": override}, ee_map)
                 script = ('cd "$art"\n: "${DOCKER_NET:=}" "${KUBE_MOUNT:=}"\n'
                           'eval "$AGENT_CMD"\n')
                 return self._run_bounded(["bash", "-c", script], f, env)
-            env = self.conf.child_env(base, extra_env)
+            env = self.conf.child_env(base, ee_map)
             watch = None
             try:
                 env.update(client.env(self.conf))
@@ -2662,8 +2664,9 @@ class Cell:
             self.place("agent")
             argv = self.agent_argv(
                 self.conf, self.cid, self.artifacts, home, prompt,
-                ee.get("DOCKER_NET", ""), ee.get("KUBE_MOUNT", ""),
-                feedback=str(fb) if fb.is_dir() else "", image=self.agent_image())
+                ee_map.get("DOCKER_NET", ""), ee_map.get("KUBE_MOUNT", ""),
+                feedback=str(fb) if fb.is_dir() else "", image=self.agent_image(),
+                access=access)
             return self._run_bounded(argv, f, env, watch=watch)
 
     AGENT_CONTAINER_PREFIX = "fae-agent-"
@@ -2675,10 +2678,10 @@ class Cell:
 
     @staticmethod
     def agent_argv(conf, cid, art, home, prompt_file, docker_net="", kube_mount="",
-                   feedback="", image=None):
+                   feedback="", image=None, access=None):
         """The `docker run ...` argv for one agent invocation, built from the
-        config — no shell. The per-arm docker flags (network, kubeconfig mount) the
-        setup hook emitted are shlex-split in; the prompt is passed as one arg."""
+        config — no shell. Typed `access` (AgentAccess) takes precedence over
+        legacy shlex-split docker_net/kube_mount strings."""
         import shlex
         image = conf.get("AGENT_IMAGE") or image or "fae-agent:latest"
         prompt = Path(prompt_file).read_text()
@@ -2687,7 +2690,8 @@ class Cell:
                   "-v", f"{art}:/workspace", "-w", "/workspace"]
         if feedback:
             common += ["-v", f"{feedback}:/feedback:ro"]
-        net = shlex.split(docker_net) + shlex.split(kube_mount)
+        net = access.docker_args() if access is not None else (
+            shlex.split(docker_net) + shlex.split(kube_mount))
 
         client = clients.of(conf.get("AGENT_CLI", "claude"))
         return (common + client.docker_args(home) + net

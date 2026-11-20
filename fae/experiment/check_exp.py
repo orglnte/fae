@@ -51,9 +51,7 @@ def probe_variants(variants=None):
     from fae.experiment import variants as _tr
     bad = 0
     for vid in sorted(variants or fae.experiment.exp().definition.active):
-        cell = _tr._ShimCell(f"infra-probe-{vid}", "/nonexistent", fae.experiment.exp().root)
-        cell.variant = vid
-        infra = _tr.for_cell(cell)
+        infra = _tr.infra_for(vid, f"infra-probe-{vid}", "/nonexistent", fae.experiment.exp().root)
         ok, note = True, ""
         if not _tr.liveness_declared(infra.variant):
             ok, note = False, f"{type(infra).__name__} declares no alive() probe"

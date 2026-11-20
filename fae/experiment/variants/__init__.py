@@ -16,7 +16,7 @@ import os
 import sys
 from pathlib import Path
 
-from fae.cell.infra.base import HookFailure, NoopInfra, liveness_declared  # noqa: F401
+from fae.cell.infra.base import AgentAccess, HookFailure, NoopInfra, liveness_declared  # noqa: F401
 from .base import HARNESS, ROOT, Variant  # noqa: F401
 import fae.experiment
 # --- registry + CLI -----------------------------------------------------------
@@ -29,29 +29,35 @@ def registry():
     return fae.experiment.exp().definition.variants
 
 
-def for_cell(cell):
-    """The cell's infra: its variant's infra class, with the variant.
+def infra_for(vid, cid, ws, root, conf=None, *, definition=None):
+    """Instantiate the infra for variant `vid` without needing a Cell object.
     FAE_VARIANT_NOOP=1 in the environment is the fixture seam: a root with
     no infra provisions nothing."""
-    cls = registry().get(cell.variant)
+    from fae.experiment import config as _config
+    variants = definition.variants if definition is not None else registry()
+    cls = variants.get(vid)
+    cfg = conf if conf is not None else _config.load(root)
     if os.environ.get(NOOP_ENV) == "1" or cls is None:
-        return NoopInfra(cls or Variant, cell)
-    return cls.INFRA(cls, cell)
+        return NoopInfra(cls or Variant, cid=cid, ws=ws, root=root, conf=cfg)
+    return cls.INFRA(cls, cid=cid, ws=ws, root=root, conf=cfg)
+
+
+def for_cell(cell):
+    """The cell's infra: its variant's infra class, with the variant."""
+    return infra_for(cell.variant, cell.cid, cell.ws, cell.root, cell.conf)
 
 
 class _ShimCell:
-    """What the operator's infra preflight (`cli.py experiment infra`) hands
-    an infra class: the cell as the hooks knew it — cid, workspace, root, config,
-    variant."""
+    """Deprecated compatibility handle for callers not yet migrated to
+    `infra_for()`; carries only the four fields Infra unpacks."""
 
-    def __init__(self, cid, ws, root):
+    def __init__(self, cid, ws, root, variant="", conf=None):
         from fae.experiment import config as _config
         self.cid = cid
         self.ws = Path(ws)
         self.root = Path(root)
-        self.conf = _config.load(self.root)
-        from fae.cell.cell import Cell
-        self.variant = Cell(self.ws.name, workspaces=self.ws.parent, root=self.root).variant
+        self.conf = conf if conf is not None else _config.load(self.root)
+        self.variant = variant
 
 
 def main(argv=None):
@@ -64,21 +70,20 @@ def main(argv=None):
     from fae import paths
     root = paths.root()
     if hook == "infra":
-        cell = _ShimCell(a[2] if len(a) > 2 else "", a[3] if len(a) > 3 else "/nonexistent", root)
-        cell.variant = vid
-        return 0 if for_cell(cell).ok() else 1
+        t = infra_for(vid, a[2] if len(a) > 2 else "", a[3] if len(a) > 3 else "/nonexistent", root)
+        return 0 if t.ok() else 1
     if len(a) < 4:
         print(main.__doc__, file=sys.stderr)
         return 2
-    cell = _ShimCell(a[2], a[3], root)
-    cell.variant = vid
-    t = for_cell(cell)
+    t = infra_for(vid, a[2], a[3], root)
     if hook == "setup":
         try:
             env = t.cell_setup()
         except HookFailure:
             return 1
-        for k, v in env.items():
+        if isinstance(env, AgentAccess):
+            env = env.to_legacy_env()
+        for k, v in (env or {}).items():
             print(f"{k}='{v}'")
         return 0
     if hook == "teardown":

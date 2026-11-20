@@ -13,8 +13,10 @@ from __future__ import annotations
 import itertools
 import os
 import re
+import shlex
 import subprocess
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,14 +29,59 @@ class HookFailure(RuntimeError):
     driver halts the cell for review without spending an attempt."""
 
 
-def _run(argv, **kw):
+@dataclass(frozen=True)
+class AgentAccess:
+    """Typed Docker additions for an agent container that reaches its cell's
+    infra, replacing raw shell-flag strings (DOCKER_NET / KUBE_MOUNT)."""
+
+    env: dict = field(default_factory=dict)
+    mounts: tuple = ()          # (host_path, container_path) or (host_path, container_path, mode)
+    network: str = ""
+    extra_hosts: tuple = ()     # ("host:ip", ...)
+
+    def docker_args(self):
+        out = []
+        if self.network:
+            out += ["--network", self.network]
+        for h in self.extra_hosts:
+            out += ["--add-host", h]
+        for m in self.mounts:
+            mode = m[2] if len(m) == 3 else "ro"
+            out += ["-v", f"{m[0]}:{m[1]}:{mode}"]
+        for k, v in sorted(self.env.items()):
+            out += ["-e", f"{k}={v}"]
+        return out
+
+    def to_legacy_env(self):
+        """Shell-flag mapping for legacy AGENT_CMD shell overrides."""
+        out = {}
+        if self.network:
+            out["DOCKER_NET"] = f"--network {shlex.quote(self.network)}"
+        rest = []
+        for h in self.extra_hosts:
+            rest += ["--add-host", h]
+        for m in self.mounts:
+            mode = m[2] if len(m) == 3 else "ro"
+            rest += ["-v", f"{m[0]}:{m[1]}:{mode}"]
+        for k, v in sorted(self.env.items()):
+            rest += ["-e", f"{k}={v}"]
+        if rest:
+            out["KUBE_MOUNT"] = shlex.join(rest)
+        return out
+
+
+def run(argv, **kw):
     kw.setdefault("capture_output", True)
     kw.setdefault("text", True)
     return subprocess.run(argv, **kw)
 
 
-def _ok(argv, **kw):
-    return _run(argv, **kw).returncode == 0
+def ok(argv, **kw):
+    return run(argv, **kw).returncode == 0
+
+
+_run = run
+_ok = ok
 
 
 _DAEMON_GONE = ("cannot connect", "connection refused", "no such file",
@@ -126,13 +173,17 @@ class Infra:
     VERIFY_ADOPTS = None
     RUN_DIR = None
 
-    def __init__(self, variant, cell):
+    # Images that must already exist on the host daemon before a cell starts;
+    # checked automatically by the default `ok()`.
+    REQUIRED_IMAGES = ()
+
+    def __init__(self, variant, cell=None, *, cid=None, ws=None, root=None, conf=None):
         self.variant = variant
         self.cell = cell
-        self.cid = cell.cid
-        self.ws = Path(cell.ws)
-        self.root = Path(cell.root)
-        self.conf = cell.conf
+        self.cid = cid if cid is not None else cell.cid
+        self.ws = Path(ws if ws is not None else cell.ws)
+        self.root = Path(root if root is not None else cell.root)
+        self.conf = conf if conf is not None else (cell.conf if cell is not None else None)
 
     @property
     def env_file(self):
@@ -216,10 +267,25 @@ class Infra:
         when the verify was killed, so everything it needs is derivable from
         `ctx` alone."""
 
+    def check_required_images(self, images=None):
+        """Confirm Docker answers and every image in `images` (default
+        REQUIRED_IMAGES) is present locally."""
+        want = tuple(self.REQUIRED_IMAGES if images is None else images)
+        if not want:
+            return True
+        if not ok(["docker", "info"]):
+            self.log("HALT[infra]: docker unreachable")
+            return False
+        for img in want:
+            if not ok(["docker", "image", "inspect", img]):
+                self.log(f"HALT[infra]: image '{img}' not present — docker pull {img}")
+                return False
+        return True
+
     def ok(self):
         """The host can carry this infra at all. False halts the cell
         without spending an attempt."""
-        return True
+        return self.check_required_images()
 
     def alive(self):
         """The infra answers RIGHT NOW: asked before every arrangement and

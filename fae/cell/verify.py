@@ -739,17 +739,17 @@ def main(argv=None):
         sys.path.insert(0, ctx.root)
     definition = fae.experiment._experiment.load(ctx.experiment_dir)
     if a.teardown:
-        from fae.experiment.variants import _ShimCell
+        from fae.experiment import variants as _variants
         vcls = definition.variant(ctx.variant)
         if vcls is None:
             return 2
-        cell = _ShimCell(ctx.cid, ctx.workspace, ctx.root)
-        cell.variant = ctx.variant
+        infra = _variants.infra_for(ctx.variant, ctx.cid, ctx.workspace, ctx.root,
+                                    definition=definition)
         from .infra import secrunner
         secrunner.stop_by_name(ctx.cid, ctx.out,
                                log=Path(ctx.out) / definition.verifier_class().RUN_LOG)
         try:
-            vcls.INFRA(vcls, cell).verify_teardown(ctx, dict(os.environ))
+            infra.verify_teardown(ctx, dict(os.environ))
         finally:
             definition.verifier_class()().teardown(ctx)
         return 0
