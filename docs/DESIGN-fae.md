@@ -9,8 +9,10 @@ records what happens.
 
 This document is the design as it stands. [`AGENTS.md`](../AGENTS.md) states
 the invariants the code must keep, [`RUNBOOK.md`](RUNBOOK.md) is the operator
-runbook, [`HOWTO.md`](HOWTO.md) builds an experiment from nothing, and
-[`CONCEPTS-repo-fae.md`](CONCEPTS-repo-fae.md) defines every term used here.
+runbook, [`HOWTO.md`](HOWTO.md) builds a simple software-design experiment,
+[`HOWTO-elastic-cache.md`](HOWTO-elastic-cache.md) builds a system-design
+elastic-cache experiment, and [`CONCEPTS-repo-fae.md`](CONCEPTS-repo-fae.md)
+defines every term used here.
 
 ## 1. What is measured
 
@@ -54,39 +56,46 @@ A cell yields:
    (`IMPL`), so populations run by different drivers can be compared rather
    than silently pooled.
 
-## 3. Infra
+## 3. Substrates and infra
 
-What exists around a variant's program is described by four independent
-properties, each read from the variant file by its infra class:
+What exists around a variant's program is declared in the variant file's
+`[substrate]` table (`fae/cell/substrate/`):
 
-1. the *cell infra*, provisioned for the cell's lifetime;
-2. *access*, whether the agent's container can reach it (`access_infra`);
-3. the *cap*, how many live infra of that kind the host carries at once
-   (the variant's lock);
-4. the *verify infra*, provisioned per arrangement inside the verifier's
-   container.
+1. *kind*: `none` (single container), `docker` (managed Docker-in-Docker
+   daemon), `k8s` (managed `kind` cluster), or `custom` (`Infra` subclass);
+2. *lifecycle*: `cell` (kept across attempts), `verify` (fresh per
+   arrangement), or `split` (agent sandbox when `access = true` plus fresh
+   per-arrangement verify substrate);
+3. *access*: whether the agent's container receives `AgentAccess` credentials
+   and endpoints for the cell substrate;
+4. *cap*: how many live cell substrates of that kind the host carries at once
+   (`lock` and `lock_slots`);
+5. *overlay* (optional): a thin `DomainOverlay` subclass adding domain-specific
+   layers on top of the FAE-managed substrate.
 
-Variants that share an infra class share its code; what one variant sets
-differently the class reads from the variant.
+Variants that differ only in agent access or parameters share the same
+`DomainOverlay` (or `Infra` class); the engine hands verifiers a typed
+`ctx.substrate` (`NoneContext`, `DockerContext`, or `K8sContext`).
 
 ## 4. Layers
 
 1. **The engine** (`fae/`) owns everything that is not an experiment's
    choice: cells and their lifecycle, the ledger, the locks, the scheduler
    and supervisor (`experiment run`), restore-and-judge, the gate loop, the seal,
-   the fingerprint, the image builder, the agent CLIs, scoring, the taint
-   framework, and conformance of the orchestration to its formal model. It
-   names no experiment.
-2. **Contrib blocks** (`fae/cell/contrib/`, `fae/cell/infra/`) are
-   mechanisms without policy that an experiment may use: a load-shape law
-   for a resource scaled 0↔1 under load (judged relative to the store's own
-   saturation, with closed-loop blips), Docker-in-Docker and kind-cluster
-   infra, and the secure runner every judged program runs in.
+   the fingerprint, the image builder, the agent CLIs, declarative substrates
+   (`fae/cell/substrate/`: `DockerContext`, `K8sContext`, `NoneContext`,
+   `DomainOverlay`), scoring, the taint framework, and conformance of the
+   orchestration to its formal model. It names no experiment.
+2. **Contrib blocks** (`fae/cell/contrib/`) are optional domain measurement
+   mechanisms without policy that an experiment may compose — for example
+   `elastic_resource` (a load-shape law for a resource scaled 0↔1 under load,
+   judged relative to the store's own saturation, with closed-loop blips).
 3. **Experiments** each live in a repository of their own beside the
-   engine. An experiment's `cli.py` imports the engine from its checkout
-   (`$FAE_DIR`, else `../fae`) and makes its own repository the root, so its
-   configuration, workspaces and lock plane are its own. The smallest is
-   [fae-authoring-a-calculator](https://github.com/orglnte/fae-authoring-a-calculator).
+   engine and talk to FAE solely through its public SDK ports (pinned by
+   `tests/test_sdk_boundary.py`). An experiment's `cli.py` imports the engine
+   from its checkout (`$FAE_DIR`, else `../fae`) and makes its own repository
+   the root, so its configuration, workspaces and lock plane are its own. The
+   smallest is [fae-authoring-a-calculator](https://github.com/orglnte/fae-authoring-a-calculator).
 
 The host needs Python and a Docker daemon. Everything the agent authors and
 everything the verifier runs executes in containers.
@@ -123,10 +132,14 @@ serves = 8080                       # kept running on the cell's network; else r
 image = "..."                       # or image_dir; none: the verify image
 build = [...]
 
-[infra]                             # optional: the default checks docker and the run image
-class = "module:Class"              # an Infra subclass of the experiment package
+[substrate]                         # optional: none (default), docker, k8s, or custom
+kind = "docker"                     # none | docker | k8s | custom
+lifecycle = "split"                 # cell | verify | split
+access = false                      # true exposes the cell substrate to the agent container
+images = ["redis:7-alpine"]         # tags or { dir = "...", as_tag = "..." } preloaded
+overlay = "module:OverlayClass"     # optional DomainOverlay subclass
 lock = "..."                        # held for the cell's life; lock_slots its default cap
-params = { ... }                    # the class's own settings
+params = { ... }                    # overlay/variant settings
 ```
 
 Paths are relative to the experiment directory. A key the engine does not
@@ -140,7 +153,8 @@ an agent of a variant reads is therefore named in that variant's file.
 
 1. **Gate** (`GATE`): the arrangements and the sentence the retry prompt
    carries.
-2. **Verifier** (`verifier_class()`, §6).
+2. **Verifier** (`verifier_class()`, §6) and **verify-host probe**
+   (`verify_host_probe()`).
 3. **Configuration** (`CONFIG`): the machine-local keys it reads from
    `fae.toml`, with their defaults. Host paths, caps, load tuning and the
    agents' credentials homes are machine-local and stay out of version
@@ -154,10 +168,8 @@ an agent of a variant reads is therefore named in that variant's file.
 6. **The agents' base image** (`Dockerfile.agent-base` at the root): the
    engine's clients and what every variant's agent needs.
 
-Python exists in an experiment only for its infra classes (one per kind of
-infra; the methods: `cell_setup`/`cell_teardown`, `verify_setup`/
-`verify_teardown`, `ok`, `alive`, and the names it provisions, `PREFIXES`
-and `identities`) and for its verifier.
+Python exists in an experiment only for its verifier, its verify-host probe,
+and optional thin `DomainOverlay` (or custom `Infra`) classes and taint rules.
 
 ## 6. Verification and the fingerprint
 
@@ -165,21 +177,23 @@ Verification is split across three owners, and each question has exactly
 one:
 
 1. **The engine** decides how a verdict is obtained and recorded, never
-   what it means: the wire (a context file in, a verdict out), the verifier
-   container as a session (a timeout, crash or silence is a refund, and the
-   container is always removed), the declared lock, the fingerprint
-   re-check, persistence, the ledger, the gate loop, refunds and stand-downs.
-   It knows no stage name and no technology.
+   what it means: the wire (a context file in, a verdict out), runtime
+   bindings on `ctx` (`variant_def`, `conf`, `infra`, `substrate`, `runner`,
+   `start_fixture`/`run_fixture`), the verifier container as a session (a
+   timeout, crash or silence is a refund, and the container, labeled fixtures,
+   and verify-scoped substrate are always removed), the declared lock, the
+   fingerprint re-check, persistence, the ledger, the gate loop, refunds and
+   stand-downs. It knows no stage name and no technology.
 2. **The experiment's verifier** decides what green means, the same way for
    every variant: the arrangements, the load profile, the law, the end-to-end
    checks, which failures are the rig's, which contract breaks stand a cell
-   down, the metrics, and the image it runs in. It runs the artifacts as
-   the variant's `[verify.run]` says (`secrunner.for_variant`): it starts
-   them, holds their readiness and stops them before the infra's teardown.
-   It reaches a variant's infra only through the infra class.
-3. **Each infra class's verify hooks and contract** decide what world an
-   arrangement runs in (`verify_setup` / `verify_teardown`), and check the
-   promises the variant's docs make. They hold no lock and give no verdict.
+   down, the metrics, and the image it runs in. It runs the artifacts through
+   `ctx.runner` (`ctx.runner.for_variant`): it starts them, holds their
+   readiness and stops them before teardown. It reaches a variant's substrate
+   only through `ctx.substrate` and `ctx.infra`.
+3. **Each substrate/overlay's verify hooks and contract** decide what world an
+   arrangement runs in (`on_verify_setup` / `on_verify_teardown`), and check
+   the promises the variant's docs make. They hold no lock and give no verdict.
 
 The test of the split: changing the law touches only (2); adding a variant
 is a file, and a new kind of infra touches only (3); changing how verifiers

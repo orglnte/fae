@@ -96,17 +96,35 @@ An experiment is a repository beside FAE. The calculator is the smallest:
 
 ```
 experiment/
-├── __init__.py     the definition: the approaches, the scenarios, the verifier
+├── __init__.py     the definition: the gate, the verifier, the verify-host probe
 ├── task/           the brief, and the files every approach starts from
-├── variants/       one directory per approach: what the agent may write, its docs,
-│                   a known-good answer, the image it runs in
+├── variants/       one TOML file per approach: what the agent may write, its docs,
+│                   a known-good answer, its runtime or [substrate]
 └── verifier/       how an attempt is judged, and the image the judging runs in
 ```
 
-Three interfaces, one per part: the **definition** says what there is, a
-**variant** says what the agent writes and what it is given, the
-**verifier** turns one attempt into a verdict. [HOWTO.md](docs/HOWTO.md) builds
-one from an empty directory.
+Three core ports connect an experiment to FAE: the **definition** says what
+there is, a **variant** declares what the agent writes and what `[substrate]`
+(`none`, `docker`, or `k8s`, plus an optional `DomainOverlay`) it runs on, and
+the **verifier** turns one `Ctx` into one `Verdict` using `ctx.runner`,
+`ctx.substrate`, and `ctx.start_fixture` / `ctx.run_fixture`.
+
+## Two tutorials: build your own experiment
+
+Start from the guide that matches what your agents author:
+
+1. **Software design (simple case) — [docs/HOWTO.md](docs/HOWTO.md):** build a
+   single-container CLI experiment (`shout`, modeled on
+   [fae-authoring-a-calculator](https://github.com/orglnte/fae-authoring-a-calculator))
+   from an empty directory to a sealed green cell. Uses default container
+   isolation (`[substrate] kind = "none"`), `ctx.runner`, no custom infra.
+2. **System design (elastic cache under load) — [docs/HOWTO-elastic-cache.md](docs/HOWTO-elastic-cache.md):**
+   build a multi-container infrastructure experiment where agents author an
+   elastic Redis cache in front of Postgres under sustained load spikes and
+   short blips, comparing Docker (IaC) and Kubernetes (autoscaler) variants.
+   Uses declarative `[substrate]` (`kind = "docker"` and `kind = "k8s"`),
+   `DomainOverlay`, `ctx.substrate` + `ctx.start_fixture` / `ctx.run_fixture`,
+   `VerifyHostProbe`, and the engine's `fae.cell.contrib.elastic_resource` law.
 
 ## A bigger example: Terraform vs Pulumi
 
@@ -115,7 +133,8 @@ asks a question teams face now: when agents write the infrastructure code,
 do they get it right more easily in HCL or in Python?
 
 Agents write the same stack with each tool: an app behind nginx, Postgres
-and, in prod, Redis, on a Docker daemon that belongs to the cell. Each
+and, in prod, Redis, on a managed Docker-in-Docker substrate
+(`[substrate] kind = "docker"`, zero custom infra code). Each
 attempt is deployed twice, as prod and as dev, and checked for what each
 tool typically gets wrong:
 
@@ -187,13 +206,12 @@ refuses to start unless that agent is passed as `--exclude-agent AGENT`.
 
 ## Where to go next
 
-- [HOWTO.md](docs/HOWTO.md): your own experiment, from an empty directory.
-- [RUNBOOK.md](docs/RUNBOOK.md): running a fleet (the scheduler, the backlog,
-  pausing, scoring).
-- [DESIGN-fae.md](docs/DESIGN-fae.md): what is measured and why.
-- [CONCEPTS-repo-fae.md](docs/CONCEPTS-repo-fae.md): the concepts, what each
-  is for and which objects implement it.
-- [AGENTS.md](AGENTS.md): the invariants the code keeps.
+1. [HOWTO.md](docs/HOWTO.md): build a simple software-design experiment from an empty directory.
+2. [HOWTO-elastic-cache.md](docs/HOWTO-elastic-cache.md): build a system-design experiment (elastic cache under load across Docker and Kubernetes substrates).
+3. [RUNBOOK.md](docs/RUNBOOK.md): running a fleet (the scheduler, the backlog, pausing, scoring).
+4. [DESIGN-fae.md](docs/DESIGN-fae.md): what is measured and why.
+5. [CONCEPTS-repo-fae.md](docs/CONCEPTS-repo-fae.md): the concepts, what each is for and which objects implement it.
+6. [AGENTS.md](AGENTS.md): the invariants the code keeps.
 
 ## License and citation
 

@@ -16,9 +16,11 @@ the source. Section 9 lists which change touches which section.
 
 ## How to author a new experiment
 
-Follow [`HOWTO.md`](docs/HOWTO.md): it builds one from an empty directory, and
-[fae-authoring-a-calculator](https://github.com/orglnte/fae-authoring-a-calculator) is the finished reference. The steps, and where each
-one's rules live:
+Follow [`HOWTO.md`](docs/HOWTO.md) for a software-design task (single-container
+program, [fae-authoring-a-calculator](https://github.com/orglnte/fae-authoring-a-calculator)), or [`HOWTO-elastic-cache.md`](docs/HOWTO-elastic-cache.md)
+for a system-design task under load (`[substrate]` Docker/Kubernetes,
+`DomainOverlay`, `fae.cell.contrib.elastic_resource`). The steps, and where
+each one's rules live:
 
 1. Make the experiment its own repo beside this checkout, with a `cli.py`
    that imports this engine (§0). The engine never names the experiment; the
@@ -29,12 +31,13 @@ one's rules live:
    may write is the variant file's `[authoring] surface`; everything else is
    healed before a verdict (§4).
 4. Write the variants, one file each, `<experiment>/variants/<id>.toml`
-   (HOWTO §5), and an infra class for any variant whose program needs more
-   than a container of an image: the calls in §4's table — `cell_*` on the
-   host, `verify_*` inside the verify container.
+   (HOWTO §5). Declare `[substrate]` (`none`, `docker`, `k8s`, or `custom`
+   with `[infra] class`) and, when a domain layer rides on top of Docker or
+   Kubernetes, a thin `DomainOverlay` (§4).
 5. Write the verifier (HOWTO §6): its image, the `Verdict` it returns and
-   what refunds (§5, §7). A resource scaled 0↔1 under load composes the
-   contrib law (§7).
+   what refunds (§5, §7). Consume `ctx.{variant_def, conf, infra, substrate,
+   runner, start_fixture, run_fixture}` instead of importing engine internals.
+   A resource scaled 0↔1 under load composes the contrib law (§7).
 6. Point the engine at it (HOWTO §7), then run one cell three ways: no
    agent, the scripted agent, a real one (HOWTO §8–10).
 7. If the verifier measures under load, tune the load shape to the host and
@@ -71,31 +74,46 @@ loads `<EXPERIMENT_DIR>/__init__.py` BY PATH as the package `experiment`
 (one process, one experiment — a second definition is refused; tests call
 `unload()`), and every reader goes through the `Definition` it returns: the
 variants (read on first use from `<EXPERIMENT_DIR>/variants/*.toml` by
-`fae/experiment/variants/files.py`, each file's `[infra] class` imported from the
-package then), `GATE`, `CONFIG`, `fingerprint_trees`, `verifier_class()`,
-`verify_host_probe()`, `verbs()`, `taint_rules`, `POOLED_MODELS`,
-`report_summary`. A variant file's unknown key is refused, and so is an
-input the template also provides. `tests/test_experiment_definition.py`
-pins that no module under `cli.py` or `fae/` names the package. The engine
-keeps no variant, stage or agent name of any experiment.
+`fae/experiment/variants/files.py`, compiling each file's `[substrate]` spec or
+importing its `[infra] class` then), `GATE`, `CONFIG`, `fingerprint_trees`,
+`verifier_class()`, `verify_host_probe()`, `verbs()`, `taint_rules`,
+`POOLED_MODELS`, `report_summary`. A variant file's unknown key is refused,
+and so is an input the template also provides.
+`tests/test_experiment_definition.py` pins that no module under `cli.py` or
+`fae/` names the package. The engine keeps no variant, stage or agent name of
+any experiment.
+
+**Experiments reach FAE only through its public SDK ports:** `fae.cli`,
+`fae.experiment` (`Gate`, `exp()`, `config`, `variants`), `fae.cell.verify`
+(`Ctx`, `Verdict`, `Verifier`, `RunnerHelper`, `now`, `call`),
+`fae.cell.substrate` (`DomainOverlay`, `DockerContext`, `K8sContext`,
+`NoneContext`), `fae.cell.infra.base` (public helpers `AgentAccess`,
+`HookFailure`, `Infra`, `run`, `ok`, `cksum`, `host_ports`),
+`fae.cell.verify_host` (`VerifyHostProbe`), and `fae.cell.contrib`. Direct
+imports of engine internals (`fae.cell.cell`, `fae.cell.host_sleep`,
+`fae.cell.image`, `fae.cell.infra.{dind,kind,secrunner}`, `fae.conduct`),
+private helpers (`_run`, `_ok`, `_now`), or reflection on `INFRA.__module__`
+are boundary violations pinned by `tests/test_sdk_boundary.py`
+(`boundary_offenders`).
 
 **What the agent wrote never executes on the host, and neither does the
 verifier.** The verifier builds and runs the artifacts inside the variant's
-infra (a container, a dind sidecar, a kind cluster), so a judged program
-cannot touch the rig; and the verifier itself runs in a container of an image
-the experiment declares (`Verifier.IMAGE_DIR`, a Dockerfile directory with
-every version pinned; a variant may layer its own `[verify] image_dir` on it), built
-by the engine when missing and tagged by its content (`fae/cell/image.py`).
-Every host judges in the same environment, and the host needs only python and
-a docker daemon. There is no host path for the verifier: a verifier without
-an image is `stage=verifier-image`, a void.
+substrate or infra (a container, a Docker-in-Docker daemon, a kind cluster), so
+a judged program cannot touch the rig; and the verifier itself runs in a
+container of an image the experiment declares (`Verifier.IMAGE_DIR`, a
+Dockerfile directory with every version pinned; a variant may layer its own
+`[verify] image_dir` on it), built by the engine when missing and tagged by its
+content (`fae/cell/image.py`). Every host judges in the same environment, and
+the host needs only python and a docker daemon. There is no host path for the
+verifier: a verifier without an image is `stage=verifier-image`, a void.
 
-Reusable verifier blocks are contrib — engine-owned mechanisms with no
-policy: `fae/cell/contrib/elastic_resource/` (the load-shape law for a
-resource scaled 0↔1: `load_shape`, `trace`, `k6`, `law`; §7) and the
-infra blocks under `fae/cell/infra/` (`dind`, `kind`, `secrunner`).
-An experiment composes them with its own parameters. What a rig fault looks
-like in an experiment's evidence is its `taint_rules`, run by
+Declarative substrates live in `fae/cell/substrate/` (`DockerContext`,
+`K8sContext`, `NoneContext`, `DomainOverlay`), backed by the low-level engine
+blocks under `fae/cell/infra/` (`dind`, `kind`, `secrunner`). Reusable
+measurement laws live in `fae/cell/contrib/` (`elastic_resource`: `load_shape`,
+`trace`, `k6`, `law`; §7) — engine-owned mechanisms with no policy that an
+experiment composes with its own parameters. What a rig fault looks like in an
+experiment's evidence is its `taint_rules`, run by
 `fae/experiment/scoring/validate.py` beside the engine's own rules.
 
 ## 1. The unit of work is a cell
@@ -259,7 +277,11 @@ the intent markers (`.paused`, `.cancelled`, `reconcile.flagged`), which the
 loop reads at its checkpoints, and supervision's `ALERT` lines, one append
 each. Everything outside the cell process builds its cells through the
 current Experiment (`fae.experiment.exp().cell(cid)`), so they share its
-plane.
+plane. Experiment verbs that check whether a run is live or take a cell's
+verify lock use `Experiment.conduct_pid()`, `Experiment.run_active()`, and
+`Experiment.with_verify_lock(cell)` rather than importing `fae.conduct` or
+calling `Cell.verify_lock_acquire` directly; sleep-gap thresholds are read via
+`Cell.SLEEP_GAP_S`.
 
 **Lock ordering is work slot ≺ variant lock**, globally consistent, so
 deadlock-free; it also keeps the scarce lock held only while the cell works. Release is the
@@ -306,9 +328,12 @@ writes an `ALERT SETUP-FAILED` ledger line.
   live verify as a leak. The verify container `fae-verify-<cid>` and the
   cell network `fae-net-<cid>` are the engine's infra
   (`fae/cell/image.py` names them; `Infra.network_up` creates the network
-  first); what a verifier provisions for a cell is declared on the verifier
-  (`PREFIXES`, `identities`). All are reaped like a
-  variant's infra, a network only past the long grace.
+  first); containers started with `ctx.start_fixture` / `ctx.run_fixture`
+  carry labels `fae-cell=<cid>` and `fae-role=fixture`, which the reaper
+  discovers automatically (`label=fae-cell`) without per-experiment prefixes;
+  what else a verifier or overlay provisions is declared via `PREFIXES` and
+  `identities`. All are reaped like a variant's infra, a network only past the
+  long grace.
 - **Low Power Mode.** A verify is timed, and Low Power Mode slows the CPU
   (`fae/host_power.py`; macOS, read from `pmset -g`). While it is on,
   `experiment check` fails and `experiment run` refuses to start. When it
@@ -385,60 +410,91 @@ writes an `ALERT SETUP-FAILED` ledger line.
   cell never waits for a slot: it is admitted holding them. A phase for a step nothing waits on buys nothing
   and costs a state everything downstream must interpret.
 
-## 4. Variants and infra
+## 4. Variants, substrates, and infra
 
 A variant is a file, `<experiment>/variants/<id>.toml`
 (`fae/experiment/variants/files.py` reads it; `Variant`, `fae/experiment/variants/base.py`,
 is its data): its template, `[authoring] surface` (required; the engine has
 no default, and the preflight refuses a variant without it — the exact
 files and directory prefixes the agent may write), its inputs, its tools
-layer, `access_infra`, `[verify]` and `[verify.run]`, and `[infra]`: the
-class, the lock its cells hold for their lifetime (or none), `lock_slots`
-and `params`.
-`fae/cell/surface.py` heals everything else before a verdict: a changed
-seeded file is restored from the seed, and a file that is neither seeded nor
-authorable is moved to `<ws>/.out-of-surface/attempt-N/` (kept, never
-deleted); the rig's own `.git`/`.gitignore` and tool caches are left alone.
-Both are named in the ledger (`HEAL`) and in the next prompt. The seed record,
-`<ws>/.skeleton_manifest`, sits beside `artifacts/`, not in it: the agent's
-container mounts only `artifacts/`, so it cannot rewrite the record it is
-checked against.
+layer, `access_infra`, `[verify]` and `[verify.run]`, and either a declarative
+`[substrate]` table or a legacy `[infra]` table (mutually exclusive — declaring
+both is refused).
 
-The infra is `fae/cell/infra/base.py`'s `Infra`, a class the file names
-(`[infra] class = "module:Class"`, imported from the experiment package),
-else `DefaultInfra` (docker answers, the `[verify.run]` image present or
-built). The engine instantiates it per cell with the variant and the cell;
-it reads what the file says of it (`self.variant.ACCESS_INFRA`,
-`self.variant.PARAMS`), so variants that differ only in the agent's access
-share one class. It answers:
+**Declarative `[substrate]` (`fae/cell/substrate/`)** is the standard way to
+provision Docker or Kubernetes environments for a variant without writing a
+custom `Infra` subclass:
+
+- `kind`: `"none"` (default single-container runtime), `"docker"` (managed
+  DinD sidecar/verify daemon), `"k8s"` (managed `kind` cluster), or `"custom"`
+  (requires `class = "module:Class"`).
+- `lifecycle`: `"cell"` (one instance kept across attempts and shared by the
+  verifier; refused at preflight if remote `VERIFY_DOCKER_HOST` is configured),
+  `"verify"` (fresh instance per arrangement, torn down in `finally`), or
+  `"split"` (cell sandbox only when `access = true`, plus a fresh per-verify
+  instance; skips local sandbox provisioning when `access = false`).
+- `access` (sets `ACCESS_INFRA`), `cpus`, `memory`, `expose_ports`, `images`
+  (registry tags or `{ dir = "...", as_tag = "..." }` builds preloaded into the
+  substrate), `dind_image`, `cluster_prefix`, `lock`, `lock_slots`, `params`,
+  and optional `overlay = "module:OverlayClass"` (a `DomainOverlay` subclass
+  receiving `(substrate, infra)` on `on_cell_setup` / `on_cell_teardown` and
+  `(substrate, ctx, env)` on `on_verify_setup` / `on_verify_teardown` /
+  `not_ready`).
+
+`K8sContext` falls back to running `kind`/`kubectl` inside the variant's image
+via `infra.tool()` when the host lacks a `kind` binary (keeping the host
+Docker-only). `DockerContext` binds dynamic loopback ports with bind-retry,
+streams and re-tags `images`, provides `reset()` to wipe inner containers,
+volumes and user networks between arrangements, and declares cell-scoped
+sidecars via `shared_containers()`.
+
+Beneath `[substrate]` sits `fae/cell/infra/base.py`'s `Infra`. The engine
+instantiates it per cell without requiring a `Cell` object via
+`variants.infra_for(vid, cid, ws, root, conf)` (`variants.for_cell(cell)`
+delegates to it); it reads what the file says of it (`self.variant.ACCESS_INFRA`,
+`self.variant.PARAMS`, `self.variant.SUBSTRATE`), so variants that differ only
+in the agent's access share one class or overlay. `Infra.REQUIRED_IMAGES` is
+checked automatically in default `ok()`. It answers:
 
 | Call | Called by | Purpose |
 |---|---|---|
-| `ok()` | `Cell.infra_ok()` before every attempt; `cli.py experiment infra` | preflight, including whatever daemon the infra needs (the engine probes nothing itself); HALT, no attempt burned, if the environment is wrong |
+| `ok()` | `Cell.infra_ok()` before every attempt; `cli.py experiment infra` | preflight, including whatever daemon the infra needs (the engine probes nothing itself) and `REQUIRED_IMAGES`; HALT, no attempt burned, if the environment is wrong |
 | `alive()` | `Cell.verify` before every arrangement and after a charged fail | the infra answers RIGHT NOW (a hard connect failure is "no", a slow daemon is alive). Dead before → the arrangement is void without a deploy; dead after a charged fail at one of the verifier's `MEASURED_STAGES` (None: any) → the same void, stage `infra`, refunded. The base answer is False, and an infra class that never overrides it is refused at preflight (`liveness_declared`): with the base answer every arrangement would be void forever |
 | `sweep()` | `cli.py experiment infra` | remove stale infra left by dead cells |
-| `cell_setup()` | `Cell.run` / `Cell.reverify` / an experiment command (`cli.py experiment verb`), from the driver on the host; again by the gate after a host sleep | what exists for the cell's life, kept for every attempt, on the cell network; returns the agent's docker args when the variant's agent has access. Idempotent: what still answers is reused and what is gone is started, so a second call after a sleep brings back what the sleep killed; the agent's next attempt gets what the latest call returned |
+| `cell_setup()` | `Cell.run` / `Cell.reverify` / an experiment command (`cli.py experiment verb`), from the driver on the host; again by the gate after a host sleep | what exists for the cell's life, kept for every attempt, on the cell network; returns an `AgentAccess(env, mounts, network, extra_hosts)` (or legacy dict) when the variant's agent has access. Idempotent: what still answers is reused and what is gone is started, so a second call after a sleep brings back what the sleep killed; the agent's next attempt gets what the latest call returned |
 | `cell_teardown()` | the same, on their unconditional path; `cell stop`, the kill fallback, the reaper | tear it down, idempotently |
 | `verify_setup(ctx, env)` | the experiment's Verifier, inside the verify container over the daemon's socket | the world one arrangement of the judged artifacts runs in, fresh every time; raise on a rig fault (refunded), raise a rejection once the infra is up and the artifacts fail on it (charged); return what the verifier needs to run the artifacts on it |
 | `verify_teardown(ctx, env)` | the same, after the verifier stopped the artifacts, whether `verify_setup` finished or not; `run_teardown` after a kill | the world reset after the arrangement, derivable from the ctx alone |
-| `tool(argv, env, network)` | the infra's own `cell_*` pair | a tool the host does not carry, run in a throwaway container of the variant's verify image over the daemon's socket |
+| `verify_down(ctx)` | `verify.main()` `finally` block and `--teardown` | unconditionally tears down verify-scoped substrate resources (`ctx.substrate.down()`) even if `verify_teardown` or the verifier raises |
+| `not_ready(ctx, env)` | the Verifier when the judged service fails readiness | optional diagnostic hook (delegated to `overlay.not_ready` on `SubstrateInfra`) |
+| `tool(argv, env, network)` | the infra's own `cell_*` pair and `K8sContext` fallback | a tool the host does not carry, run in a throwaway container of the variant's verify image over the daemon's socket |
 | `image_context(conf)`, `agent_image_context(conf)` | `fae/cell/image.py` | sources staged beside the variant's `[verify] image_dir` (its layer over the verifier's image, `FROM $BASE`, versions pinned; none = the verifier's image as is) and `[authoring] tools` Dockerfiles |
 | `identities(cid)` | `fae/conduct/zombies.py`, `fae/conduct/hostload.py` | the names of what a cell and its verifies provision (a per-verify cluster included), from the one formula the provisioner uses |
-| `shared_containers()` | `Cell.place` | the cell's containers both phases use, by name, moved to each phase's CPUs (§6); none by default |
+| `shared_containers()` | `Cell.place` | the cell's containers both phases use, by name, moved to each phase's CPUs (§6); none by default (`DockerSubstrate` reports its cell-scoped sidecar automatically) |
 | `PREFIXES`, `stray(live, workspaces)` | `fae/conduct/zombies.py` | what a reaper may DISCOVER: name prefixes to scan by, and any infra no name carries |
 
-The artifacts are the verifier's to run: `secrunner.for_variant` builds the
-runner from the variant's `[verify.run]` (a program that `serves` kept
-running on the cell's network, any other run once with no network); the
-verifier starts it after `verify_setup`, holds its readiness, and stops it
-before `verify_teardown`, keeping its output in the verifier's `RUN_LOG`.
+`fae/cell/surface.py` heals everything outside `[authoring] surface` before a
+verdict: a changed seeded file is restored from the seed, and a file that is
+neither seeded nor authorable is moved to `<ws>/.out-of-surface/attempt-N/`
+(kept, never deleted); the rig's own `.git`/`.gitignore` and tool caches are
+left alone. Both are named in the ledger (`HEAL`) and in the next prompt. The
+seed record, `<ws>/.skeleton_manifest`, sits beside `artifacts/`, not in it:
+the agent's container mounts only `artifacts/`, so it cannot rewrite the record
+it is checked against.
 
-Who provisions what is a matter of PHASE: the cell infra is the infra
-class's `cell_*` pair (the driver, on the host), the verify infra its
+The artifacts are the verifier's to run: `ctx.runner` (`RunnerHelper`, backed
+by `secrunner.for_variant`) builds the runner from the variant's `[verify.run]`
+(a program that `serves` kept running on the cell's network, any other run once
+with no network); the verifier starts it after `verify_setup`, holds its
+readiness, and stops it before `verify_teardown`, keeping its output in the
+verifier's `RUN_LOG`.
+
+Who provisions what is a matter of PHASE: the cell substrate/infra is the
+`cell_*` pair (the driver, on the host), the verify substrate/infra its
 `verify_*` pair (the Verifier, in the container), the instruments of the
-measurement the Verifier's own. Everything a cell provisions sits on the
-cell's network `fae-net-<cid>` and is addressed by NAME inside it; nothing
-the verify uses is a host port.
+measurement the Verifier's own (`ctx.start_fixture` / `ctx.run_fixture`).
+Everything a cell provisions sits on the cell's network `fae-net-<cid>` and is
+addressed by NAME inside it; nothing the verify uses is a host port.
 
 ## 5. The verifier: out of process, in a declared image
 
@@ -447,11 +503,19 @@ arrangement, variant, the fingerprint pinned at cell start) in `docker run
 --rm` of the variant's image (`fae/cell/verify.py: run_verifier`: the root,
 the engine's tree and the workspace mounted at their own paths, the cell
 network, the daemon's socket, the driver's environment minus the host's own
-and anything naming a secret) and reads one `Verdict` back. `ctx.out` is the
-verify's own directory, `<ws>/.verify-out`: after the child exits the host
-copies the verifier's declared outputs (`FILES`, `FEEDBACK_LOGS`) up into
-the workspace, never over a host-owned name and never through a symlink;
-`verifier.log`, `metrics.json` and `arrangements/` are the host's:
+and anything naming a secret) and reads one `Verdict` back. Before calling
+`verifier.verify(ctx)`, `verify.main()` binds non-serialized runtime helpers
+onto `ctx`: `ctx.variant_def`, `ctx.conf`, `ctx.infra`, `ctx.substrate` (the
+typed `NoneContext`, `DockerContext`, or `K8sContext`), `ctx.runner`
+(`RunnerHelper`), `ctx.verify_container`, `ctx.cell_network`, and
+`ctx.start_fixture(...)` / `ctx.run_fixture(...)` / `ctx.stop_fixtures()`
+(which auto-attach `fae-cell=<cid>` and `fae-role=fixture` and stop LIFO in a
+`finally` block alongside `ctx.substrate.down()`). Public UTC timestamps are
+`verify.now()`. `ctx.out` is the verify's own directory, `<ws>/.verify-out`:
+after the child exits the host copies the verifier's declared outputs (`FILES`,
+`FEEDBACK_LOGS`) up into the workspace, never over a host-owned name and never
+through a symlink; `verifier.log`, `metrics.json` and `arrangements/` are the
+host's:
 
 - `ok`, `stage`;
 - `charge` — False is a rig fault and the attempt is refunded; the engine
@@ -462,10 +526,14 @@ the workspace, never over a host-owned name and never through a symlink;
 
 A verifier that crashes, hangs past `VERIFIER_TIMEOUT_S` or answers nothing
 is `charge=False` too, and the container is `docker rm -f`'d on every path.
-What it started beside its container (a cluster, a store, the runner) does not
-die with it, so a verify that did not end on its own or ended without a
-readable verdict (its container killed under it) is also torn down
-(`run_teardown`). It runs
+What it started beside its container (a cluster, a store, fixtures, the runner)
+does not die with it, so a verify that did not end on its own or ended without
+a readable verdict (its container killed under it) is also torn down
+(`run_teardown`, passing `FAE_VERIFY_CONTAINER`, `FAE_VERIFY_IMAGE`, and
+`FAE_CELL_NET`; on a remote verify host, `fae-net-<cid>` stays alive until
+`run_teardown` finishes). `verify.main --teardown` runs in strict order: stop
+the runner, stop labeled fixtures (`stop_fixtures_for`), run `infra.verify_teardown`,
+run `infra.verify_down`, and run `verifier.teardown`. It runs
 under the CPU cap the verifier declares (`Verifier.CPUS`), so the load side
 is the same size on every host; as the operator's uid, so what it writes is
 the operator's; and with the daemon socket's group added
@@ -501,19 +569,19 @@ left there by an earlier verify) is a rig defect, the same on every retry:
 alert, and warns on one judged again once the rig was mended.
 
 **The judged program never runs in the verify container.** A verifier runs
-it in the cell's secure runner, `fae-secrun-<cid>`
-(`fae/cell/infra/secrunner.py`), from the verify image
+it through `ctx.runner` (`RunnerHelper`, backed by `fae-secrun-<cid>` in
+`fae/cell/infra/secrunner.py`), from the verify image
 (`FAE_VERIFY_IMAGE`) or the variant's runtime image: a fresh copy of the
-artifacts at `/workspace` and, when the program keeps state, a scratch dir
-at `/scratch` are its only mounts; no Docker socket; the operator's uid
-with `HOME` and `USER` set, every capability dropped, no privilege
-escalation, CPU/memory/pid ceilings; the networks the verifier names, or
-none. One lifecycle for every program: start, then wait for its end (a CLI,
+artifacts at `/workspace` (`ctx.runner.fresh_copy()`) and, when the program
+keeps state, a scratch dir at `/scratch` are its only mounts; no Docker socket;
+the operator's uid with `HOME` and `USER` set, every capability dropped, no
+privilege escalation, CPU/memory/pid ceilings; the networks the verifier names,
+or none. One lifecycle for every program: start, then wait for its end (a CLI,
 one test case with its input on stdin) or use it while it serves, then
 stop, which keeps its output and removes the container. The verify
 container keeps the rig's reach (the mounts, the socket, the lock plane)
-and runs only rig code. `secrunner.for_variant` builds the runner from a
-variant file's `[verify.run]`.
+and runs only rig code. `ctx.runner.for_variant(...)` builds the runner from
+the variant file's `[verify.run]`.
 
 ## 6. The seal: what the agent can actually reach
 
@@ -539,7 +607,7 @@ experiment's config names wins over placement. It mounts exactly:
 -v "$art":/workspace                    # the artifacts dir, nothing else
 -v "$AGENT_CLAUDE":/home/node/.claude   # creds only (per-cell, staged fresh)
 -v "$ws/feedback":/feedback:ro          # attempt ≥2: the judged run's logs, read-only
-<the infra's cell_setup args>           # empty unless the variant has access_infra
+<cell_setup() AgentAccess args>         # empty unless the variant has access_infra / [substrate] access = true
 ```
 
 `/feedback` holds copies of the judged run's logs, staged by

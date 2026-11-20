@@ -35,7 +35,7 @@ would not expect, and names that collide, are in
 | Verdict | The outcome of one arrangement: pass or fail, the stage, charged or refunded | void, refund, uncharged | `Verdict`, `VerifyResult` | rig faults vs authoring failures |
 | Ledger | The cell's append-only file of record | iterations.log | `ledger.py` via `Cell` | one truth; one parser |
 | Seal | Marks a finished cell's result immutable | — | `Cell` (sealing) | evidence that cannot drift |
-| Infra | What exists around a variant's program, kept by its cell, set up for the cell and per arrangement | substrate | `Infra`, `DefaultInfra`, `secrunner`, `dind`, `kind` | provisioning; isolation |
+| Substrate / Infra | What exists around a variant's program, declared via `[substrate]` (with optional `DomainOverlay`), provisioned for the cell and/or per arrangement | infra, substrate | `SubstrateSpec`, `DockerContext`, `K8sContext`, `DomainOverlay`, `Infra`, `AgentAccess` | provisioning; isolation |
 | **The run** | | | | |
 | Queue | The specs waiting, running and done, one lane per agent | backlog, lane | `Queues` | what runs next; fairness |
 | Slot | A held place under a cap: work slots, and each variant lock's slots | arm slot, cap | `Queues`, `mutex` | concurrency bounds |
@@ -116,11 +116,13 @@ would not expect, and names that collide, are in
    `.sealed`. Principle: the result is immutable; derived files
    (validation, score) are regenerated; new evidence goes under
    `reverify/<ts>/`.
-8. **Infra.** Purpose: provide the world a variant's program runs in.
-   State: the infra class and the variant's parameters; one instance per
-   cell, kept by the cell. Actions: cell setup and teardown, verify setup
-   and teardown, ok, alive. Principle: a variant names its class; the
-   verifier reaches the infra only through it.
+8. **Substrate / Infra.** Purpose: provide the world a variant's program runs
+   in. State: `[substrate]` (`kind`, `lifecycle`, `access`, `images`,
+   `overlay`, `params`) compiled to a `SubstrateInfra` (or custom `Infra`),
+   instantiated via `variants.infra_for(...)`. Actions: cell setup/teardown
+   (returning `AgentAccess`), verify setup/teardown/down, ok, alive.
+   Principle: a variant declares its substrate; the verifier reaches it only
+   through `ctx.substrate` and `ctx.infra`.
 
 ### The run
 

@@ -150,8 +150,9 @@ table and writes `workspaces.nosync/results.csv` + `results.json`
 ## Repo map
 
 ```
-README.md            what FAE is, a first run
-docs/                RUNBOOK.md (this runbook), HOWTO.md, DESIGN-fae.md,
+README.md            what FAE is, a first run, links to both tutorials
+docs/                RUNBOOK.md (this runbook), HOWTO.md (software design),
+                     HOWTO-elastic-cache.md (system design), DESIGN-fae.md,
                      CONCEPTS-repo-fae.md, TODO-concepts.md
 AGENTS.md            rig contract: cells, ledger, locks, verdicts, delete rules,
                      and §0 the engine/experiment boundary
@@ -166,9 +167,11 @@ fae/experiment/     the experiment: Definition, Workspace, Experiment and
                      check_exp.py its readiness check;
                      scoring/ its results (validate, score_cell, aggregate,
                      surface_filter, SCHEMA.md)
-fae/cell/           the Python cell driver: attempt loop, the Variant
-                     interface + registry, verify, the ledger (the
-                     one parser), the contract base, contrib/ and infra/ blocks
+fae/cell/           the Python cell driver: attempt loop, verify (`Ctx`,
+                     `RunnerHelper`, fixtures), the ledger (the one parser),
+                     the contract base, `substrate/` (`DockerContext`,
+                     `K8sContext`, `NoneContext`, `DomainOverlay`), `contrib/`
+                     and `infra/` blocks
 fae/                the engine package: cli/, conduct/, experiment/, cell/,
                      mutex.py (the one flock), book.py (a JSON file
                      read and replaced whole), conduct/_queues.py (the
