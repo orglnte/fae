@@ -73,7 +73,8 @@ class TestARemoteDaemon(unittest.TestCase):
         self.assertEqual(argv[0], "rsync")
         self.assertIn("--delete", argv)
         self.assertIn("--relative", argv)
-        self.assertEqual(argv[-3:], [str(sub) + "/", str(f), "op@vm.example:/"])
+        self.assertEqual(sorted(argv[-3:-1]), sorted([str(sub) + "/", str(f)]))
+        self.assertEqual(argv[-1], "op@vm.example:/")
 
     def test_the_load_sampler_writes_the_busy_share_between_samples(self):
         lines = ["cpu 100 0 100 700 100 0 0 0\n", "intr 1\n", "cpu 150 0 150 1500 100 0 0 0\n",

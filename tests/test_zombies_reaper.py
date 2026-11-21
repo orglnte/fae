@@ -79,9 +79,9 @@ class TestFdHolders(unittest.TestCase):
 
 class TestContainersAll(unittest.TestCase):
     def test_docker_ps_dash_a_names_become_a_set(self):
-        with mock.patch.object(state, "sh", return_value="fae-agent-x\nfae-dind-x\n"):
-            self.assertEqual(zombies._containers_all(),
-                             {"fae-agent-x", "fae-dind-x"})
+        names = ("fae-agent-x", "fae-dind-x")
+        with mock.patch.object(state, "sh", return_value="\n".join(names) + "\n"):
+            self.assertEqual(zombies._containers_all(), set(names))
 
 
 class TestKillProcess(unittest.TestCase):
